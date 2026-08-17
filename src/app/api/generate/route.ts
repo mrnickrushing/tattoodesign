@@ -1,15 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getBrand } from "@/lib/brands";
 
 export const runtime = "nodejs";
 
 const GEMINI_MODEL = process.env.GEMINI_IMAGE_MODEL || "gemini-2.5-flash-image";
-
-const STYLE_PROMPTS: Record<string, string> = {
-  traditional: "American traditional tattoo flash style, bold uniform linework",
-  fineline: "fine line tattoo style, delicate single-weight linework",
-  blackwork: "blackwork tattoo style, bold graphic shapes, high contrast",
-  irezumi: "Japanese irezumi tattoo style, flowing linework",
-};
 
 export async function POST(req: NextRequest) {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -17,32 +11,34 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         error:
-          "Flash Generator isn't connected yet. Set GEMINI_API_KEY in your environment to enable AI generation.",
+          "The generator isn't connected yet. Set GEMINI_API_KEY in your environment to enable AI generation.",
       },
       { status: 501 }
     );
   }
 
-  let body: { prompt?: string; style?: string };
+  let body: { prompt?: string; style?: string; brand?: string };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
 
+  const brand = getBrand(body.brand || "ink") || getBrand("ink")!;
   const prompt = (body.prompt || "").trim();
   if (!prompt) {
     return NextResponse.json({ error: "Describe what you want first." }, { status: 400 });
   }
 
-  const styleDesc = (body.style && STYLE_PROMPTS[body.style]) || STYLE_PROMPTS.traditional;
+  const style =
+    brand.generate.styles.find((s) => s.id === body.style) || brand.generate.styles[0];
 
   const fullPrompt = [
-    `Tattoo flash design: ${prompt}.`,
-    styleDesc + ".",
+    `${brand.generate.subjectFraming}: ${prompt}.`,
+    style.promptDescription + ".",
     "Pure black ink linework only, no shading, no color, no gradients, no gray.",
     "Isolated on a solid pure white background, centered composition.",
-    "Clean unbroken outlines suitable for a tattoo stencil, like classic flash sheet art.",
+    `Clean unbroken outlines ${brand.generate.outputFraming}.`,
   ].join(" ");
 
   try {

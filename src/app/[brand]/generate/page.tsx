@@ -1,19 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useParams } from "next/navigation";
 import { downloadDataUrl, stencilize } from "@/lib/stencil";
 import { addToLibrary } from "@/lib/designLibrary";
-
-const STYLES = [
-  { id: "traditional", label: "Traditional" },
-  { id: "fineline", label: "Fine line" },
-  { id: "blackwork", label: "Blackwork" },
-  { id: "irezumi", label: "Irezumi" },
-];
+import { getBrand } from "@/lib/brands";
 
 export default function GeneratePage() {
+  const { brand: brandParam } = useParams<{ brand: string }>();
+  const brand = getBrand(brandParam);
+
   const [prompt, setPrompt] = useState("");
-  const [style, setStyle] = useState("traditional");
+  const [style, setStyle] = useState(brand?.generate.styles[0]?.id ?? "");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rawUrl, setRawUrl] = useState<string | null>(null);
@@ -21,8 +19,27 @@ export default function GeneratePage() {
   const [saved, setSaved] = useState(false);
   const [disabledReason, setDisabledReason] = useState<string | null>(null);
 
+  useEffect(() => {
+    // Surface the "not connected" state on load without requiring a submit,
+    // so the UI is honest about capability before the user types anything.
+    fetch("/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ brand: brandParam }),
+    })
+      .then(async (res) => {
+        if (res.status === 501) {
+          const data = await res.json();
+          setDisabledReason(data.error);
+        }
+      })
+      .catch(() => {});
+  }, [brandParam]);
+
+  if (!brand) return null;
+
   async function handleGenerate() {
-    if (!prompt.trim() || loading) return;
+    if (!brand || !prompt.trim() || loading) return;
     setLoading(true);
     setError(null);
     setSaved(false);
@@ -31,7 +48,7 @@ export default function GeneratePage() {
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, style }),
+        body: JSON.stringify({ prompt, style, brand: brand.id }),
       });
       const data = await res.json();
 
@@ -59,32 +76,16 @@ export default function GeneratePage() {
     }
   }
 
-  useEffect(() => {
-    // Surface the "not connected" state on load without requiring a submit,
-    // so the UI is honest about capability before the user types anything.
-    fetch("/api/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })
-      .then(async (res) => {
-        if (res.status === 501) {
-          const data = await res.json();
-          setDisabledReason(data.error);
-        }
-      })
-      .catch(() => {});
-  }, []);
-
   return (
     <main className="flex-1 bg-background">
       <section className="mx-auto max-w-6xl px-5 py-10 sm:py-14">
         <p className="text-[11px] uppercase tracking-[0.3em] text-accent font-medium mb-3">
-          01 · Flash Generator
+          01 · {brand.generate.navLabel}
         </p>
         <h1 className="font-display text-4xl sm:text-5xl tracking-wide text-ink mb-3">
-          Words or a vibe in, stencils out
+          {brand.generate.title}
         </h1>
-        <p className="text-ink/65 max-w-xl mb-8">
-          Describe the piece — subject, mood, style — and generate clean
-          black-line flash art on a white background, powered by Gemini.
-        </p>
+        <p className="text-ink/65 max-w-xl mb-8">{brand.generate.subtitle}</p>
 
         {disabledReason && (
           <div className="mb-8 rounded-xl border border-accent/30 bg-accent/5 px-4 py-3 text-sm text-accent">
@@ -95,7 +96,7 @@ export default function GeneratePage() {
         <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
           <div className="grid gap-5 sm:grid-cols-2">
             <ImagePane label="Raw generation" src={rawUrl} loading={loading} placeholder="AI output will appear here" />
-            <ImagePane label="Flash stencil" src={stencilUrl} loading={loading} placeholder="Cleaned stencil will appear here" />
+            <ImagePane label="Stencil" src={stencilUrl} loading={loading} placeholder="Cleaned line art will appear here" />
           </div>
 
           <aside className="rounded-2xl border border-line bg-paper p-5 h-fit">
@@ -105,7 +106,7 @@ export default function GeneratePage() {
             <textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder="e.g. a swallow wrapped around a dagger, bold traditional"
+              placeholder={brand.generate.promptPlaceholder}
               rows={4}
               className="w-full rounded-xl border border-line bg-white px-3 py-2 text-sm text-ink placeholder:text-ink/30 focus:outline-none focus:ring-2 focus:ring-accent/30"
             />
@@ -113,14 +114,14 @@ export default function GeneratePage() {
             <div className="mt-4">
               <p className="text-sm text-ink/70 mb-2">Style</p>
               <div className="flex flex-wrap gap-2">
-                {STYLES.map((s) => (
+                {brand.generate.styles.map((s) => (
                   <button
                     key={s.id}
                     type="button"
                     onClick={() => setStyle(s.id)}
                     className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
                       style === s.id
-                        ? "bg-ink text-paper"
+                        ? "bg-accent text-white"
                         : "bg-white text-ink/60 border border-line hover:text-ink"
                     }`}
                   >
@@ -136,16 +137,16 @@ export default function GeneratePage() {
               type="button"
               onClick={handleGenerate}
               disabled={!prompt.trim() || loading || !!disabledReason}
-              className="mt-6 w-full rounded-full bg-ink px-4 py-2.5 text-sm font-medium text-paper disabled:opacity-30"
+              className="mt-6 w-full rounded-full bg-accent px-4 py-2.5 text-sm font-medium text-white disabled:opacity-30"
             >
-              {loading ? "Generating…" : "Generate flash"}
+              {loading ? "Generating…" : "Generate"}
             </button>
 
             <div className="mt-2 flex flex-col gap-2">
               <button
                 type="button"
                 disabled={!stencilUrl}
-                onClick={() => stencilUrl && downloadDataUrl(stencilUrl, "flash.png")}
+                onClick={() => stencilUrl && downloadDataUrl(stencilUrl, "design.png")}
                 className="rounded-full border border-line px-4 py-2.5 text-sm font-medium text-ink disabled:opacity-30"
               >
                 Download PNG
@@ -155,9 +156,9 @@ export default function GeneratePage() {
                 disabled={!stencilUrl}
                 onClick={() => {
                   if (!stencilUrl) return;
-                  addToLibrary({
+                  addToLibrary(brand.id, {
                     dataUrl: stencilUrl,
-                    title: prompt.slice(0, 40) || "Generated flash",
+                    title: prompt.slice(0, 40) || "Generated design",
                     source: "generated",
                   });
                   setSaved(true);

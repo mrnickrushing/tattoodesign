@@ -1,7 +1,9 @@
 // Small localStorage-backed library so designs made in the Generator or
-// Converter can be sent straight into the Flash Sheet Builder.
+// Converter can be sent straight into the Sheet Builder. Namespaced per
+// brand so Ink Lab flash and Sugar Haus templates never mix.
 
 import { generateId } from "./id";
+import type { BrandId } from "./brands";
 
 export type LibraryDesign = {
   id: string;
@@ -11,25 +13,31 @@ export type LibraryDesign = {
   createdAt: number;
 };
 
-const KEY = "inkline:design-library";
-const EVENT = "inkline:design-library-changed";
+function key(brand: BrandId) {
+  return `inkline:design-library:${brand}`;
+}
 
-export function getLibrary(): LibraryDesign[] {
+function eventName(brand: BrandId) {
+  return `inkline:design-library-changed:${brand}`;
+}
+
+export function getLibrary(brand: BrandId): LibraryDesign[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = window.localStorage.getItem(KEY);
+    const raw = window.localStorage.getItem(key(brand));
     return raw ? (JSON.parse(raw) as LibraryDesign[]) : [];
   } catch {
     return [];
   }
 }
 
-function save(designs: LibraryDesign[]) {
-  window.localStorage.setItem(KEY, JSON.stringify(designs));
-  window.dispatchEvent(new Event(EVENT));
+function save(brand: BrandId, designs: LibraryDesign[]) {
+  window.localStorage.setItem(key(brand), JSON.stringify(designs));
+  window.dispatchEvent(new Event(eventName(brand)));
 }
 
 export function addToLibrary(
+  brand: BrandId,
   design: Omit<LibraryDesign, "id" | "createdAt">
 ): LibraryDesign {
   const entry: LibraryDesign = {
@@ -37,20 +45,24 @@ export function addToLibrary(
     id: generateId(),
     createdAt: Date.now(),
   };
-  const designs = [entry, ...getLibrary()];
-  save(designs);
+  const designs = [entry, ...getLibrary(brand)];
+  save(brand, designs);
   return entry;
 }
 
-export function removeFromLibrary(id: string) {
-  save(getLibrary().filter((d) => d.id !== id));
+export function removeFromLibrary(brand: BrandId, id: string) {
+  save(
+    brand,
+    getLibrary(brand).filter((d) => d.id !== id)
+  );
 }
 
-export function subscribeLibrary(cb: () => void) {
-  window.addEventListener(EVENT, cb);
+export function subscribeLibrary(brand: BrandId, cb: () => void) {
+  const evt = eventName(brand);
+  window.addEventListener(evt, cb);
   window.addEventListener("storage", cb);
   return () => {
-    window.removeEventListener(EVENT, cb);
+    window.removeEventListener(evt, cb);
     window.removeEventListener("storage", cb);
   };
 }

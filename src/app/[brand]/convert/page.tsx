@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useParams } from "next/navigation";
 import {
   DEFAULT_STENCIL_OPTIONS,
   downloadDataUrl,
@@ -9,8 +10,12 @@ import {
   type StencilOptions,
 } from "@/lib/stencil";
 import { addToLibrary } from "@/lib/designLibrary";
+import { getBrand } from "@/lib/brands";
 
 export default function ConvertPage() {
+  const { brand: brandParam } = useParams<{ brand: string }>();
+  const brand = getBrand(brandParam);
+
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
@@ -78,19 +83,18 @@ export default function ConvertPage() {
     };
   }, [handleFile]);
 
+  if (!brand) return null;
+
   return (
     <main className="flex-1 bg-background">
       <section className="mx-auto max-w-6xl px-5 py-10 sm:py-14">
         <p className="text-[11px] uppercase tracking-[0.3em] text-accent font-medium mb-3">
-          02 · Linework Converter
+          02 · {brand.convert.navLabel}
         </p>
         <h1 className="font-display text-4xl sm:text-5xl tracking-wide text-ink mb-3">
-          Photo to stencil
+          {brand.convert.title}
         </h1>
-        <p className="text-ink/65 max-w-xl mb-10">
-          Drop in a reference photo. Everything runs locally in your browser
-          — edge detection turns it into clean tattoo-ready line art.
-        </p>
+        <p className="text-ink/65 max-w-xl mb-10">{brand.convert.subtitle}</p>
 
         <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
           <div className="grid gap-5 sm:grid-cols-2">
@@ -110,7 +114,7 @@ export default function ConvertPage() {
                   <p className="text-ink/60 text-sm mb-3">
                     Drag a photo here, or
                   </p>
-                  <label className="inline-flex cursor-pointer items-center rounded-full bg-ink px-4 py-2 text-sm font-medium text-paper hover:bg-ink/90">
+                  <label className="inline-flex cursor-pointer items-center rounded-full bg-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90">
                     Choose file
                     <input
                       type="file"
@@ -134,12 +138,12 @@ export default function ConvertPage() {
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={resultUrl}
-                  alt="Stencil result"
+                  alt="Line art result"
                   className="absolute inset-0 h-full w-full object-contain p-2"
                 />
               ) : (
                 <p className="text-ink/30 text-sm px-6 text-center">
-                  {processing ? "Processing…" : "Your stencil will appear here"}
+                  {processing ? "Processing…" : "Your line art will appear here"}
                 </p>
               )}
               {processing && (
@@ -148,7 +152,7 @@ export default function ConvertPage() {
                 </div>
               )}
               <span className="absolute top-3 left-3 text-[10px] uppercase tracking-widest text-ink/40 bg-white/80 px-2 py-1 rounded-full">
-                Stencil
+                Result
               </span>
             </div>
           </div>
@@ -185,23 +189,19 @@ export default function ConvertPage() {
                 <input
                   type="checkbox"
                   checked={!!opts.invert}
-                  onChange={(e) =>
-                    updateOpts({ invert: e.target.checked })
-                  }
+                  onChange={(e) => updateOpts({ invert: e.target.checked })}
                 />
               </label>
             </div>
 
-            {error && (
-              <p className="mt-4 text-sm text-accent">{error}</p>
-            )}
+            {error && <p className="mt-4 text-sm text-accent">{error}</p>}
 
             <div className="mt-6 flex flex-col gap-2">
               <button
                 type="button"
                 disabled={!resultUrl}
-                onClick={() => resultUrl && downloadDataUrl(resultUrl, "stencil.png")}
-                className="rounded-full bg-ink px-4 py-2.5 text-sm font-medium text-paper disabled:opacity-30"
+                onClick={() => resultUrl && downloadDataUrl(resultUrl, "line-art.png")}
+                className="rounded-full bg-accent px-4 py-2.5 text-sm font-medium text-white disabled:opacity-30"
               >
                 Download PNG
               </button>
@@ -210,9 +210,9 @@ export default function ConvertPage() {
                 disabled={!resultUrl}
                 onClick={() => {
                   if (!resultUrl) return;
-                  addToLibrary({
+                  addToLibrary(brand.id, {
                     dataUrl: resultUrl,
-                    title: "Converted stencil",
+                    title: "Converted design",
                     source: "converted",
                   });
                   setSaved(true);
