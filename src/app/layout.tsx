@@ -1,34 +1,48 @@
 import type { Metadata } from "next";
-import { Bebas_Neue, Inter } from "next/font/google";
-import NavBar from "@/components/NavBar";
+import { Bebas_Neue, Sora, Playfair_Display, Caveat, Inter } from "next/font/google";
 import "./globals.css";
 
-const display = Bebas_Neue({
-  variable: "--font-display",
+const bebas = Bebas_Neue({
+  variable: "--font-bebas",
   subsets: ["latin"],
   weight: "400",
 });
 
-const body = Inter({
-  variable: "--font-body",
+const sora = Sora({
+  variable: "--font-sora",
+  subsets: ["latin"],
+});
+
+const playfair = Playfair_Display({
+  variable: "--font-playfair",
+  subsets: ["latin"],
+});
+
+const caveat = Caveat({
+  variable: "--font-caveat",
+  subsets: ["latin"],
+  weight: ["500", "600"],
+});
+
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
 });
 
 export const metadata: Metadata = {
-  title: "Inkline — Tattoo Flash Toolkit",
+  title: "Inkline — Ink Lab & Sugar Haus",
   description:
-    "Generate flash, convert photos into tattoo-ready stencils, and build printable flash sheets.",
+    "Two studios, one toolkit: generate designs, convert photos into clean line art, and build printable sheets.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${display.variable} ${body.variable} h-full antialiased`}
+      className={`${bebas.variable} ${sora.variable} ${playfair.variable} ${caveat.variable} ${inter.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-background text-foreground">
-        <NavBar />
-        <div className="flex-1 flex flex-col">{children}</div>
+        {children}
       </body>
     </html>
   );

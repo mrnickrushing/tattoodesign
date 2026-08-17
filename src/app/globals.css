@@ -1,12 +1,41 @@
 @import "tailwindcss";
 
+/* Neutral defaults — used by the brand-picker landing page, before a
+   [data-brand] scope takes over. */
 :root {
   --background: #f5f4f0;
   --foreground: #141311;
-  --ink: #0f0e0c;
+  --ink: #141311;
   --paper: #ffffff;
   --accent: #b5121b;
   --line: #dedad2;
+  --font-display: var(--font-bebas);
+  --font-body: var(--font-inter);
+  --font-script: var(--font-caveat);
+}
+
+/* Ink Lab — dark, mono, crimson. */
+[data-brand="ink"] {
+  --background: #121110;
+  --foreground: #f4f2ef;
+  --ink: #f4f2ef;
+  --paper: #1b1917;
+  --accent: #da1b2e;
+  --line: #322e2a;
+  --font-display: var(--font-bebas);
+  --font-body: var(--font-sora);
+}
+
+/* Sugar Haus — warm cream, rose, script wordmark. */
+[data-brand="sugar"] {
+  --background: #fbf1ea;
+  --foreground: #3b2b28;
+  --ink: #3b2b28;
+  --paper: #ffffff;
+  --accent: #d1487a;
+  --line: #f0ddd0;
+  --font-display: var(--font-playfair);
+  --font-body: var(--font-inter);
 }
 
 @theme inline {
@@ -18,6 +47,7 @@
   --color-line: var(--line);
   --font-sans: var(--font-body);
   --font-display: var(--font-display);
+  --font-script: var(--font-script);
 }
 
 body {

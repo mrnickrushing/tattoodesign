@@ -1,74 +1,59 @@
 import Link from "next/link";
+import { BRANDS } from "@/lib/brands";
 
-const tools = [
+const doors = [
   {
-    href: "/generate",
-    tag: "01",
-    title: "Flash Generator",
+    brand: BRANDS.ink,
+    tagline: "Tattoo flash & stencils",
     blurb:
-      "Words or a vibe in, clean stencils on white out. Describe the piece and get tattoo-flash line art, no shading, no color, ready to trace.",
-    cta: "Generate flash",
+      "Generate flash from a prompt, convert photos into stencil linework, and build printable flash sheets.",
   },
   {
-    href: "/convert",
-    tag: "02",
-    title: "Stencil Linework Converter",
+    brand: BRANDS.sugar,
+    tagline: "Cookie, cake pop & topper design",
     blurb:
-      "Drop in a photo, get back tattoo-ready line art. Runs edge detection right in your browser and lets you dial in the line weight.",
-    cta: "Convert a photo",
-  },
-  {
-    href: "/builder",
-    tag: "03",
-    title: "Flash Sheet Builder",
-    blurb:
-      "Arrange your designs into classic sheet layouts you can print. Drag, rotate, and scale onto a real paper-sized canvas.",
-    cta: "Build a sheet",
+      "Generate cookie and cake designs from a prompt, convert photos into icing-ready line art, and build printable bake sheets.",
   },
 ];
 
 export default function Home() {
   return (
-    <main className="flex-1 bg-background">
-      <section className="mx-auto max-w-6xl px-5 pt-16 pb-10 sm:pt-24 sm:pb-14">
+    <main className="flex-1 flex flex-col bg-background">
+      <section className="mx-auto max-w-4xl w-full px-5 pt-20 pb-10 text-center">
         <p className="text-[11px] uppercase tracking-[0.3em] text-accent font-medium mb-4">
-          For tattoo artists &amp; flash nerds
+          One toolkit, two studios
         </p>
-        <h1 className="font-display text-5xl sm:text-7xl leading-[0.95] tracking-wide text-ink max-w-3xl">
-          Design flash. Build sheets. Print &amp; go.
+        <h1 className="font-display text-5xl sm:text-6xl leading-[0.95] tracking-wide text-ink">
+          Pick your studio
         </h1>
-        <p className="mt-6 max-w-xl text-base sm:text-lg text-ink/70 leading-relaxed">
-          Three tools that stay out of your way: generate flash from a
-          prompt, turn any photo into clean stencil linework, then lay it all
-          out on a printable flash sheet.
+        <p className="mt-5 text-base sm:text-lg text-ink/60 max-w-xl mx-auto">
+          Same three tools underneath — generate, convert, and build printable
+          sheets — themed for whoever&apos;s using them.
         </p>
       </section>
 
-      <section className="mx-auto max-w-6xl px-5 pb-24 grid gap-5 sm:grid-cols-3">
-        {tools.map((tool) => (
-          <Link
-            key={tool.href}
-            href={tool.href}
-            className="group flex flex-col justify-between rounded-2xl border border-line bg-paper p-6 min-h-64 transition-shadow hover:shadow-[0_8px_30px_rgba(15,14,12,0.08)]"
-          >
-            <div>
-              <span className="font-display text-4xl text-ink/15 group-hover:text-accent/30 transition-colors">
-                {tool.tag}
+      <section className="mx-auto max-w-4xl w-full px-5 pb-24 grid gap-6 sm:grid-cols-2">
+        {doors.map(({ brand, tagline, blurb }) => (
+          <div key={brand.id} data-brand={brand.id}>
+            <Link
+              href={`/${brand.id}`}
+              className="group flex flex-col justify-between rounded-2xl border border-line bg-paper text-ink p-8 min-h-72 transition-shadow hover:shadow-[0_8px_40px_rgba(0,0,0,0.15)]"
+            >
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.25em] font-medium mb-3 text-accent">
+                  {tagline}
+                </p>
+                <h2 className="font-display text-4xl tracking-wide">{brand.name}</h2>
+                <p className="mt-4 text-sm leading-relaxed text-ink/70">{blurb}</p>
+              </div>
+              <span className="mt-8 inline-flex items-center gap-1.5 text-sm font-medium text-accent">
+                Enter {brand.name}
+                <span aria-hidden="true" className="transition-transform group-hover:translate-x-0.5">
+                  →
+                </span>
               </span>
-              <h2 className="mt-3 font-display text-2xl tracking-wide text-ink">
-                {tool.title}
-              </h2>
-              <p className="mt-3 text-sm leading-relaxed text-ink/65">
-                {tool.blurb}
-              </p>
-            </div>
-            <span className="mt-6 inline-flex items-center gap-1.5 text-sm font-medium text-ink group-hover:text-accent transition-colors">
-              {tool.cta}
-              <span aria-hidden="true" className="transition-transform group-hover:translate-x-0.5">
-                →
-              </span>
-            </span>
-          </Link>
+            </Link>
+          </div>
         ))}
       </section>
     </main>

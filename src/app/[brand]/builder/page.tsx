@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useParams } from "next/navigation";
 import {
   addToLibrary,
   getLibrary,
@@ -9,6 +10,7 @@ import {
 } from "@/lib/designLibrary";
 import { fileToDataUrl } from "@/lib/stencil";
 import { generateId } from "@/lib/id";
+import { getBrand } from "@/lib/brands";
 
 const PX_PER_IN = 72;
 
@@ -46,10 +48,15 @@ type DragState =
   | { type: "rotate"; id: string; centerX: number; centerY: number };
 
 export default function BuilderPage() {
+  const { brand: brandParam } = useParams<{ brand: string }>();
+  const brand = getBrand(brandParam);
+
   const [templateId, setTemplateId] = useState("letter");
   const [items, setItems] = useState<SheetItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [library, setLibrary] = useState<LibraryDesign[]>(() => getLibrary());
+  // Starts empty (matching the server-rendered markup, which has no access
+  // to localStorage) and is filled in after hydration by the effect below.
+  const [library, setLibrary] = useState<LibraryDesign[]>([]);
   const [scale, setScale] = useState(1);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -61,8 +68,14 @@ export default function BuilderPage() {
   const sheetHeightPx = template.heightIn * PX_PER_IN;
 
   useEffect(() => {
-    return subscribeLibrary(() => setLibrary(getLibrary()));
-  }, []);
+    if (!brand) return;
+    // Populating from localStorage, a browser-only source that stays empty
+    // during SSR — this can't be a lazy useState initializer without
+    // causing a hydration mismatch against the server-rendered empty state.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLibrary(getLibrary(brand.id));
+    return subscribeLibrary(brand.id, () => setLibrary(getLibrary(brand.id)));
+  }, [brand]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -158,9 +171,12 @@ export default function BuilderPage() {
   }
 
   async function handleUpload(file: File) {
+    if (!brand) return;
     const dataUrl = await fileToDataUrl(file);
-    addToLibrary({ dataUrl, title: file.name, source: "uploaded" });
+    addToLibrary(brand.id, { dataUrl, title: file.name, source: "uploaded" });
   }
+
+  if (!brand) return null;
 
   const selected = items.find((i) => i.id === selectedId) || null;
 
@@ -168,15 +184,12 @@ export default function BuilderPage() {
     <main className="flex-1 bg-background">
       <section className="mx-auto max-w-6xl px-5 py-10 sm:py-14">
         <p className="text-[11px] uppercase tracking-[0.3em] text-accent font-medium mb-3 print:hidden">
-          03 · Flash Sheet Builder
+          03 · {brand.builder.navLabel}
         </p>
         <h1 className="font-display text-4xl sm:text-5xl tracking-wide text-ink mb-3 print:hidden">
-          Lay out a flash sheet
+          {brand.builder.title}
         </h1>
-        <p className="text-ink/65 max-w-xl mb-8 print:hidden">
-          Drag designs onto the sheet, resize and rotate them, then print at
-          true size.
-        </p>
+        <p className="text-ink/65 max-w-xl mb-8 print:hidden">{brand.builder.subtitle}</p>
 
         <div className="grid gap-6 lg:grid-cols-[1fr_320px] print:block">
           <div ref={containerRef} className="print:hidden">
@@ -194,7 +207,7 @@ export default function BuilderPage() {
                   transform: `scale(${scale})`,
                   transformOrigin: "top left",
                 }}
-                className="relative bg-white shadow-[0_4px_24px_rgba(15,14,12,0.12)] border border-line"
+                className="relative bg-white shadow-[0_4px_24px_rgba(0,0,0,0.15)] border border-line"
               >
                 {items.map((item) => (
                   <SheetItemView
@@ -285,7 +298,7 @@ export default function BuilderPage() {
                   onClick={() => setTemplateId(t.id)}
                   className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
                     templateId === t.id
-                      ? "bg-ink text-paper"
+                      ? "bg-accent text-white"
                       : "bg-white text-ink/60 border border-line hover:text-ink"
                   }`}
                 >
@@ -348,7 +361,7 @@ export default function BuilderPage() {
             <button
               type="button"
               onClick={() => window.print()}
-              className="w-full mb-6 rounded-full bg-ink px-4 py-2.5 text-sm font-medium text-paper"
+              className="w-full mb-6 rounded-full bg-accent px-4 py-2.5 text-sm font-medium text-white"
             >
               Print sheet
             </button>
