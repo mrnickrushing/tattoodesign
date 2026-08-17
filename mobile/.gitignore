@@ -41,3 +41,7 @@ example
 # generated native folders
 /ios
 /android
+
+# Local EAS/Apple credential config (never commit)
+.easrc
+AuthKey*.p8

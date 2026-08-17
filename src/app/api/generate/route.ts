@@ -82,6 +82,34 @@ export async function POST(req: NextRequest) {
     if (!res.ok) {
       const text = await res.text();
       console.error("Gemini API error", res.status, text);
+
+      // Distinguish the failure modes that aren't the user's fault. Reporting
+      // a quota/auth problem as "try a different prompt" sends people off
+      // rewriting perfectly good prompts against an error no prompt can fix.
+      if (res.status === 429) {
+        const zeroQuota = text.includes("limit: 0");
+        return NextResponse.json(
+          {
+            error: zeroQuota
+              ? `Your Gemini plan doesn't include image generation on "${GEMINI_MODEL}". Enable billing, or set GEMINI_IMAGE_MODEL to a model your plan covers.`
+              : "Hit the Gemini rate limit. Wait a moment and try again.",
+          },
+          { status: 429 }
+        );
+      }
+      if (res.status === 401 || res.status === 403) {
+        return NextResponse.json(
+          { error: "Gemini rejected the API key. Check GEMINI_API_KEY." },
+          { status: 502 }
+        );
+      }
+      if (res.status === 404) {
+        return NextResponse.json(
+          { error: `Model "${GEMINI_MODEL}" wasn't found. Check GEMINI_IMAGE_MODEL.` },
+          { status: 502 }
+        );
+      }
+
       return NextResponse.json(
         { error: "The AI model couldn't generate that. Try a different prompt." },
         { status: 502 }
