@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getBrand } from "@/lib/brands";
+import { checkRateLimit, getClientKey } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 
 const GEMINI_MODEL = process.env.GEMINI_IMAGE_MODEL || "gemini-2.5-flash-image";
+const MAX_PROMPT_LENGTH = 500;
 
 export async function POST(req: NextRequest) {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -14,6 +16,20 @@ export async function POST(req: NextRequest) {
           "The generator isn't connected yet. Set GEMINI_API_KEY in your environment to enable AI generation.",
       },
       { status: 501 }
+    );
+  }
+
+  // This endpoint is unauthenticated and calls a paid API, so it needs an
+  // abuse guard even without a login system.
+  const clientKey = getClientKey(req);
+  const rateLimit = checkRateLimit(clientKey);
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { error: "Too many requests. Try again in a bit." },
+      {
+        status: 429,
+        headers: { "Retry-After": String(rateLimit.retryAfterSeconds) },
+      }
     );
   }
 
@@ -28,6 +44,12 @@ export async function POST(req: NextRequest) {
   const prompt = (body.prompt || "").trim();
   if (!prompt) {
     return NextResponse.json({ error: "Describe what you want first." }, { status: 400 });
+  }
+  if (prompt.length > MAX_PROMPT_LENGTH) {
+    return NextResponse.json(
+      { error: `Keep it under ${MAX_PROMPT_LENGTH} characters.` },
+      { status: 400 }
+    );
   }
 
   const style =

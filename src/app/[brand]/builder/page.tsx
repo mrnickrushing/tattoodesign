@@ -312,10 +312,11 @@ export default function BuilderPage() {
                 <p className="text-sm font-medium text-ink mb-3">
                   {selected.title}
                 </p>
-                <label className="block text-xs text-ink/60 mb-1">
+                <label htmlFor="sheet-item-size" className="block text-xs text-ink/60 mb-1">
                   Size ({selected.wIn.toFixed(1)}in)
                 </label>
                 <input
+                  id="sheet-item-size"
                   type="range"
                   min={0.5}
                   max={Math.max(template.widthIn, template.heightIn)}
@@ -332,10 +333,11 @@ export default function BuilderPage() {
                   }}
                   className="w-full accent-accent mb-3"
                 />
-                <label className="block text-xs text-ink/60 mb-1">
+                <label htmlFor="sheet-item-rotation" className="block text-xs text-ink/60 mb-1">
                   Rotation ({Math.round(selected.rotation)}°)
                 </label>
                 <input
+                  id="sheet-item-rotation"
                   type="range"
                   min={-180}
                   max={180}
@@ -374,6 +376,7 @@ export default function BuilderPage() {
                 Upload
                 <input
                   type="file"
+                  aria-label="Upload a design"
                   accept="image/*"
                   className="hidden"
                   onChange={(e) => {

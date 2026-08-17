@@ -5,6 +5,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { getBrand } from "@/lib/brands";
 import { THEMES } from "@/lib/theme";
 import { BrandProvider } from "@/context/BrandContext";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 export default function BrandLayout() {
   const { brand: brandParam } = useLocalSearchParams<{ brand: string }>();
@@ -26,23 +27,28 @@ export default function BrandLayout() {
           switchTo={brand.switchTo}
           theme={theme}
         />
-        <Tabs
-          screenOptions={{
-            headerShown: false,
-            sceneStyle: { backgroundColor: theme.background },
-            tabBarStyle: {
-              backgroundColor: theme.paper,
-              borderTopColor: theme.line,
-            },
-            tabBarActiveTintColor: theme.accent,
-            tabBarInactiveTintColor: theme.muted,
-            tabBarLabelStyle: { fontFamily: theme.fontBodyMedium, fontSize: 12 },
-          }}
-        >
-          <Tabs.Screen name="index" options={{ title: brand.generate.tabLabel }} />
-          <Tabs.Screen name="convert" options={{ title: brand.convert.tabLabel }} />
-          <Tabs.Screen name="builder" options={{ title: brand.builder.tabLabel }} />
-        </Tabs>
+        {/* Scoped beneath the root boundary in _layout.tsx: a crash in one
+            tab's content falls back here, keeping the header and tab bar
+            (and the ability to switch tabs or studios) alive. */}
+        <ErrorBoundary>
+          <Tabs
+            screenOptions={{
+              headerShown: false,
+              sceneStyle: { backgroundColor: theme.background },
+              tabBarStyle: {
+                backgroundColor: theme.paper,
+                borderTopColor: theme.line,
+              },
+              tabBarActiveTintColor: theme.accent,
+              tabBarInactiveTintColor: theme.muted,
+              tabBarLabelStyle: { fontFamily: theme.fontBodyMedium, fontSize: 12 },
+            }}
+          >
+            <Tabs.Screen name="index" options={{ title: brand.generate.tabLabel }} />
+            <Tabs.Screen name="convert" options={{ title: brand.convert.tabLabel }} />
+            <Tabs.Screen name="builder" options={{ title: brand.builder.tabLabel }} />
+          </Tabs>
+        </ErrorBoundary>
       </View>
     </BrandProvider>
   );
