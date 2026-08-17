@@ -1,6 +1,7 @@
 import { View, Text, Pressable, StyleSheet, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
+import * as Haptics from "expo-haptics";
 import { BRANDS } from "@/lib/brands";
 import { THEMES, NEUTRAL_THEME } from "@/lib/theme";
 
@@ -45,13 +46,20 @@ export default function StudioPicker() {
           {doors.map(({ brand, theme, tagline, blurb }) => (
             <Pressable
               key={brand.id}
-              onPress={() => router.push(`/${brand.id}`)}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                router.push(`/${brand.id}`);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={`Enter ${brand.name}`}
+              accessibilityHint={blurb}
               style={({ pressed }) => [
                 styles.door,
                 {
                   backgroundColor: theme.paper,
                   borderColor: theme.line,
                   opacity: pressed ? 0.85 : 1,
+                  transform: [{ scale: pressed ? 0.98 : 1 }],
                 },
               ]}
             >

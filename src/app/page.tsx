@@ -37,7 +37,7 @@ export default function Home() {
           <div key={brand.id} data-brand={brand.id}>
             <Link
               href={`/${brand.id}`}
-              className="group flex flex-col justify-between rounded-2xl border border-line bg-paper text-ink p-8 min-h-72 transition-shadow hover:shadow-[0_8px_40px_rgba(0,0,0,0.15)]"
+              className="group flex flex-col justify-between rounded-2xl border border-line bg-paper text-ink p-8 min-h-72 transition-shadow hover:shadow-lg"
             >
               <div>
                 <p className="text-[11px] uppercase tracking-[0.25em] font-medium mb-3 text-accent">

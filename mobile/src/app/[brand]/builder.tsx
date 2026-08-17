@@ -11,6 +11,7 @@ import {
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import * as Print from "expo-print";
+import * as Haptics from "expo-haptics";
 import { captureRef } from "react-native-view-shot";
 import Animated, {
   useAnimatedStyle,
@@ -79,6 +80,7 @@ export default function BuilderScreen() {
   }
 
   function changeTemplate(id: string) {
+    Haptics.selectionAsync();
     setTemplateId(id);
     setItems([]);
     setSelectedId(null);
@@ -100,11 +102,13 @@ export default function BuilderScreen() {
         rotation: 0,
       },
     ]);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setSelectedId(id);
   }
 
   function removeSelected() {
     if (!selectedId) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setItems((prev) => prev.filter((i) => i.id !== selectedId));
     setSelectedId(null);
   }
@@ -147,8 +151,10 @@ export default function BuilderScreen() {
     try {
       const dataUrl = await captureSheet();
       await saveDataUrlToPhotos(dataUrl, `sheet-${Date.now()}.png`);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       Alert.alert("Saved", "Sheet added to your Photos.");
     } catch (e) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       Alert.alert("Couldn't save", e instanceof Error ? e.message : "Try again.");
     }
   }
@@ -165,6 +171,7 @@ export default function BuilderScreen() {
       const html = `<html><body style="margin:0;padding:0;"><img src="${dataUrl}" style="width:${widthPx}px;height:${heightPx}px;object-fit:contain;" /></body></html>`;
       await Print.printAsync({ html, width: widthPx, height: heightPx });
     } catch (e) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       Alert.alert("Couldn't print", e instanceof Error ? e.message : "Try again.");
     }
   }
@@ -174,23 +181,33 @@ export default function BuilderScreen() {
       style={{ backgroundColor: theme.background }}
       contentContainerStyle={styles.scroll}
     >
-      <Text style={[styles.title, { color: theme.foreground, fontFamily: theme.fontDisplay }]}>
+      <Text
+        accessibilityRole="header"
+        style={[styles.title, { color: theme.foreground, fontFamily: theme.fontDisplay }]}
+      >
         {brand.builder.title}
       </Text>
       <Text style={[styles.subtitle, { color: theme.muted, fontFamily: theme.fontBody }]}>
         Drag to move, pinch to resize, twist to rotate. Tap to select.
       </Text>
 
-      <View style={styles.chips}>
+      <View style={styles.chips} accessibilityRole="radiogroup">
         {TEMPLATES.map((t) => {
           const active = t.id === templateId;
           return (
             <Pressable
               key={t.id}
               onPress={() => changeTemplate(t.id)}
-              style={[
+              accessibilityRole="radio"
+              accessibilityState={{ selected: active }}
+              accessibilityLabel={t.label}
+              style={({ pressed }) => [
                 styles.chip,
-                { backgroundColor: active ? theme.accent : theme.paper, borderColor: theme.line },
+                {
+                  backgroundColor: active ? theme.accent : theme.paper,
+                  borderColor: theme.line,
+                  opacity: pressed ? 0.8 : 1,
+                },
               ]}
             >
               <Text
@@ -229,9 +246,14 @@ export default function BuilderScreen() {
       {selectedId && (
         <Pressable
           onPress={removeSelected}
-          style={[styles.removeButton, { borderColor: theme.accent }]}
+          accessibilityRole="button"
+          accessibilityLabel="Remove selected design"
+          style={({ pressed }) => [
+            styles.removeButton,
+            { borderColor: theme.danger, opacity: pressed ? 0.7 : 1 },
+          ]}
         >
-          <Text style={{ color: theme.accent, fontFamily: theme.fontBodyMedium, fontSize: 13 }}>
+          <Text style={{ color: theme.danger, fontFamily: theme.fontBodyMedium, fontSize: 13 }}>
             Remove selected design
           </Text>
         </Pressable>
@@ -239,7 +261,12 @@ export default function BuilderScreen() {
 
       <Pressable
         onPress={handlePrint}
-        style={[styles.primaryButton, { backgroundColor: theme.accent }]}
+        accessibilityRole="button"
+        accessibilityLabel="Print sheet"
+        style={({ pressed }) => [
+          styles.primaryButton,
+          { backgroundColor: theme.accent, opacity: pressed ? 0.85 : 1, transform: [{ scale: pressed ? 0.98 : 1 }] },
+        ]}
       >
         <Text style={{ color: theme.accentText, fontFamily: theme.fontBodyMedium }}>
           Print sheet
@@ -247,7 +274,12 @@ export default function BuilderScreen() {
       </Pressable>
       <Pressable
         onPress={handleSave}
-        style={[styles.secondaryButton, { borderColor: theme.line }]}
+        accessibilityRole="button"
+        accessibilityLabel="Save sheet to Photos"
+        style={({ pressed }) => [
+          styles.secondaryButton,
+          { borderColor: theme.line, opacity: pressed ? 0.7 : 1, transform: [{ scale: pressed ? 0.98 : 1 }] },
+        ]}
       >
         <Text style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium }}>
           Save to Photos
@@ -256,11 +288,18 @@ export default function BuilderScreen() {
 
       <View style={styles.libraryHeader}>
         <Text
+          accessibilityRole="header"
           style={[styles.label, { color: theme.foreground, fontFamily: theme.fontBodyMedium }]}
         >
           Your designs
         </Text>
-        <Pressable onPress={pickUpload}>
+        <Pressable
+          onPress={pickUpload}
+          accessibilityRole="button"
+          accessibilityLabel="Upload a design"
+          hitSlop={10}
+          style={{ paddingVertical: 6, paddingHorizontal: 4 }}
+        >
           <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 12 }}>
             Upload
           </Text>
@@ -277,7 +316,12 @@ export default function BuilderScreen() {
             <Pressable
               key={d.id}
               onPress={() => addItem(d)}
-              style={[styles.libraryThumb, { borderColor: theme.line }]}
+              accessibilityRole="button"
+              accessibilityLabel={`Add ${d.title} to sheet`}
+              style={({ pressed }) => [
+                styles.libraryThumb,
+                { borderColor: theme.line, opacity: pressed ? 0.7 : 1 },
+              ]}
             >
               <Image
                 source={{ uri: d.dataUrl }}
@@ -371,7 +415,17 @@ function DraggableItem({
 
   return (
     <GestureDetector gesture={composed}>
-      <Animated.View style={style}>
+      <Animated.View
+        style={style}
+        accessible
+        accessibilityRole="button"
+        accessibilityLabel={item.title}
+        accessibilityHint={
+          selected
+            ? "Selected. Drag to move, pinch to resize, twist to rotate."
+            : "Double tap to select, then use Remove selected design to delete."
+        }
+      >
         <Image
           source={{ uri: item.dataUrl }}
           style={styles.image}
@@ -389,7 +443,14 @@ const styles = StyleSheet.create({
   title: { fontSize: 30, marginBottom: 6 },
   subtitle: { fontSize: 14, lineHeight: 20, marginBottom: 16 },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 16 },
-  chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
+  chip: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    minHeight: 44,
+    justifyContent: "center",
+  },
   sheetWrap: { alignItems: "center", marginBottom: 12 },
   sheet: {
     backgroundColor: "#ffffff",
@@ -407,14 +468,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 8,
     marginBottom: 16,
+    minHeight: 44,
+    justifyContent: "center",
   },
-  primaryButton: { borderRadius: 999, paddingVertical: 14, alignItems: "center", marginBottom: 10 },
+  primaryButton: {
+    borderRadius: 999,
+    paddingVertical: 14,
+    alignItems: "center",
+    marginBottom: 10,
+    minHeight: 44,
+    justifyContent: "center",
+  },
   secondaryButton: {
     borderRadius: 999,
     paddingVertical: 14,
     alignItems: "center",
     borderWidth: 1,
     marginBottom: 24,
+    minHeight: 44,
+    justifyContent: "center",
   },
   libraryHeader: {
     flexDirection: "row",

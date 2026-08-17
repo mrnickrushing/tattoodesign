@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import { Tabs, useLocalSearchParams, router, Redirect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import * as Haptics from "expo-haptics";
 import { getBrand } from "@/lib/brands";
 import { THEMES } from "@/lib/theme";
 import { BrandProvider } from "@/context/BrandContext";
@@ -72,6 +73,7 @@ function StudioHeader({
     >
       <View style={styles.header}>
         <Text
+          accessibilityRole="header"
           style={{
             fontFamily: wordmarkFont,
             fontSize: 24,
@@ -80,7 +82,16 @@ function StudioHeader({
         >
           {wordmark}
         </Text>
-        <Pressable onPress={() => router.replace(`/${switchTo.id}`)}>
+        <Pressable
+          onPress={() => {
+            Haptics.selectionAsync();
+            router.replace(`/${switchTo.id}`);
+          }}
+          accessibilityRole="button"
+          accessibilityLabel={`Switch to ${switchTo.label}`}
+          hitSlop={12}
+          style={{ paddingVertical: 8, paddingHorizontal: 4 }}
+        >
           <Text style={{ color: theme.muted, fontSize: 12, fontFamily: theme.fontBody }}>
             {switchTo.label} →
           </Text>

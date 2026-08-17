@@ -91,7 +91,7 @@ export default function GeneratePage() {
         <p className="text-ink/65 max-w-xl mb-8">{brand.generate.subtitle}</p>
 
         {disabledReason && (
-          <div className="mb-8 rounded-xl border border-accent/30 bg-accent/5 px-4 py-3 text-sm text-accent">
+          <div className="mb-8 rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
             {disabledReason}
           </div>
         )}
@@ -136,7 +136,7 @@ export default function GeneratePage() {
               </div>
             </div>
 
-            {error && <p className="mt-4 text-sm text-accent">{error}</p>}
+            {error && <p className="mt-4 text-sm text-danger">{error}</p>}
 
             <button
               type="button"
