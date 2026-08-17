@@ -324,9 +324,7 @@ function DraggableItem({
 
   // Mutating `.value` on a shared value from inside a gesture worklet is the
   // documented, correct Reanimated pattern (worklets run on the UI thread,
-  // not as React render code) — the react-hooks/immutability rule doesn't
-  // yet know about that exception.
-  /* eslint-disable react-hooks/immutability */
+  // not as React render code).
   const pan = Gesture.Pan()
     .onStart(() => {
       startX.value = translateX.value;
@@ -357,7 +355,6 @@ function DraggableItem({
     .onUpdate((e) => {
       rotation.value = startRotation.value + (e.rotation * 180) / Math.PI;
     });
-  /* eslint-enable react-hooks/immutability */
 
   const composed = Gesture.Simultaneous(pan, pinch, rotate, tap);
 

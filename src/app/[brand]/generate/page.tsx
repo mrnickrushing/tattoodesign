@@ -22,10 +22,12 @@ export default function GeneratePage() {
   useEffect(() => {
     // Surface the "not connected" state on load without requiring a submit,
     // so the UI is honest about capability before the user types anything.
+    const controller = new AbortController();
     fetch("/api/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ brand: brandParam }),
+      signal: controller.signal,
     })
       .then(async (res) => {
         if (res.status === 501) {
@@ -34,6 +36,7 @@ export default function GeneratePage() {
         }
       })
       .catch(() => {});
+    return () => controller.abort();
   }, [brandParam]);
 
   if (!brand) return null;
@@ -100,10 +103,12 @@ export default function GeneratePage() {
           </div>
 
           <aside className="rounded-2xl border border-line bg-paper p-5 h-fit">
-            <h2 className="font-display text-xl tracking-wide text-ink mb-4">
+            <h2 id="generate-prompt-label" className="font-display text-xl tracking-wide text-ink mb-4">
               Prompt
             </h2>
             <textarea
+              id="generate-prompt"
+              aria-labelledby="generate-prompt-label"
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               placeholder={brand.generate.promptPlaceholder}

@@ -9,6 +9,7 @@ import { Sora_400Regular, Sora_600SemiBold } from "@expo-google-fonts/sora";
 import { PlayfairDisplay_700Bold } from "@expo-google-fonts/playfair-display";
 import { Caveat_600SemiBold } from "@expo-google-fonts/caveat";
 import { Inter_400Regular, Inter_600SemiBold } from "@expo-google-fonts/inter";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -36,10 +37,12 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <View style={{ flex: 1 }} onLayout={onLayoutRootView}>
-        <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="index" />
-          <Stack.Screen name="[brand]" />
-        </Stack>
+        <ErrorBoundary>
+          <Stack screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="index" />
+            <Stack.Screen name="[brand]" />
+          </Stack>
+        </ErrorBoundary>
       </View>
     </GestureHandlerRootView>
   );

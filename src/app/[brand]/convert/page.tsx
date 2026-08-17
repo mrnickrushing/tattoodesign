@@ -118,6 +118,7 @@ export default function ConvertPage() {
                     Choose file
                     <input
                       type="file"
+                      aria-label="Choose a reference photo"
                       accept="image/*"
                       className="hidden"
                       onChange={(e) => {
@@ -188,6 +189,7 @@ export default function ConvertPage() {
                 <span className="text-ink/70">Invert</span>
                 <input
                   type="checkbox"
+                  aria-label="Invert"
                   checked={!!opts.invert}
                   onChange={(e) => updateOpts({ invert: e.target.checked })}
                 />
@@ -252,6 +254,7 @@ function Slider({
       </div>
       <input
         type="range"
+        aria-label={label}
         min={min}
         max={max}
         value={value}
