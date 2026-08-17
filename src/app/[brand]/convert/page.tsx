@@ -196,7 +196,7 @@ export default function ConvertPage() {
               </label>
             </div>
 
-            {error && <p className="mt-4 text-sm text-accent">{error}</p>}
+            {error && <p className="mt-4 text-sm text-danger">{error}</p>}
 
             <div className="mt-6 flex flex-col gap-2">
               <button

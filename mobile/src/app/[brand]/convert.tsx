@@ -12,6 +12,7 @@ import {
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import Slider from "@react-native-community/slider";
+import * as Haptics from "expo-haptics";
 import { useBrand } from "@/context/BrandContext";
 import { DEFAULT_STENCIL_OPTIONS, stencilize, type StencilOptions } from "@/lib/stencil";
 import { addToLibrary } from "@/lib/designLibrary";
@@ -63,6 +64,7 @@ export default function ConvertScreen() {
     const dataUrl = `data:image/jpeg;base64,${result.assets[0].base64}`;
     setSourceUrl(dataUrl);
     setSaved(false);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     runPipeline(dataUrl, opts);
   }
 
@@ -70,8 +72,10 @@ export default function ConvertScreen() {
     if (!resultUrl) return;
     try {
       await saveDataUrlToPhotos(resultUrl, `line-art-${Date.now()}.png`);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       Alert.alert("Saved", "Added to your Photos.");
     } catch (e) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       Alert.alert("Couldn't save", e instanceof Error ? e.message : "Try again.");
     }
   }
@@ -83,6 +87,7 @@ export default function ConvertScreen() {
       title: "Converted design",
       source: "converted",
     });
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setSaved(true);
   }
 
@@ -91,7 +96,10 @@ export default function ConvertScreen() {
       style={{ backgroundColor: theme.background }}
       contentContainerStyle={styles.scroll}
     >
-      <Text style={[styles.title, { color: theme.foreground, fontFamily: theme.fontDisplay }]}>
+      <Text
+        accessibilityRole="header"
+        style={[styles.title, { color: theme.foreground, fontFamily: theme.fontDisplay }]}
+      >
         {brand.convert.title}
       </Text>
       <Text style={[styles.subtitle, { color: theme.muted, fontFamily: theme.fontBody }]}>
@@ -101,7 +109,12 @@ export default function ConvertScreen() {
       <View style={styles.previewRow}>
         <Pressable
           onPress={pickImage}
-          style={[styles.pane, { borderColor: theme.line, backgroundColor: theme.paper }]}
+          accessibilityRole="button"
+          accessibilityLabel={sourceUrl ? "Change reference photo" : "Choose a reference photo"}
+          style={({ pressed }) => [
+            styles.pane,
+            { borderColor: theme.line, backgroundColor: theme.paper, opacity: pressed ? 0.85 : 1 },
+          ]}
         >
           {sourceUrl ? (
             <Image
@@ -117,7 +130,10 @@ export default function ConvertScreen() {
           )}
         </Pressable>
 
-        <View style={[styles.pane, { borderColor: theme.line, backgroundColor: "#fff" }]}>
+        <View
+          accessibilityLabel={resultUrl ? "Converted line art" : "Result"}
+          style={[styles.pane, { borderColor: theme.line, backgroundColor: "#fff" }]}
+        >
           {resultUrl ? (
             <Image
               source={{ uri: resultUrl }}
@@ -140,6 +156,7 @@ export default function ConvertScreen() {
 
       <SliderRow
         label="Sensitivity"
+        hint="Lower = more detail picked up as lines"
         value={opts.threshold ?? 60}
         min={10}
         max={180}
@@ -167,13 +184,20 @@ export default function ConvertScreen() {
         <Text style={{ color: theme.foreground, fontFamily: theme.fontBody }}>Invert</Text>
         <Switch
           value={!!opts.invert}
-          onValueChange={(v) => updateOpts({ invert: v })}
+          onValueChange={(v) => {
+            Haptics.selectionAsync();
+            updateOpts({ invert: v });
+          }}
           trackColor={{ true: theme.accent }}
+          accessibilityLabel="Invert"
         />
       </View>
 
       {error && (
-        <Text style={{ color: theme.accent, marginTop: 12, fontFamily: theme.fontBody }}>
+        <Text
+          accessibilityRole="alert"
+          style={{ color: theme.danger, marginTop: 12, fontFamily: theme.fontBody }}
+        >
           {error}
         </Text>
       )}
@@ -181,9 +205,16 @@ export default function ConvertScreen() {
       <Pressable
         onPress={handleSave}
         disabled={!resultUrl}
-        style={[
+        accessibilityRole="button"
+        accessibilityLabel="Save to Photos"
+        accessibilityState={{ disabled: !resultUrl }}
+        style={({ pressed }) => [
           styles.primaryButton,
-          { backgroundColor: theme.accent, opacity: resultUrl ? 1 : 0.4 },
+          {
+            backgroundColor: theme.accent,
+            opacity: !resultUrl ? 0.4 : pressed ? 0.85 : 1,
+            transform: [{ scale: pressed && resultUrl ? 0.98 : 1 }],
+          },
         ]}
       >
         <Text style={{ color: theme.accentText, fontFamily: theme.fontBodyMedium }}>
@@ -194,7 +225,17 @@ export default function ConvertScreen() {
       <Pressable
         onPress={handleSend}
         disabled={!resultUrl}
-        style={[styles.secondaryButton, { borderColor: theme.line, opacity: resultUrl ? 1 : 0.4 }]}
+        accessibilityRole="button"
+        accessibilityLabel={saved ? "Added to sheet" : "Send to Sheet Builder"}
+        accessibilityState={{ disabled: !resultUrl }}
+        style={({ pressed }) => [
+          styles.secondaryButton,
+          {
+            borderColor: theme.line,
+            opacity: !resultUrl ? 0.4 : pressed ? 0.7 : 1,
+            transform: [{ scale: pressed && resultUrl ? 0.98 : 1 }],
+          },
+        ]}
       >
         <Text style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium }}>
           {saved ? "Added to Sheet ✓" : "Send to Sheet Builder"}
@@ -206,6 +247,7 @@ export default function ConvertScreen() {
 
 function SliderRow({
   label,
+  hint,
   value,
   min,
   max,
@@ -213,6 +255,7 @@ function SliderRow({
   onChange,
 }: {
   label: string;
+  hint?: string;
   value: number;
   min: number;
   max: number;
@@ -232,9 +275,15 @@ function SliderRow({
         maximumValue={max}
         value={value}
         onValueChange={onChange}
+        onSlidingComplete={() => Haptics.selectionAsync()}
         minimumTrackTintColor={theme.accent}
         thumbTintColor={theme.accent}
+        accessibilityLabel={label}
+        accessibilityValue={{ min, max, now: Math.round(value) }}
       />
+      {hint && (
+        <Text style={{ color: theme.muted, fontSize: 11, marginTop: 2 }}>{hint}</Text>
+      )}
     </View>
   );
 }

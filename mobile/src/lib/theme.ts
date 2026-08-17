@@ -6,6 +6,10 @@ export type Theme = {
   paper: string;
   accent: string;
   accentText: string;
+  /** Distinct from accent on purpose — accent doubles as the primary CTA
+   * color, so error states need their own color to read as "wrong" rather
+   * than "another button". Mirrors the web app's --danger token. */
+  danger: string;
   line: string;
   /** Muted text, e.g. subtitles / captions. */
   muted: string;
@@ -22,6 +26,7 @@ export const THEMES: Record<BrandId, Theme> = {
     paper: "#1b1917",
     accent: "#da1b2e",
     accentText: "#ffffff",
+    danger: "#ff5a3c",
     line: "#322e2a",
     muted: "#a19d98",
     fontDisplay: "BebasNeue_400Regular",
@@ -35,6 +40,7 @@ export const THEMES: Record<BrandId, Theme> = {
     paper: "#ffffff",
     accent: "#d1487a",
     accentText: "#ffffff",
+    danger: "#c0392b",
     line: "#f0ddd0",
     muted: "#8a7570",
     fontDisplay: "PlayfairDisplay_700Bold",
@@ -50,6 +56,7 @@ export const NEUTRAL_THEME: Theme = {
   paper: "#ffffff",
   accent: "#b5121b",
   accentText: "#ffffff",
+  danger: "#b5121b",
   line: "#dedad2",
   muted: "#8a857e",
   fontDisplay: "BebasNeue_400Regular",

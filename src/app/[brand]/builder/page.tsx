@@ -207,7 +207,7 @@ export default function BuilderPage() {
                   transform: `scale(${scale})`,
                   transformOrigin: "top left",
                 }}
-                className="relative bg-white shadow-[0_4px_24px_rgba(0,0,0,0.15)] border border-line"
+                className="relative bg-white shadow-md border border-line"
               >
                 {items.map((item) => (
                   <SheetItemView
@@ -353,7 +353,7 @@ export default function BuilderPage() {
                 <button
                   type="button"
                   onClick={deleteSelected}
-                  className="w-full rounded-full border border-accent/40 px-3 py-1.5 text-xs font-medium text-accent hover:bg-accent/5"
+                  className="w-full rounded-full border border-danger/40 px-3 py-1.5 text-xs font-medium text-danger hover:bg-danger/5"
                 >
                   Remove from sheet
                 </button>

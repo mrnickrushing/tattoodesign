@@ -30,7 +30,7 @@ export default async function BrandHome({
           <Link
             key={card.tool}
             href={`/${brand.id}/${card.tool}`}
-            className="group flex flex-col justify-between rounded-2xl border border-line bg-paper p-6 min-h-64 transition-shadow hover:shadow-[0_8px_30px_rgba(0,0,0,0.12)]"
+            className="group flex flex-col justify-between rounded-2xl border border-line bg-paper p-6 min-h-64 transition-shadow hover:shadow-md"
           >
             <div>
               <span className="font-display text-4xl text-ink/15 group-hover:text-accent/40 transition-colors">
