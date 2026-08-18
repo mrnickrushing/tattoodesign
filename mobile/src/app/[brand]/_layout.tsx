@@ -24,6 +24,7 @@ export default function BrandLayout() {
     index: ["sparkles", "sparkles-outline"],
     convert: ["scan", "scan-outline"],
     builder: ["grid", "grid-outline"],
+    settings: ["settings", "settings-outline"],
   } as const;
 
   return (
@@ -67,6 +68,7 @@ export default function BrandLayout() {
             <Tabs.Screen name="index" options={{ title: brand.generate.tabLabel }} />
             <Tabs.Screen name="convert" options={{ title: brand.convert.tabLabel }} />
             <Tabs.Screen name="builder" options={{ title: brand.builder.tabLabel }} />
+            <Tabs.Screen name="settings" options={{ title: "Settings" }} />
           </Tabs>
         </ErrorBoundary>
       </View>

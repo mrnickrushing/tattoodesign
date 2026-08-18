@@ -6,18 +6,27 @@ import {
   StyleSheet,
   ScrollView,
   Alert,
+  Pressable,
   KeyboardAvoidingView,
   Platform,
 } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useBrand } from "@/context/BrandContext";
 import { generateDesign, checkGeneratorAvailable } from "@/lib/api";
 import { stencilize } from "@/lib/stencil";
 import { addToLibrary } from "@/lib/designLibrary";
 import { saveDataUrlToPhotos } from "@/lib/files";
+import {
+  clearPrompts,
+  forgetPrompt,
+  getPrompts,
+  rememberPrompt,
+  type PromptEntry,
+} from "@/lib/promptHistory";
 import { StockPane } from "@/components/StockPane";
 import { Button } from "@/components/Button";
-import { ScreenHeader, Chip, Notice, Card } from "@/components/ui";
+import { ScreenHeader, Chip, Notice, Card, SectionLabel } from "@/components/ui";
 import { RADIUS, SPACE } from "@/lib/theme";
 
 const STYLE_ICONS: Record<string, "flash" | "remove" | "square" | "color-filter" | "brush"> = {
@@ -41,10 +50,53 @@ export default function GenerateScreen() {
   const [rawUrl, setRawUrl] = useState<string | null>(null);
   const [stencilUrl, setStencilUrl] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [history, setHistory] = useState<PromptEntry[]>([]);
 
   useEffect(() => {
     checkGeneratorAvailable().then(setDisabledReason);
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    getPrompts(brand.id).then((entries) => {
+      if (active) setHistory(entries);
+    });
+    return () => {
+      active = false;
+    };
+  }, [brand.id]);
+
+  function recall(entry: PromptEntry) {
+    Haptics.selectionAsync();
+    setPrompt(entry.prompt);
+    // The style is half of what made the result, so it comes back too — but
+    // only if it still exists for this brand.
+    if (brand.generate.styles.some((s) => s.id === entry.style)) setStyle(entry.style);
+  }
+
+  function promptOptions(entry: PromptEntry) {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    Alert.alert(entry.prompt, undefined, [
+      { text: "Use this prompt", onPress: () => recall(entry) },
+      {
+        text: "Remove",
+        style: "destructive",
+        onPress: async () => setHistory(await forgetPrompt(brand.id, entry.prompt)),
+      },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  }
+
+  function confirmClearHistory() {
+    Alert.alert("Clear prompt history?", "The designs you already made are kept.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Clear",
+        style: "destructive",
+        onPress: async () => setHistory(await clearPrompts(brand.id)),
+      },
+    ]);
+  }
 
   async function handleGenerate() {
     if (!prompt.trim() || loading) return;
@@ -60,6 +112,8 @@ export default function GenerateScreen() {
       return;
     }
     setRawUrl(result.dataUrl);
+    // Only prompts that actually produced something are worth keeping.
+    setHistory(await rememberPrompt(brand.id, prompt, style));
     try {
       const stencil = await stencilize(result.dataUrl, {
         threshold: 70,
@@ -218,6 +272,57 @@ export default function GenerateScreen() {
             style={{ flex: 1 }}
           />
         </View>
+
+        {history.length > 0 && (
+          <View style={{ marginTop: SPACE.xl }}>
+            <SectionLabel
+              action={{ label: "Clear", icon: "trash-outline", onPress: confirmClearHistory }}
+            >
+              Recent prompts
+            </SectionLabel>
+            <View style={[styles.history, { borderColor: theme.line }]}>
+              {history.map((entry, i) => {
+                const styleLabel = brand.generate.styles.find((s) => s.id === entry.style)?.label;
+                return (
+                  <Pressable
+                    key={entry.prompt}
+                    onPress={() => recall(entry)}
+                    onLongPress={() => promptOptions(entry)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Use prompt: ${entry.prompt}`}
+                    accessibilityHint="Long press to remove it"
+                    style={({ pressed }) => [
+                      styles.historyRow,
+                      i > 0 && { borderTopWidth: 1, borderTopColor: theme.line },
+                      pressed && { backgroundColor: theme.surfaceAlt },
+                    ]}
+                  >
+                    <View style={styles.historyText}>
+                      <Text
+                        numberOfLines={1}
+                        style={{
+                          color: theme.foreground,
+                          fontFamily: theme.fontBody,
+                          fontSize: 14,
+                        }}
+                      >
+                        {entry.prompt}
+                      </Text>
+                      {styleLabel && (
+                        <Text
+                          style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 11 }}
+                        >
+                          {styleLabel}
+                        </Text>
+                      )}
+                    </View>
+                    <Ionicons name="return-down-back-outline" size={16} color={theme.muted} />
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        )}
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -238,4 +343,14 @@ const styles = StyleSheet.create({
   },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   actions: { flexDirection: "row", gap: SPACE.sm, marginTop: SPACE.sm },
+  history: { borderWidth: 1, borderRadius: RADIUS.md, overflow: "hidden" },
+  historyRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SPACE.sm,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    minHeight: 52,
+  },
+  historyText: { flex: 1, gap: 2 },
 });

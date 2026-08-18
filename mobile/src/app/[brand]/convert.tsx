@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { View, Text, Pressable, StyleSheet, ScrollView, Switch, Alert } from "react-native";
+import { View, Text, StyleSheet, ScrollView, Switch, Alert } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import Slider from "@react-native-community/slider";
 import * as Haptics from "expo-haptics";
@@ -8,14 +8,21 @@ import { useBrand } from "@/context/BrandContext";
 import { DEFAULT_STENCIL_OPTIONS, stencilize, type StencilOptions } from "@/lib/stencil";
 import { addToLibrary } from "@/lib/designLibrary";
 import { saveDataUrlToPhotos } from "@/lib/files";
+import { cropImage, isFullCrop, type CropRect } from "@/lib/crop";
 import { StockPane } from "@/components/StockPane";
+import { CropTool } from "@/components/CropTool";
 import { Button } from "@/components/Button";
 import { ScreenHeader, Notice, Card } from "@/components/ui";
 import { SPACE } from "@/lib/theme";
 
 export default function ConvertScreen() {
   const { brand, theme } = useBrand();
+  /** The photo as picked. Crops are always taken from this, so re-cropping
+   *  never compounds — the second crop isn't a crop of the first. */
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
+  const [sourceSize, setSourceSize] = useState<{ width: number; height: number } | null>(null);
+  const [cropped, setCropped] = useState<{ uri: string; rect: CropRect } | null>(null);
+  const [cropping, setCropping] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,9 +45,10 @@ export default function ConvertScreen() {
     (patch: Partial<StencilOptions>) => {
       const next = { ...opts, ...patch };
       setOpts(next);
-      if (sourceUrl) runPipeline(sourceUrl, next);
+      const working = cropped?.uri ?? sourceUrl;
+      if (working) runPipeline(working, next);
     },
-    [opts, sourceUrl, runPipeline]
+    [opts, cropped, sourceUrl, runPipeline]
   );
 
   async function pickImage() {
@@ -55,11 +63,36 @@ export default function ConvertScreen() {
       quality: 1,
     });
     if (result.canceled || !result.assets[0]?.base64) return;
-    const dataUrl = `data:image/jpeg;base64,${result.assets[0].base64}`;
+    const asset = result.assets[0];
+    const dataUrl = `data:image/jpeg;base64,${asset.base64}`;
     setSourceUrl(dataUrl);
+    setSourceSize({ width: asset.width, height: asset.height });
+    setCropped(null);
     setSaved(false);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     runPipeline(dataUrl, opts);
+  }
+
+  async function applyCrop(rect: CropRect) {
+    setCropping(false);
+    if (!sourceUrl) return;
+    if (isFullCrop(rect)) {
+      // Nothing was trimmed — go back to the untouched photo rather than
+      // spending a re-encode to produce a copy of it.
+      setCropped(null);
+      runPipeline(sourceUrl, opts);
+      return;
+    }
+    setProcessing(true);
+    try {
+      const uri = await cropImage(sourceUrl, rect);
+      setCropped({ uri, rect });
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      runPipeline(uri, opts);
+    } catch (e) {
+      setProcessing(false);
+      Alert.alert("Couldn't crop", e instanceof Error ? e.message : "Try again.");
+    }
   }
 
   async function handleSave() {
@@ -97,16 +130,14 @@ export default function ConvertScreen() {
       />
 
       <View style={styles.panes}>
-        <Pressable onPress={pickImage} style={{ flex: 1 }} accessibilityRole="button"
-          accessibilityLabel={sourceUrl ? "Change reference photo" : "Choose a reference photo"}>
-          <StockPane
-            index={1}
-            label="Source"
-            uri={sourceUrl}
-            emptyIcon="image-outline"
-            emptyHint="Tap to pick a photo"
-          />
-        </Pressable>
+        <StockPane
+          index={1}
+          label={cropped ? "Cropped" : "Source"}
+          uri={cropped?.uri ?? sourceUrl}
+          emptyIcon="image-outline"
+          emptyHint="Tap to pick a photo"
+          onPressEmpty={pickImage}
+        />
         <StockPane
           index={2}
           label="Line art"
@@ -118,7 +149,23 @@ export default function ConvertScreen() {
         />
       </View>
 
-      <Card style={{ marginTop: SPACE.lg }}>
+      <View style={styles.photoActions}>
+        <Button
+          label={sourceUrl ? "Change photo" : "Choose photo"}
+          icon="image-outline"
+          onPress={pickImage}
+          style={{ flex: 1 }}
+        />
+        <Button
+          label={cropped ? "Re-crop" : "Crop"}
+          icon="crop-outline"
+          onPress={() => setCropping(true)}
+          disabled={!sourceUrl || !sourceSize}
+          style={{ flex: 1 }}
+        />
+      </View>
+
+      <Card>
         <Text style={[styles.field, { color: theme.muted, fontFamily: theme.fontBodyMedium }]}>
           TRACE CONTROLS
         </Text>
@@ -191,6 +238,17 @@ export default function ConvertScreen() {
           style={{ flex: 1 }}
         />
       </View>
+
+      {cropping && sourceUrl && sourceSize && (
+        <CropTool
+          uri={sourceUrl}
+          imageWidth={sourceSize.width}
+          imageHeight={sourceSize.height}
+          initialRect={cropped?.rect}
+          onApply={applyCrop}
+          onClose={() => setCropping(false)}
+        />
+      )}
     </ScrollView>
   );
 }
@@ -255,6 +313,7 @@ function SliderRow({
 const styles = StyleSheet.create({
   scroll: { padding: SPACE.md, paddingTop: SPACE.lg, paddingBottom: SPACE.xxl },
   panes: { flexDirection: "row", gap: SPACE.sm },
+  photoActions: { flexDirection: "row", gap: SPACE.sm, marginTop: SPACE.lg, marginBottom: SPACE.sm },
   field: { fontSize: 10, letterSpacing: 1.5, marginBottom: SPACE.sm },
   sliderTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   sliderLabel: { flexDirection: "row", alignItems: "center", gap: 7 },

@@ -1,7 +1,17 @@
-import { View, Text, StyleSheet, ActivityIndicator, type ViewStyle } from "react-native";
+import { useState } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  ActivityIndicator,
+  Pressable,
+  type ViewStyle,
+} from "react-native";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 import { useBrand } from "@/context/BrandContext";
+import { ImageViewer } from "@/components/ImageViewer";
 import { RADIUS } from "@/lib/theme";
 
 /**
@@ -21,6 +31,7 @@ export function StockPane({
   emptyIcon = "scan-outline",
   emptyHint,
   style,
+  onPressEmpty,
 }: {
   index?: number;
   label: string;
@@ -30,19 +41,33 @@ export function StockPane({
   emptyIcon?: keyof typeof Ionicons.glyphMap;
   emptyHint?: string;
   style?: ViewStyle;
+  /** Called when tapped while empty — e.g. "pick a photo". A filled pane
+   *  always opens the zoom viewer instead. */
+  onPressEmpty?: () => void;
 }) {
   const { theme } = useBrand();
+  const [zoomed, setZoomed] = useState(false);
   const filled = !!uri;
 
   return (
-    <View
-      style={[
+    <Pressable
+      onPress={() => {
+        if (filled) {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          setZoomed(true);
+        } else onPressEmpty?.();
+      }}
+      disabled={!filled && !onPressEmpty}
+      accessibilityRole={filled || onPressEmpty ? "button" : "image"}
+      accessibilityLabel={
+        filled ? `${label}, tap to zoom` : `${label}, empty`
+      }
+      style={({ pressed }) => [
         styles.pane,
         { backgroundColor: theme.stock, borderColor: theme.line },
+        pressed && (filled || onPressEmpty) ? { opacity: 0.9 } : null,
         style,
       ]}
-      accessibilityRole="image"
-      accessibilityLabel={filled ? label : `${label}, empty`}
     >
       {/* Registration marks — the tell that this is printed stock. */}
       <CropMarks color={theme.stockMark} />
@@ -77,7 +102,20 @@ export function StockPane({
         )}
         <Text style={[styles.label, { color: theme.stockMark }]}>{label.toUpperCase()}</Text>
       </View>
-    </View>
+
+      {/* Affordance: only shown once there's something worth opening. */}
+      {filled && (
+        <View style={[styles.expand, { backgroundColor: `${theme.stockInk}14` }]} pointerEvents="none">
+          <Ionicons name="expand-outline" size={13} color={theme.stockInk} />
+        </View>
+      )}
+
+      <ImageViewer
+        uri={zoomed ? uri : null}
+        title={label}
+        onClose={() => setZoomed(false)}
+      />
+    </Pressable>
   );
 }
 
@@ -150,6 +188,16 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "baseline",
     gap: 6,
+  },
+  expand: {
+    position: "absolute",
+    right: 8,
+    bottom: 8,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
   },
   index: { fontSize: 20, lineHeight: 22, opacity: 0.35 },
   label: { fontSize: 9, letterSpacing: 1.5, fontWeight: "600" },

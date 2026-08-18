@@ -6,25 +6,32 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "channel": "development"
     },
     "preview": {
-      "distribution": "internal"
+      "distribution": "internal",
+      "channel": "preview"
     },
     "internal": {
       "distribution": "store",
       "autoIncrement": true,
       "ios": {
         "buildConfiguration": "Release"
-      }
+      },
+      "channel": "internal"
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "channel": "production"
     }
   },
   "submit": {
     "internal": {
       "ios": {
+        "appleId": "nickrushing849@icloud.com",
+        "ascAppId": "6802466699",
+        "appleTeamId": "PH4AKDQ4Q7",
         "language": "en-US"
       }
     },
