@@ -17,7 +17,13 @@ export type StencilOptions = {
   denoise?: number;
   /** Invert to white-on-black instead of the default black-on-white. */
   invert?: boolean;
+  /** Rendering strategy. Each mode is tuned for a different transfer style. */
+  mode?: StencilMode;
+  /** Suppress a flat background sampled from the image corners before tracing. */
+  isolateBackground?: boolean;
 };
+
+export type StencilMode = "outline" | "fine" | "photocopy" | "halftone" | "crosshatch";
 
 export const DEFAULT_STENCIL_OPTIONS: Required<StencilOptions> = {
   maxDimension: 1200,
@@ -25,6 +31,8 @@ export const DEFAULT_STENCIL_OPTIONS: Required<StencilOptions> = {
   lineWeight: 1,
   denoise: 1,
   invert: false,
+  mode: "outline",
+  isolateBackground: false,
 };
 
 function stripDataUrlPrefix(dataUrl: string): string {
@@ -36,6 +44,26 @@ function toGrayscale(pixels: Uint8Array): Float32Array {
   const out = new Float32Array(pixels.length / 4);
   for (let i = 0, j = 0; i < pixels.length; i += 4, j++) {
     out[j] = pixels[i] * 0.299 + pixels[i + 1] * 0.587 + pixels[i + 2] * 0.114;
+  }
+  return out;
+}
+
+function suppressBackground(pixels: Uint8Array, width: number, height: number): Uint8Array {
+  const out = new Uint8Array(pixels);
+  const sample = (x: number, y: number) => {
+    const i = (y * width + x) * 4;
+    return [pixels[i], pixels[i + 1], pixels[i + 2]] as const;
+  };
+  const corners = [sample(0, 0), sample(width - 1, 0), sample(0, height - 1), sample(width - 1, height - 1)];
+  const bg = [0, 1, 2].map((channel) => corners.reduce((sum, color) => sum + color[channel], 0) / corners.length);
+  // A deliberately conservative cutoff: this removes paper/wall fields while
+  // preserving skin texture and pale artwork that aggressive segmentation loses.
+  const tolerance = 42;
+  for (let i = 0; i < out.length; i += 4) {
+    const distance = Math.sqrt(
+      (out[i] - bg[0]) ** 2 + (out[i + 1] - bg[1]) ** 2 + (out[i + 2] - bg[2]) ** 2
+    );
+    if (distance < tolerance) out[i] = out[i + 1] = out[i + 2] = 255;
   }
   return out;
 }
@@ -129,6 +157,40 @@ function dilate(
   return out;
 }
 
+function buildMask(
+  mode: StencilMode,
+  gray: Float32Array,
+  magnitude: Float32Array,
+  width: number,
+  height: number,
+  threshold: number
+): Uint8Array {
+  const mask = new Uint8Array(width * height);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = y * width + x;
+      const tone = gray[i];
+      if (mode === "photocopy") {
+        mask[i] = tone < Math.min(245, threshold + 95) ? 1 : 0;
+      } else if (mode === "halftone") {
+        const cell = 7;
+        const radius = Math.max(0, Math.round(((255 - tone) / 255) * 3));
+        const dx = (x % cell) - Math.floor(cell / 2);
+        const dy = (y % cell) - Math.floor(cell / 2);
+        mask[i] = radius > 0 && dx * dx + dy * dy <= radius * radius ? 1 : 0;
+      } else if (mode === "crosshatch") {
+        const darkness = 255 - tone;
+        const hatch = (x + y) % 9 === 0 || (darkness > 95 && (x - y + height) % 11 === 0) || (darkness > 165 && y % 7 === 0);
+        mask[i] = darkness > 45 && hatch ? 1 : 0;
+      } else {
+        const cutoff = mode === "fine" ? threshold * 1.18 : threshold;
+        mask[i] = magnitude[i] > cutoff ? 1 : 0;
+      }
+    }
+  }
+  return mask;
+}
+
 /**
  * Runs the full photo -> stencil pipeline and returns a PNG data URL.
  * Accepts either a bare base64 string or a `data:image/...;base64,...` URL.
@@ -171,15 +233,12 @@ export async function stencilize(
   }) as Uint8Array | null;
   if (!pixels) throw new Error("Could not read pixel data");
 
-  let gray = toGrayscale(pixels);
+  const prepared = opts.isolateBackground ? suppressBackground(pixels, width, height) : pixels;
+  let gray = toGrayscale(prepared);
   gray = boxBlur(gray, width, height, opts.denoise);
   const magnitude = sobelMagnitude(gray, width, height);
-
-  const rawMask = new Uint8Array(width * height);
-  for (let i = 0; i < rawMask.length; i++) {
-    rawMask[i] = magnitude[i] > opts.threshold ? 1 : 0;
-  }
-  const mask = dilate(rawMask, width, height, opts.lineWeight);
+  const rawMask = buildMask(opts.mode, gray, magnitude, width, height, opts.threshold);
+  const mask = dilate(rawMask, width, height, opts.mode === "fine" ? Math.max(0, opts.lineWeight - 1) : opts.lineWeight);
 
   const out = new Uint8Array(width * height * 4);
   const lineColor = opts.invert ? 255 : 0;

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -52,6 +52,8 @@ import { IcingPreview } from "@/components/IcingPreview";
 import { PlacementPreview } from "@/components/PlacementPreview";
 import { DesignActions, type DesignAction } from "@/components/DesignActions";
 import { DesignEditor } from "@/components/DesignEditor";
+import { PrinterStudio } from "@/components/PrinterStudio";
+import { getPrinterProfile, savePrinterProfile, type PrinterProfile } from "@/lib/printerProfiles";
 import { SPACE, RADIUS, lift } from "@/lib/theme";
 
 type SheetTemplate = { id: string; label: string; widthIn: number; heightIn: number };
@@ -60,6 +62,7 @@ const TEMPLATES: SheetTemplate[] = [
   { id: "letter", label: "Letter", widthIn: 8.5, heightIn: 11 },
   { id: "tabloid", label: "Tabloid", widthIn: 11, heightIn: 17 },
   { id: "a4", label: "A4", widthIn: 8.27, heightIn: 11.69 },
+  { id: "thermal80", label: "Thermal 80", widthIn: 3.15, heightIn: 11 },
   { id: "square", label: "Square", widthIn: 12, heightIn: 12 },
 ];
 
@@ -130,6 +133,8 @@ export default function BuilderScreen() {
   const [history, setHistory] = useState<SheetItem[][]>([]);
   const [snapEnabled, setSnapEnabled] = useState(true);
   const [guidesVisible, setGuidesVisible] = useState(true);
+  const [printerOpen, setPrinterOpen] = useState(false);
+  const [printerProfile, setPrinterProfile] = useState<PrinterProfile | null>(null);
   /** Autosave stays off until the stored draft has been read back, or the
    *  first render would overwrite it with an empty canvas. */
   const restored = useRef(false);
@@ -173,6 +178,16 @@ export default function BuilderScreen() {
       active = false;
     };
   }, [brand.id, requestedSheetId]);
+
+  useEffect(() => {
+    getPrinterProfile(brand.id).then(setPrinterProfile);
+  }, [brand.id]);
+
+  useEffect(() => {
+    if (!printerProfile) return;
+    const timer = setTimeout(() => void savePrinterProfile(brand.id, printerProfile), 250);
+    return () => clearTimeout(timer);
+  }, [brand.id, printerProfile]);
 
   // Debounced so dragging a design doesn't write on every frame.
   useEffect(() => {
@@ -258,6 +273,8 @@ export default function BuilderScreen() {
 
   function addItem(design: LibraryDesign) {
     const wIn = Math.min(3, template.widthIn * 0.35);
+    const ratio = design.width && design.height ? design.height / design.width : 1;
+    const hIn = Math.min(template.heightIn, wIn * ratio);
     const id = generateId();
     pushHistory();
     setItems((prev) => [
@@ -268,9 +285,9 @@ export default function BuilderScreen() {
         uri: design.uri,
         title: design.title,
         xIn: template.widthIn / 2 - wIn / 2,
-        yIn: template.heightIn / 2 - wIn / 2,
+        yIn: template.heightIn / 2 - hIn / 2,
         wIn,
-        hIn: wIn,
+        hIn,
         rotation: 0,
         mirrored: false,
         locked: false,
@@ -675,7 +692,7 @@ export default function BuilderScreen() {
     }
     try {
       const dataUrl = await renderSheet();
-      await shareDataUrl(dataUrl, `sheet-${Date.now()}.png`);
+      await shareDataUrl(dataUrl, "inkline-sheet.png");
     } catch (e) {
       Alert.alert("Couldn't share", e instanceof Error ? e.message : "Try again.");
     }
@@ -723,21 +740,27 @@ export default function BuilderScreen() {
   }
 
   /** Re-composite from the original design files at print resolution. */
-  async function renderSheet(): Promise<string> {
+  const renderSheet = useCallback(async (output?: Pick<PrinterProfile, "dpi" | "scaleCorrection">): Promise<string> => {
+    const scale = output?.scaleCorrection ?? 1;
     return composeSheet(
       items.map((i) => ({
         uri: i.uri,
-        xIn: i.xIn,
-        yIn: i.yIn,
-        wIn: i.wIn,
-        hIn: i.hIn,
+        xIn: i.xIn * scale,
+        yIn: i.yIn * scale,
+        wIn: i.wIn * scale,
+        hIn: i.hIn * scale,
         rotation: i.rotation,
         mirrored: i.mirrored,
       })),
       template.widthIn,
-      template.heightIn
+      template.heightIn,
+      output?.dpi
     );
-  }
+  }, [items, template.widthIn, template.heightIn]);
+
+  const changePrinterProfile = useCallback((next: PrinterProfile) => {
+    setPrinterProfile(next);
+  }, []);
 
   async function handleSave() {
     if (items.length === 0) {
@@ -755,20 +778,21 @@ export default function BuilderScreen() {
     }
   }
 
-  async function handlePrint() {
+  async function handlePrint(output?: PrinterProfile) {
     if (items.length === 0) {
       Alert.alert("Nothing to print", "Add a design to the sheet first.");
       return;
     }
     try {
-      const dataUrl = await renderSheet();
+      const active = output ?? printerProfile ?? await getPrinterProfile(brand.id);
+      const dataUrl = await renderSheet(active);
       const widthPx = Math.round(template.widthIn * 72);
       const heightPx = Math.round(template.heightIn * 72);
       const html =
         `<html><head><style>` +
         `@page { size: ${template.widthIn}in ${template.heightIn}in; margin: 0; }` +
         `html,body { margin:0; padding:0; }` +
-        `img { width:${template.widthIn}in; height:${template.heightIn}in; display:block; }` +
+        `img { width:${template.widthIn}in; height:${template.heightIn}in; display:block;${active.mirrored ? "transform:scaleX(-1);" : ""} }` +
         `</style></head><body><img src="${dataUrl}" /></body></html>`;
       await Print.printAsync({ html, width: widthPx, height: heightPx });
     } catch (e) {
@@ -1008,10 +1032,10 @@ export default function BuilderScreen() {
 
       <View style={styles.actions}>
         <Button
-          label="Print sheet"
-          icon="print-outline"
+          label="Printer studio"
+          icon="options-outline"
           variant="primary"
-          onPress={handlePrint}
+          onPress={() => setPrinterOpen(true)}
           style={{ flex: 1 }}
         />
         <Button
@@ -1236,6 +1260,19 @@ export default function BuilderScreen() {
             refreshLibrary();
           }}
           onClose={() => setIcing(null)}
+        />
+      )}
+
+      {printerProfile && (
+        <PrinterStudio
+          visible={printerOpen}
+          profile={printerProfile}
+          pageWidthIn={template.widthIn}
+          pageHeightIn={template.heightIn}
+          onChange={changePrinterProfile}
+          onClose={() => setPrinterOpen(false)}
+          onAirPrint={handlePrint}
+          renderProof={renderSheet}
         />
       )}
     </ScrollView>

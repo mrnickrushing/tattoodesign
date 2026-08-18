@@ -54,10 +54,9 @@ export async function composeSheet(
       const data = Skia.Data.fromBase64(base64);
       image = Skia.Image.MakeImageFromEncoded(data);
     } catch {
-      // One unreadable design shouldn't cost the whole sheet.
-      continue;
+      throw new Error("A design on this sheet can no longer be read. Remove it or restore it before printing.");
     }
-    if (!image) continue;
+    if (!image) throw new Error("A design on this sheet is not a valid image.");
 
     const x = item.xIn * dpi;
     const y = item.yIn * dpi;
@@ -70,10 +69,14 @@ export async function composeSheet(
     canvas.translate(x + w / 2, y + h / 2);
     if (item.rotation) canvas.rotate(item.rotation, 0, 0);
     if (item.mirrored) canvas.scale(-1, 1);
+    const sourceRatio = image.width() / image.height();
+    const boxRatio = w / h;
+    const drawW = sourceRatio > boxRatio ? w : h * sourceRatio;
+    const drawH = sourceRatio > boxRatio ? w / sourceRatio : h;
     canvas.drawImageRect(
       image,
       Skia.XYWHRect(0, 0, image.width(), image.height()),
-      Skia.XYWHRect(-w / 2, -h / 2, w, h),
+      Skia.XYWHRect(-drawW / 2, -drawH / 2, drawW, drawH),
       paint
     );
     canvas.restore();

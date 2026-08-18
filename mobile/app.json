@@ -21,23 +21,7 @@
         "backgroundColor": "#090707",
         "foregroundImage": "./assets/images/inkline-icon-v2.png"
       },
-      "predictiveBackGestureEnabled": false,
-      "permissions": [
-        "android.permission.RECORD_AUDIO",
-        "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
-        "android.permission.READ_MEDIA_IMAGES",
-        "android.permission.READ_MEDIA_VIDEO",
-        "android.permission.READ_MEDIA_AUDIO",
-        "android.permission.RECORD_AUDIO",
-        "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
-        "android.permission.READ_MEDIA_IMAGES",
-        "android.permission.READ_MEDIA_VIDEO",
-        "android.permission.READ_MEDIA_AUDIO"
-      ]
+      "predictiveBackGestureEnabled": false
     },
     "web": {
       "output": "single",
@@ -58,14 +42,23 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Inkline uses your photos to convert them into stencil line art."
+          "photosPermission": "Inkline uses your photos to convert them into stencil line art.",
+          "microphonePermission": false
         }
       ],
       [
         "expo-media-library",
         {
           "photosPermission": "Inkline uses your photos to convert them into stencil line art.",
-          "savePhotosPermission": "Inkline saves your generated designs and flash sheets to Photos."
+          "savePhotosPermission": "Inkline saves your generated designs and flash sheets to Photos.",
+          "granularPermissions": ["photo"]
+        }
+      ],
+      [
+        "react-native-ble-plx",
+        {
+          "neverForLocation": true,
+          "bluetoothAlwaysPermission": "Inkline uses Bluetooth to find and print to compatible nearby stencil printers."
         }
       ]
     ],
