@@ -23,9 +23,13 @@ export function isFullCrop(rect: CropRect): boolean {
 }
 
 export async function cropImage(dataUrl: string, rect: CropRect): Promise<string> {
-  const image = Skia.Image.MakeImageFromEncoded(
-    Skia.Data.fromBase64(stripDataUrlPrefix(dataUrl))
-  );
+  let image = null;
+  try {
+    image = Skia.Image.MakeImageFromEncoded(Skia.Data.fromBase64(stripDataUrlPrefix(dataUrl)));
+  } catch {
+    // Skia's own errors say nothing useful to someone holding a phone.
+    image = null;
+  }
   if (!image) throw new Error("Couldn't read that image.");
 
   const iw = image.width();

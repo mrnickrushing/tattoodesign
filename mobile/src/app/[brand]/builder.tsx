@@ -44,6 +44,7 @@ import { Button } from "@/components/Button";
 import { ScreenHeader, Chip, SectionLabel, Card } from "@/components/ui";
 import { ImageViewer } from "@/components/ImageViewer";
 import { NamePrompt } from "@/components/NamePrompt";
+import { IcingPreview } from "@/components/IcingPreview";
 import { SPACE, RADIUS, lift } from "@/lib/theme";
 
 type SheetTemplate = { id: string; label: string; widthIn: number; heightIn: number };
@@ -107,6 +108,7 @@ export default function BuilderScreen() {
   const [sheetId, setSheetId] = useState<string | null>(null);
   const [sheetName, setSheetName] = useState<string | null>(null);
   const [prompt, setPrompt] = useState<NamePromptState | null>(null);
+  const [icing, setIcing] = useState<LibraryDesign | null>(null);
   const [promptSeq, setPromptSeq] = useState(0);
   /** Bumped to remount the placed designs when their geometry changes from
    *  outside a gesture, so the view re-seeds from state. */
@@ -724,6 +726,10 @@ export default function BuilderScreen() {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                 Alert.alert(d.title, undefined, [
                   { text: "View", onPress: () => setPreview(d) },
+                  // Icing colors are a Sugar Haus question; flash is inked.
+                  ...(brand.id === "sugar"
+                    ? [{ text: "Try icing colors", onPress: () => setIcing(d) }]
+                    : []),
                   {
                     text: "Rename",
                     onPress: () =>
@@ -792,6 +798,22 @@ export default function BuilderScreen() {
         onSubmit={(v) => handlePromptSubmit(v)}
         onClose={() => setPrompt(null)}
       />
+
+      {icing && (
+        <IcingPreview
+          uri={icing.uri}
+          title={icing.title}
+          onSave={async (dataUrl) => {
+            await addToLibrary(brand.id, {
+              dataUrl,
+              title: `${icing.title} (iced)`,
+              source: "converted",
+            });
+            refreshLibrary();
+          }}
+          onClose={() => setIcing(null)}
+        />
+      )}
     </ScrollView>
   );
 }
