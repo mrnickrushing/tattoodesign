@@ -24,6 +24,7 @@ import { useBrand } from "@/context/BrandContext";
 import {
   addToLibrary,
   getLibrary,
+  removeFromLibrary,
   type LibraryDesign,
 } from "@/lib/designLibrary";
 import { generateId } from "@/lib/id";
@@ -44,13 +45,15 @@ const TEMPLATES: SheetTemplate[] = [
 
 type SheetItem = {
   id: string;
-  dataUrl: string;
+  uri: string;
   title: string;
   xIn: number;
   yIn: number;
   wIn: number;
   hIn: number;
   rotation: number;
+  /** Stencils are often applied reversed, so mirroring is a first-class op. */
+  mirrored: boolean;
 };
 
 const MAX_PX_PER_IN = 50;
@@ -86,30 +89,71 @@ export default function BuilderScreen() {
   }
 
   function changeTemplate(id: string) {
+    const next = TEMPLATES.find((t) => t.id === id);
+    if (!next) return;
     Haptics.selectionAsync();
     setTemplateId(id);
-    setItems([]);
-    setSelectedId(null);
+    // Trying a different sheet size shouldn't throw the layout away. Keep
+    // every design and just pull anything that now falls off the page back
+    // onto it.
+    setItems((prev) =>
+      prev.map((it) => ({
+        ...it,
+        wIn: Math.min(it.wIn, next.widthIn),
+        hIn: Math.min(it.hIn, next.heightIn),
+        xIn: Math.max(0, Math.min(it.xIn, next.widthIn - Math.min(it.wIn, next.widthIn))),
+        yIn: Math.max(0, Math.min(it.yIn, next.heightIn - Math.min(it.hIn, next.heightIn))),
+      }))
+    );
   }
 
-  function addItem(design: { dataUrl: string; title: string }) {
+  function addItem(design: { uri: string; title: string }) {
     const wIn = Math.min(3, template.widthIn * 0.35);
     const id = generateId();
     setItems((prev) => [
       ...prev,
       {
         id,
-        dataUrl: design.dataUrl,
+        uri: design.uri,
         title: design.title,
         xIn: template.widthIn / 2 - wIn / 2,
         yIn: template.heightIn / 2 - wIn / 2,
         wIn,
         hIn: wIn,
         rotation: 0,
+        mirrored: false,
       },
     ]);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setSelectedId(id);
+  }
+
+  function duplicateSelected() {
+    const src = items.find((i) => i.id === selectedId);
+    if (!src) return;
+    const id = generateId();
+    // Offset slightly so the copy is visibly its own object, and keep it
+    // on the page even when duplicating something near the edge.
+    const step = 0.25;
+    setItems((prev) => [
+      ...prev,
+      {
+        ...src,
+        id,
+        xIn: Math.min(src.xIn + step, Math.max(0, template.widthIn - src.wIn)),
+        yIn: Math.min(src.yIn + step, Math.max(0, template.heightIn - src.hIn)),
+      },
+    ]);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setSelectedId(id);
+  }
+
+  function mirrorSelected() {
+    if (!selectedId) return;
+    Haptics.selectionAsync();
+    setItems((prev) =>
+      prev.map((i) => (i.id === selectedId ? { ...i, mirrored: !i.mirrored } : i))
+    );
   }
 
   function removeSelected() {
@@ -224,13 +268,27 @@ export default function BuilderScreen() {
       </View>
 
       {selectedId && (
-        <Button
-          label="Remove selected"
-          icon="trash-outline"
-          variant="danger"
-          onPress={removeSelected}
-          style={{ marginBottom: SPACE.sm }}
-        />
+        <View style={styles.itemActions}>
+          <Button
+            label="Duplicate"
+            icon="copy-outline"
+            onPress={duplicateSelected}
+            style={{ flex: 1 }}
+          />
+          <Button
+            label="Mirror"
+            icon="swap-horizontal-outline"
+            onPress={mirrorSelected}
+            style={{ flex: 1 }}
+          />
+          <Button
+            label="Remove"
+            icon="trash-outline"
+            variant="danger"
+            onPress={removeSelected}
+            style={{ flex: 1 }}
+          />
+        </View>
       )}
 
       <View style={styles.actions}>
@@ -267,19 +325,30 @@ export default function BuilderScreen() {
               key={d.id}
               onPress={() => addItem(d)}
               onLongPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                setPreview(d);
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                Alert.alert(d.title, undefined, [
+                  { text: "View", onPress: () => setPreview(d) },
+                  {
+                    text: "Delete",
+                    style: "destructive",
+                    onPress: async () => {
+                      await removeFromLibrary(brand.id, d.id);
+                      refreshLibrary();
+                    },
+                  },
+                  { text: "Cancel", style: "cancel" },
+                ]);
               }}
               accessibilityRole="button"
               accessibilityLabel={`Add ${d.title} to sheet`}
-              accessibilityHint="Long press to view it full screen"
+              accessibilityHint="Long press to view or delete"
               style={({ pressed }) => [
                 styles.libraryThumb,
                 { borderColor: theme.line, backgroundColor: theme.stock, opacity: pressed ? 0.7 : 1 },
               ]}
             >
               <Image
-                source={{ uri: d.dataUrl }}
+                source={{ uri: d.uri }}
                 style={styles.image}
                 contentFit="contain"
                 alt={d.title}
@@ -290,7 +359,7 @@ export default function BuilderScreen() {
       )}
 
       <ImageViewer
-        uri={preview?.dataUrl ?? null}
+        uri={preview?.uri ?? null}
         title={preview?.title}
         onClose={() => setPreview(null)}
       />
@@ -384,15 +453,15 @@ function DraggableItem({
         accessibilityHint={
           selected
             ? "Selected. Drag to move, pinch to resize, twist to rotate."
-            : "Double tap to select, then use Remove selected design to delete."
+            : "Double tap to select, then duplicate, mirror, or remove it."
         }
       >
         <Image
-          source={{ uri: item.dataUrl }}
-          style={styles.image}
+          source={{ uri: item.uri }}
+          style={[styles.image, item.mirrored && { transform: [{ scaleX: -1 }] }]}
           contentFit="contain"
           pointerEvents="none"
-          alt={item.title}
+          alt={item.mirrored ? `${item.title}, mirrored` : item.title}
         />
       </Animated.View>
     </GestureDetector>
@@ -411,6 +480,7 @@ const styles = StyleSheet.create({
     ...lift("md"),
   },
   actions: { flexDirection: "row", gap: SPACE.sm, marginBottom: SPACE.lg },
+  itemActions: { flexDirection: "row", gap: SPACE.sm, marginBottom: SPACE.md },
   emptyLib: {
     alignItems: "center",
     gap: SPACE.sm,
