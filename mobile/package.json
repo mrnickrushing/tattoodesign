@@ -1,7 +1,7 @@
 {
   "name": "inkline-mobile",
   "main": "expo-router/entry",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "dependencies": {
     "@expo-google-fonts/bebas-neue": "^0.4.1",
     "@expo-google-fonts/caveat": "^0.4.2",

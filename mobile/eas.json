@@ -35,6 +35,13 @@
         "language": "en-US"
       }
     },
-    "production": {}
+    "production": {
+      "ios": {
+        "appleId": "nickrushing849@icloud.com",
+        "ascAppId": "6802466699",
+        "appleTeamId": "PH4AKDQ4Q7",
+        "language": "en-US"
+      }
+    }
   }
 }
