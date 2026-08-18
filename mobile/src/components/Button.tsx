@@ -1,5 +1,6 @@
 import { Pressable, Text, ActivityIndicator, StyleSheet, View, type ViewStyle } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
 import { useBrand } from "@/context/BrandContext";
 import { RADIUS, SPACE, glow, lift } from "@/lib/theme";
@@ -27,7 +28,7 @@ export function Button({
   const off = disabled || loading;
 
   const bg =
-    variant === "primary" ? theme.accent : variant === "danger" ? "transparent" : theme.surfaceAlt;
+    variant === "primary" ? "transparent" : variant === "danger" ? "transparent" : theme.surfaceAlt;
   const fg =
     variant === "primary"
       ? theme.accentText
@@ -66,10 +67,25 @@ export function Button({
         style,
       ]}
     >
+      {variant === "primary" && (
+        <>
+          <LinearGradient
+            colors={
+              brand.id === "ink"
+                ? (["#ff334b", theme.accent, "#a70f22"] as const)
+                : (["#ee6f9c", theme.accent, "#aa315d"] as const)
+            }
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={StyleSheet.absoluteFill}
+          />
+          <View style={styles.sheen} />
+        </>
+      )}
       {loading ? (
-        <ActivityIndicator color={fg} />
+        <ActivityIndicator color={fg} style={styles.content} />
       ) : (
-        <View style={styles.row}>
+        <View style={[styles.row, styles.content]}>
           {icon && <Ionicons name={icon} size={17} color={fg} />}
           <Text style={[styles.label, { color: fg, fontFamily: theme.fontBodyMedium }]}>
             {label}
@@ -88,7 +104,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: SPACE.lg,
+    overflow: "hidden",
   },
+  sheen: {
+    position: "absolute",
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    right: -54,
+    top: -84,
+  },
+  content: { zIndex: 2 },
   row: { flexDirection: "row", alignItems: "center", gap: 8 },
   label: { fontSize: 15, letterSpacing: 0.2 },
   off: { opacity: 0.35 },

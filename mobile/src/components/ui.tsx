@@ -1,8 +1,10 @@
 import { View, Text, Pressable, StyleSheet, type ViewStyle } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
 import { useBrand } from "@/context/BrandContext";
-import { RADIUS, SPACE } from "@/lib/theme";
+import { BrandArtwork } from "@/components/BrandArtwork";
+import { RADIUS, SPACE, glow, lift } from "@/lib/theme";
 
 /** Screen title block. The rule under the eyebrow echoes the trim line on a
  *  flash sheet, and gives the type somewhere to sit instead of floating. */
@@ -15,27 +17,50 @@ export function ScreenHeader({
   title: string;
   subtitle?: string;
 }) {
-  const { theme } = useBrand();
+  const { brand, theme } = useBrand();
+  const heroColors =
+    brand.id === "ink"
+      ? (["#211715", theme.surface, "#11100f"] as const)
+      : (["#ffffff", "#fcebf1", "#faeee7"] as const);
+
   return (
-    <View style={styles.header}>
-      <View style={styles.eyebrowRow}>
-        <View style={[styles.eyebrowRule, { backgroundColor: theme.accent }]} />
-        <Text style={[styles.eyebrow, { color: theme.accent, fontFamily: theme.fontBodyMedium }]}>
-          {eyebrow.toUpperCase()}
+    <LinearGradient
+      colors={heroColors}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={[
+        styles.header,
+        { borderColor: theme.line },
+        brand.id === "ink" ? glow(theme, "sm") : lift("sm"),
+      ]}
+    >
+      <BrandArtwork brand={brand.id} muted style={styles.headerArt} />
+      <View style={[styles.headerOrb, { backgroundColor: theme.accentGlow }]} />
+      <View style={styles.headerCopy}>
+        <View style={styles.eyebrowRow}>
+          <View style={[styles.eyebrowRule, { backgroundColor: theme.accent }]} />
+          <Text style={[styles.eyebrow, { color: theme.accent, fontFamily: theme.fontBodyMedium }]}>
+            {eyebrow.toUpperCase()}
+          </Text>
+          <View style={[styles.studioChip, { borderColor: theme.line, backgroundColor: `${theme.foreground}08` }]}>
+            <Text style={{ color: theme.muted, fontFamily: theme.fontBodyMedium, fontSize: 8, letterSpacing: 1 }}>
+              {brand.name.toUpperCase()}
+            </Text>
+          </View>
+        </View>
+        <Text
+          accessibilityRole="header"
+          style={[styles.title, { color: theme.foreground, fontFamily: theme.fontDisplay }]}
+        >
+          {title}
         </Text>
+        {subtitle && (
+          <Text style={[styles.subtitle, { color: theme.muted, fontFamily: theme.fontBody }]}>
+            {subtitle}
+          </Text>
+        )}
       </View>
-      <Text
-        accessibilityRole="header"
-        style={[styles.title, { color: theme.foreground, fontFamily: theme.fontDisplay }]}
-      >
-        {title}
-      </Text>
-      {subtitle && (
-        <Text style={[styles.subtitle, { color: theme.muted, fontFamily: theme.fontBody }]}>
-          {subtitle}
-        </Text>
-      )}
-    </View>
+    </LinearGradient>
   );
 }
 
@@ -150,27 +175,41 @@ export function Notice({
 
 /** Groups controls onto a raised card so a screen isn't one flat column. */
 export function Card({ children, style }: { children: React.ReactNode; style?: ViewStyle }) {
-  const { theme } = useBrand();
+  const { brand, theme } = useBrand();
   return (
     <View
       style={[
         styles.card,
         { backgroundColor: theme.surface, borderColor: theme.line },
+        brand.id === "ink" ? glow(theme, "sm") : lift("sm"),
         style,
       ]}
     >
+      <View style={[styles.cardNotch, { backgroundColor: theme.accent }]} />
       {children}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  header: { marginBottom: SPACE.lg },
+  header: {
+    marginBottom: SPACE.lg,
+    borderWidth: 1,
+    borderRadius: RADIUS.xl,
+    padding: SPACE.md,
+    minHeight: 172,
+    overflow: "hidden",
+    justifyContent: "center",
+  },
+  headerCopy: { zIndex: 2, maxWidth: "82%" },
+  headerArt: { position: "absolute", width: 160, height: 120, right: -46, bottom: -14, opacity: 0.6 },
+  headerOrb: { position: "absolute", width: 150, height: 150, borderRadius: 75, right: -65, top: -75, opacity: 0.45 },
   eyebrowRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 },
   eyebrowRule: { width: 18, height: 2, borderRadius: 1 },
   eyebrow: { fontSize: 10, letterSpacing: 2 },
+  studioChip: { borderWidth: 1, borderRadius: RADIUS.pill, paddingHorizontal: 8, paddingVertical: 4 },
   title: { fontSize: 34, lineHeight: 37, letterSpacing: 0.3 },
-  subtitle: { fontSize: 14, lineHeight: 20, marginTop: 8 },
+  subtitle: { fontSize: 14, lineHeight: 20, marginTop: 8, maxWidth: "86%" },
   chip: {
     flexDirection: "row",
     alignItems: "center",
@@ -201,4 +240,5 @@ const styles = StyleSheet.create({
     borderRadius: RADIUS.lg,
     padding: SPACE.md,
   },
+  cardNotch: { position: "absolute", width: 44, height: 3, borderRadius: 2, left: SPACE.md, top: 0 },
 });
