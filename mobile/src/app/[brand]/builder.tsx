@@ -9,6 +9,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 import { Image } from "expo-image";
+import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import * as Print from "expo-print";
 import * as Haptics from "expo-haptics";
@@ -27,6 +28,9 @@ import {
 } from "@/lib/designLibrary";
 import { generateId } from "@/lib/id";
 import { saveDataUrlToPhotos } from "@/lib/files";
+import { Button } from "@/components/Button";
+import { ScreenHeader, Chip, SectionLabel } from "@/components/ui";
+import { SPACE, RADIUS, lift } from "@/lib/theme";
 
 type SheetTemplate = { id: string; label: string; widthIn: number; heightIn: number };
 
@@ -181,47 +185,21 @@ export default function BuilderScreen() {
       style={{ backgroundColor: theme.background }}
       contentContainerStyle={styles.scroll}
     >
-      <Text
-        accessibilityRole="header"
-        style={[styles.title, { color: theme.foreground, fontFamily: theme.fontDisplay }]}
-      >
-        {brand.builder.title}
-      </Text>
-      <Text style={[styles.subtitle, { color: theme.muted, fontFamily: theme.fontBody }]}>
-        Drag to move, pinch to resize, twist to rotate. Tap to select.
-      </Text>
+      <ScreenHeader
+        eyebrow={brand.builder.tabLabel}
+        title={brand.builder.title}
+        subtitle="Tap a design to place it. Drag to move, pinch to resize, twist to rotate."
+      />
 
       <View style={styles.chips} accessibilityRole="radiogroup">
-        {TEMPLATES.map((t) => {
-          const active = t.id === templateId;
-          return (
-            <Pressable
-              key={t.id}
-              onPress={() => changeTemplate(t.id)}
-              accessibilityRole="radio"
-              accessibilityState={{ selected: active }}
-              accessibilityLabel={t.label}
-              style={({ pressed }) => [
-                styles.chip,
-                {
-                  backgroundColor: active ? theme.accent : theme.paper,
-                  borderColor: theme.line,
-                  opacity: pressed ? 0.8 : 1,
-                },
-              ]}
-            >
-              <Text
-                style={{
-                  color: active ? theme.accentText : theme.foreground,
-                  fontFamily: theme.fontBody,
-                  fontSize: 12,
-                }}
-              >
-                {t.label}
-              </Text>
-            </Pressable>
-          );
-        })}
+        {TEMPLATES.map((t) => (
+          <Chip
+            key={t.id}
+            label={t.label}
+            active={t.id === templateId}
+            onPress={() => changeTemplate(t.id)}
+          />
+        ))}
       </View>
 
       <View style={styles.sheetWrap}>
@@ -244,72 +222,42 @@ export default function BuilderScreen() {
       </View>
 
       {selectedId && (
-        <Pressable
+        <Button
+          label="Remove selected"
+          icon="trash-outline"
+          variant="danger"
           onPress={removeSelected}
-          accessibilityRole="button"
-          accessibilityLabel="Remove selected design"
-          style={({ pressed }) => [
-            styles.removeButton,
-            { borderColor: theme.danger, opacity: pressed ? 0.7 : 1 },
-          ]}
-        >
-          <Text style={{ color: theme.danger, fontFamily: theme.fontBodyMedium, fontSize: 13 }}>
-            Remove selected design
-          </Text>
-        </Pressable>
+          style={{ marginBottom: SPACE.sm }}
+        />
       )}
 
-      <Pressable
-        onPress={handlePrint}
-        accessibilityRole="button"
-        accessibilityLabel="Print sheet"
-        style={({ pressed }) => [
-          styles.primaryButton,
-          { backgroundColor: theme.accent, opacity: pressed ? 0.85 : 1, transform: [{ scale: pressed ? 0.98 : 1 }] },
-        ]}
-      >
-        <Text style={{ color: theme.accentText, fontFamily: theme.fontBodyMedium }}>
-          Print sheet
-        </Text>
-      </Pressable>
-      <Pressable
-        onPress={handleSave}
-        accessibilityRole="button"
-        accessibilityLabel="Save sheet to Photos"
-        style={({ pressed }) => [
-          styles.secondaryButton,
-          { borderColor: theme.line, opacity: pressed ? 0.7 : 1, transform: [{ scale: pressed ? 0.98 : 1 }] },
-        ]}
-      >
-        <Text style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium }}>
-          Save to Photos
-        </Text>
-      </Pressable>
-
-      <View style={styles.libraryHeader}>
-        <Text
-          accessibilityRole="header"
-          style={[styles.label, { color: theme.foreground, fontFamily: theme.fontBodyMedium }]}
-        >
-          Your designs
-        </Text>
-        <Pressable
-          onPress={pickUpload}
-          accessibilityRole="button"
-          accessibilityLabel="Upload a design"
-          hitSlop={10}
-          style={{ paddingVertical: 6, paddingHorizontal: 4 }}
-        >
-          <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 12 }}>
-            Upload
-          </Text>
-        </Pressable>
+      <View style={styles.actions}>
+        <Button
+          label="Print sheet"
+          icon="print-outline"
+          variant="primary"
+          onPress={handlePrint}
+          style={{ flex: 1 }}
+        />
+        <Button
+          label="Save sheet"
+          icon="download-outline"
+          onPress={handleSave}
+          style={{ flex: 1 }}
+        />
       </View>
 
+      <SectionLabel action={{ label: "Upload", icon: "cloud-upload-outline", onPress: pickUpload }}>
+        Your designs
+      </SectionLabel>
+
       {library.length === 0 ? (
-        <Text style={{ color: theme.muted, fontSize: 13, fontFamily: theme.fontBody }}>
-          Designs from Generate and Convert will show up here.
-        </Text>
+        <View style={[styles.emptyLib, { borderColor: theme.line }]}>
+          <Ionicons name="albums-outline" size={26} color={theme.muted} />
+          <Text style={{ color: theme.muted, fontSize: 13, fontFamily: theme.fontBody, textAlign: "center" }}>
+            Designs you generate or trace land here, ready to place.
+          </Text>
+        </View>
       ) : (
         <View style={styles.libraryGrid}>
           {library.map((d) => (
@@ -320,7 +268,7 @@ export default function BuilderScreen() {
               accessibilityLabel={`Add ${d.title} to sheet`}
               style={({ pressed }) => [
                 styles.libraryThumb,
-                { borderColor: theme.line, opacity: pressed ? 0.7 : 1 },
+                { borderColor: theme.line, backgroundColor: theme.stock, opacity: pressed ? 0.7 : 1 },
               ]}
             >
               <Image
@@ -333,6 +281,7 @@ export default function BuilderScreen() {
           ))}
         </View>
       )}
+
     </ScrollView>
   );
 }
@@ -439,70 +388,33 @@ function DraggableItem({
 }
 
 const styles = StyleSheet.create({
-  scroll: { padding: 20, paddingBottom: 60 },
-  title: { fontSize: 30, marginBottom: 6 },
-  subtitle: { fontSize: 14, lineHeight: 20, marginBottom: 16 },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 16 },
-  chip: {
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    minHeight: 44,
-    justifyContent: "center",
-  },
-  sheetWrap: { alignItems: "center", marginBottom: 12 },
+  scroll: { padding: SPACE.md, paddingTop: SPACE.lg, paddingBottom: SPACE.xxl },
+  chips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: SPACE.md },
+  sheetWrap: { alignItems: "center", marginBottom: SPACE.md },
   sheet: {
     backgroundColor: "#ffffff",
     borderWidth: 1,
-    borderColor: "#00000022",
-    shadowColor: "#000",
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
+    borderColor: "#00000018",
+    borderRadius: 2,
+    ...lift("md"),
   },
-  removeButton: {
-    alignSelf: "center",
+  actions: { flexDirection: "row", gap: SPACE.sm, marginBottom: SPACE.lg },
+  emptyLib: {
+    alignItems: "center",
+    gap: SPACE.sm,
     borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    marginBottom: 16,
-    minHeight: 44,
-    justifyContent: "center",
+    borderStyle: "dashed",
+    borderRadius: RADIUS.md,
+    paddingVertical: SPACE.lg,
+    paddingHorizontal: SPACE.md,
   },
-  primaryButton: {
-    borderRadius: 999,
-    paddingVertical: 14,
-    alignItems: "center",
-    marginBottom: 10,
-    minHeight: 44,
-    justifyContent: "center",
-  },
-  secondaryButton: {
-    borderRadius: 999,
-    paddingVertical: 14,
-    alignItems: "center",
-    borderWidth: 1,
-    marginBottom: 24,
-    minHeight: 44,
-    justifyContent: "center",
-  },
-  libraryHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 10,
-  },
-  label: { fontSize: 15 },
   libraryGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   libraryThumb: {
-    width: 72,
-    height: 72,
-    borderRadius: 10,
+    width: 76,
+    height: 76,
+    borderRadius: RADIUS.sm,
     borderWidth: 1,
     overflow: "hidden",
-    backgroundColor: "#fff",
   },
   image: { width: "100%", height: "100%" },
 });

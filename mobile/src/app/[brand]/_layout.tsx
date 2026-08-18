@@ -2,9 +2,10 @@ import { useMemo } from "react";
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import { Tabs, useLocalSearchParams, router, Redirect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { getBrand } from "@/lib/brands";
-import { THEMES } from "@/lib/theme";
+import { THEMES, SPACE, RADIUS } from "@/lib/theme";
 import { BrandProvider } from "@/context/BrandContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 
@@ -18,6 +19,12 @@ export default function BrandLayout() {
   );
 
   if (!brand || !theme || !value) return <Redirect href="/" />;
+
+  const icons = {
+    index: ["sparkles", "sparkles-outline"],
+    convert: ["scan", "scan-outline"],
+    builder: ["grid", "grid-outline"],
+  } as const;
 
   return (
     <BrandProvider value={value}>
@@ -33,17 +40,29 @@ export default function BrandLayout() {
             (and the ability to switch tabs or studios) alive. */}
         <ErrorBoundary>
           <Tabs
-            screenOptions={{
+            screenOptions={({ route }) => ({
               headerShown: false,
               sceneStyle: { backgroundColor: theme.background },
               tabBarStyle: {
-                backgroundColor: theme.paper,
+                backgroundColor: theme.surface,
                 borderTopColor: theme.line,
+                height: 88,
+                paddingTop: 8,
               },
               tabBarActiveTintColor: theme.accent,
               tabBarInactiveTintColor: theme.muted,
-              tabBarLabelStyle: { fontFamily: theme.fontBodyMedium, fontSize: 12 },
-            }}
+              tabBarLabelStyle: {
+                fontFamily: theme.fontBodyMedium,
+                fontSize: 11,
+                letterSpacing: 0.3,
+              },
+              tabBarIcon: ({ focused, color, size }) => {
+                const pair = icons[route.name as keyof typeof icons] ?? icons.index;
+                return (
+                  <Ionicons name={focused ? pair[0] : pair[1]} size={size ?? 22} color={color} />
+                );
+              },
+            })}
           >
             <Tabs.Screen name="index" options={{ title: brand.generate.tabLabel }} />
             <Tabs.Screen name="convert" options={{ title: brand.convert.tabLabel }} />
@@ -69,19 +88,24 @@ function StudioHeader({
   return (
     <SafeAreaView
       edges={["top"]}
-      style={{ backgroundColor: theme.paper, borderBottomWidth: 1, borderBottomColor: theme.line }}
+      style={{
+        backgroundColor: theme.surface,
+        borderBottomWidth: 1,
+        borderBottomColor: theme.line,
+      }}
     >
       <View style={styles.header}>
-        <Text
-          accessibilityRole="header"
-          style={{
-            fontFamily: wordmarkFont,
-            fontSize: 24,
-            color: theme.foreground,
-          }}
-        >
-          {wordmark}
-        </Text>
+        <View style={styles.brandRow}>
+          {/* A small ink-dot lockup so the wordmark isn't floating alone. */}
+          <View style={[styles.dot, { backgroundColor: theme.accent }]} />
+          <Text
+            accessibilityRole="header"
+            style={{ fontFamily: wordmarkFont, fontSize: 25, color: theme.foreground }}
+          >
+            {wordmark}
+          </Text>
+        </View>
+
         <Pressable
           onPress={() => {
             Haptics.selectionAsync();
@@ -90,10 +114,14 @@ function StudioHeader({
           accessibilityRole="button"
           accessibilityLabel={`Switch to ${switchTo.label}`}
           hitSlop={12}
-          style={{ paddingVertical: 8, paddingHorizontal: 4 }}
+          style={({ pressed }) => [
+            styles.switch,
+            { borderColor: theme.line, backgroundColor: theme.surfaceAlt, opacity: pressed ? 0.7 : 1 },
+          ]}
         >
+          <Ionicons name="swap-horizontal" size={13} color={theme.muted} />
           <Text style={{ color: theme.muted, fontSize: 12, fontFamily: theme.fontBody }}>
-            {switchTo.label} →
+            {switchTo.label}
           </Text>
         </Pressable>
       </View>
@@ -106,7 +134,18 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 20,
-    paddingVertical: 12,
+    paddingHorizontal: SPACE.md,
+    paddingVertical: SPACE.sm,
+  },
+  brandRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  dot: { width: 7, height: 7, borderRadius: 4 },
+  switch: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    borderWidth: 1,
+    borderRadius: RADIUS.pill,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
   },
 });

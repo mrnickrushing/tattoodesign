@@ -3,21 +3,33 @@ import {
   View,
   Text,
   TextInput,
-  Pressable,
   StyleSheet,
   ScrollView,
-  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Platform,
 } from "react-native";
-import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
 import { useBrand } from "@/context/BrandContext";
 import { generateDesign, checkGeneratorAvailable } from "@/lib/api";
 import { stencilize } from "@/lib/stencil";
 import { addToLibrary } from "@/lib/designLibrary";
 import { saveDataUrlToPhotos } from "@/lib/files";
+import { StockPane } from "@/components/StockPane";
+import { Button } from "@/components/Button";
+import { ScreenHeader, Chip, Notice, Card } from "@/components/ui";
+import { RADIUS, SPACE } from "@/lib/theme";
+
+const STYLE_ICONS: Record<string, "flash" | "remove" | "square" | "color-filter" | "brush"> = {
+  traditional: "flash",
+  fineline: "remove",
+  blackwork: "square",
+  irezumi: "color-filter",
+  cookie: "flash",
+  cakepop: "color-filter",
+  topper: "square",
+  piping: "brush",
+};
 
 export default function GenerateScreen() {
   const { brand, theme } = useBrand();
@@ -83,9 +95,10 @@ export default function GenerateScreen() {
       title: prompt.slice(0, 40) || "Generated design",
       source: "generated",
     });
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setSaved(true);
   }
+
+  const canGenerate = !!prompt.trim() && !loading && !disabledReason;
 
   return (
     <KeyboardAvoidingView
@@ -97,271 +110,132 @@ export default function GenerateScreen() {
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
       >
-        <Text
-          accessibilityRole="header"
-          style={[styles.title, { color: theme.foreground, fontFamily: theme.fontDisplay }]}
-        >
-          {brand.generate.title}
-        </Text>
-        <Text style={[styles.subtitle, { color: theme.muted, fontFamily: theme.fontBody }]}>
-          {brand.generate.subtitle}
-        </Text>
+        <ScreenHeader
+          eyebrow={brand.generate.tabLabel}
+          title={brand.generate.title}
+          subtitle={brand.generate.subtitle}
+        />
 
         {disabledReason && (
-          <View
-            accessibilityRole="alert"
-            style={[styles.banner, { borderColor: theme.danger }]}
-          >
-            <Text style={{ color: theme.danger, fontFamily: theme.fontBody, fontSize: 13 }}>
-              {disabledReason}
-            </Text>
+          <View style={{ marginBottom: SPACE.md }}>
+            <Notice icon="cloud-offline-outline">{disabledReason}</Notice>
           </View>
         )}
 
-        <View style={styles.previewRow}>
-          <ImagePane label="Raw" uri={rawUrl} loading={loading} theme={theme} />
-          <ImagePane label="Stencil" uri={stencilUrl} loading={loading} theme={theme} />
+        <View style={styles.panes}>
+          <StockPane
+            index={1}
+            label="Raw"
+            uri={rawUrl}
+            loading={loading}
+            loadingLabel="Drawing"
+            emptyIcon="sparkles-outline"
+            emptyHint="AI draft lands here"
+          />
+          <StockPane
+            index={2}
+            label="Stencil"
+            uri={stencilUrl}
+            loading={loading}
+            loadingLabel="Cleaning"
+            emptyIcon="git-branch-outline"
+            emptyHint="Cleaned linework"
+          />
         </View>
 
-        <Text style={[styles.label, { color: theme.foreground, fontFamily: theme.fontBodyMedium }]}>
-          Prompt
-        </Text>
-        <TextInput
-          value={prompt}
-          onChangeText={setPrompt}
-          placeholder={brand.generate.promptPlaceholder}
-          placeholderTextColor={theme.muted}
-          multiline
-          accessibilityLabel="Prompt"
-          accessibilityHint={brand.generate.promptPlaceholder}
-          style={[
-            styles.input,
-            {
-              backgroundColor: theme.paper,
-              borderColor: theme.line,
-              color: theme.foreground,
-              fontFamily: theme.fontBody,
-            },
-          ]}
-        />
+        <Card style={{ marginTop: SPACE.lg }}>
+          <Text style={[styles.field, { color: theme.muted, fontFamily: theme.fontBodyMedium }]}>
+            WHAT ARE WE MAKING
+          </Text>
+          <TextInput
+            value={prompt}
+            onChangeText={setPrompt}
+            placeholder={brand.generate.promptPlaceholder}
+            placeholderTextColor={theme.muted}
+            multiline
+            accessibilityLabel="Prompt"
+            style={[
+              styles.input,
+              {
+                backgroundColor: theme.surfaceAlt,
+                borderColor: theme.line,
+                color: theme.foreground,
+                fontFamily: theme.fontBody,
+              },
+            ]}
+          />
 
-        <Text
-          style={[
-            styles.label,
-            { color: theme.foreground, fontFamily: theme.fontBodyMedium, marginTop: 16 },
-          ]}
-        >
-          Style
-        </Text>
-        <View style={styles.chips} accessibilityRole="radiogroup">
-          {brand.generate.styles.map((s) => {
-            const active = s.id === style;
-            return (
-              <Pressable
-                key={s.id}
-                onPress={() => {
-                  Haptics.selectionAsync();
-                  setStyle(s.id);
-                }}
-                accessibilityRole="radio"
-                accessibilityState={{ selected: active }}
-                accessibilityLabel={s.label}
-                style={({ pressed }) => [
-                  styles.chip,
-                  {
-                    backgroundColor: active ? theme.accent : theme.paper,
-                    borderColor: theme.line,
-                    opacity: pressed ? 0.8 : 1,
-                  },
-                ]}
-              >
-                <Text
-                  style={{
-                    color: active ? theme.accentText : theme.foreground,
-                    fontFamily: theme.fontBody,
-                    fontSize: 13,
-                  }}
-                >
-                  {s.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-
-        {error && (
           <Text
-            accessibilityRole="alert"
-            style={{ color: theme.danger, marginTop: 12, fontFamily: theme.fontBody }}
+            style={[
+              styles.field,
+              { color: theme.muted, fontFamily: theme.fontBodyMedium, marginTop: SPACE.md },
+            ]}
           >
-            {error}
+            STYLE
           </Text>
-        )}
+          <View style={styles.chips} accessibilityRole="radiogroup">
+            {brand.generate.styles.map((s) => (
+              <Chip
+                key={s.id}
+                label={s.label}
+                icon={STYLE_ICONS[s.id]}
+                active={s.id === style}
+                onPress={() => setStyle(s.id)}
+              />
+            ))}
+          </View>
 
-        <Pressable
-          onPress={handleGenerate}
-          disabled={!prompt.trim() || loading || !!disabledReason}
-          accessibilityRole="button"
-          accessibilityLabel="Generate"
-          accessibilityState={{ disabled: !prompt.trim() || loading || !!disabledReason }}
-          style={({ pressed }) => [
-            styles.primaryButton,
-            {
-              backgroundColor: theme.accent,
-              opacity: !prompt.trim() || loading || disabledReason ? 0.4 : pressed ? 0.85 : 1,
-              transform: [{ scale: pressed ? 0.98 : 1 }],
-            },
-          ]}
-        >
-          {loading ? (
-            <ActivityIndicator color={theme.accentText} />
-          ) : (
-            <Text style={{ color: theme.accentText, fontFamily: theme.fontBodyMedium }}>
-              Generate
-            </Text>
+          {error && (
+            <View style={{ marginTop: SPACE.md }}>
+              <Notice>{error}</Notice>
+            </View>
           )}
-        </Pressable>
 
-        <Pressable
-          onPress={handleSave}
-          disabled={!stencilUrl}
-          accessibilityRole="button"
-          accessibilityLabel="Save to Photos"
-          accessibilityState={{ disabled: !stencilUrl }}
-          style={({ pressed }) => [
-            styles.secondaryButton,
-            {
-              borderColor: theme.line,
-              opacity: !stencilUrl ? 0.4 : pressed ? 0.7 : 1,
-              transform: [{ scale: pressed && stencilUrl ? 0.98 : 1 }],
-            },
-          ]}
-        >
-          <Text style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium }}>
-            Save to Photos
-          </Text>
-        </Pressable>
+          <Button
+            label={loading ? "Generating" : "Generate"}
+            icon="sparkles"
+            variant="primary"
+            onPress={handleGenerate}
+            disabled={!canGenerate}
+            loading={loading}
+            style={{ marginTop: SPACE.md }}
+          />
+        </Card>
 
-        <Pressable
-          onPress={handleSend}
-          disabled={!stencilUrl}
-          accessibilityRole="button"
-          accessibilityLabel={saved ? "Added to sheet" : "Send to Sheet Builder"}
-          accessibilityState={{ disabled: !stencilUrl }}
-          style={({ pressed }) => [
-            styles.secondaryButton,
-            {
-              borderColor: theme.line,
-              opacity: !stencilUrl ? 0.4 : pressed ? 0.7 : 1,
-              transform: [{ scale: pressed && stencilUrl ? 0.98 : 1 }],
-            },
-          ]}
-        >
-          <Text style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium }}>
-            {saved ? "Added to Sheet ✓" : "Send to Sheet Builder"}
-          </Text>
-        </Pressable>
+        <View style={styles.actions}>
+          <Button
+            label="Save to Photos"
+            icon="download-outline"
+            onPress={handleSave}
+            disabled={!stencilUrl}
+            style={{ flex: 1 }}
+          />
+          <Button
+            label={saved ? "On the sheet" : "Add to sheet"}
+            icon={saved ? "checkmark" : "add"}
+            onPress={handleSend}
+            disabled={!stencilUrl}
+            style={{ flex: 1 }}
+          />
+        </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
-function ImagePane({
-  label,
-  uri,
-  loading,
-  theme,
-}: {
-  label: string;
-  uri: string | null;
-  loading: boolean;
-  theme: ReturnType<typeof useBrand>["theme"];
-}) {
-  return (
-    <View
-      accessibilityRole="image"
-      accessibilityLabel={uri ? label : `${label}, empty`}
-      style={[imgStyles.pane, { backgroundColor: "#fff", borderColor: theme.line }]}
-    >
-      {uri ? (
-        <Image source={{ uri }} style={imgStyles.image} contentFit="contain" alt={label} />
-      ) : (
-        <Text style={{ color: "#00000055", fontSize: 12, textAlign: "center", padding: 12 }}>
-          {loading ? "Generating…" : label}
-        </Text>
-      )}
-      {loading && (
-        <View style={imgStyles.overlay}>
-          <ActivityIndicator color={theme.accent} />
-        </View>
-      )}
-    </View>
-  );
-}
-
-const imgStyles = StyleSheet.create({
-  pane: {
-    flex: 1,
-    aspectRatio: 1,
-    borderRadius: 16,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    overflow: "hidden",
-  },
-  image: { width: "100%", height: "100%" },
-  overlay: {
-    ...StyleSheet.absoluteFill,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#ffffff99",
-  },
-});
-
 const styles = StyleSheet.create({
-  scroll: { padding: 20, paddingBottom: 60 },
-  title: { fontSize: 30, marginBottom: 6 },
-  subtitle: { fontSize: 14, lineHeight: 20, marginBottom: 16 },
-  banner: {
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 16,
-  },
-  previewRow: { flexDirection: "row", gap: 10, marginBottom: 20 },
-  label: { fontSize: 13, marginBottom: 8 },
+  scroll: { padding: SPACE.md, paddingTop: SPACE.lg, paddingBottom: SPACE.xxl },
+  panes: { flexDirection: "row", gap: SPACE.sm },
+  field: { fontSize: 10, letterSpacing: 1.5, marginBottom: 8 },
   input: {
     borderWidth: 1,
-    borderRadius: 14,
+    borderRadius: RADIUS.md,
     padding: 12,
-    minHeight: 80,
+    minHeight: 84,
     textAlignVertical: "top",
-    fontSize: 14,
+    fontSize: 15,
+    lineHeight: 21,
   },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  chip: {
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    minHeight: 44,
-    justifyContent: "center",
-  },
-  primaryButton: {
-    marginTop: 20,
-    borderRadius: 999,
-    paddingVertical: 14,
-    alignItems: "center",
-    minHeight: 44,
-    justifyContent: "center",
-  },
-  secondaryButton: {
-    marginTop: 10,
-    borderRadius: 999,
-    paddingVertical: 14,
-    alignItems: "center",
-    borderWidth: 1,
-    minHeight: 44,
-    justifyContent: "center",
-  },
+  actions: { flexDirection: "row", gap: SPACE.sm, marginTop: SPACE.sm },
 });
