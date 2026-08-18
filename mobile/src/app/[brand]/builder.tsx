@@ -38,7 +38,7 @@ import {
   type SavedSheet,
 } from "@/lib/sheetLibrary";
 import { generateId } from "@/lib/id";
-import { saveDataUrlToPhotos } from "@/lib/files";
+import { saveDataUrlToPhotos, shareDataUrl, shareUri } from "@/lib/files";
 import { composeSheet } from "@/lib/sheet";
 import { fillGrid, packGrid } from "@/lib/layout";
 import { Button } from "@/components/Button";
@@ -46,6 +46,8 @@ import { ScreenHeader, Chip, SectionLabel, Card } from "@/components/ui";
 import { ImageViewer } from "@/components/ImageViewer";
 import { NamePrompt } from "@/components/NamePrompt";
 import { IcingPreview } from "@/components/IcingPreview";
+import { PlacementPreview } from "@/components/PlacementPreview";
+import { DesignActions, type DesignAction } from "@/components/DesignActions";
 import { SPACE, RADIUS, lift } from "@/lib/theme";
 
 type SheetTemplate = { id: string; label: string; widthIn: number; heightIn: number };
@@ -110,6 +112,8 @@ export default function BuilderScreen() {
   const [sheetName, setSheetName] = useState<string | null>(null);
   const [prompt, setPrompt] = useState<NamePromptState | null>(null);
   const [icing, setIcing] = useState<LibraryDesign | null>(null);
+  const [menu, setMenu] = useState<LibraryDesign | null>(null);
+  const [placing, setPlacing] = useState<LibraryDesign | null>(null);
   const [promptSeq, setPromptSeq] = useState(0);
   /** Bumped to remount the placed designs when their geometry changes from
    *  outside a gesture, so the view re-seeds from state. */
@@ -532,6 +536,89 @@ export default function BuilderScreen() {
     setItems((prev) => resolveItems(prev, lib));
   }
 
+  async function deleteDesign(design: LibraryDesign) {
+    await removeFromLibrary(brand.id, design.id);
+    const lib = await getLibrary(brand.id);
+    setLibrary(lib);
+    // Its file is gone, so anything placed from it would render as a blank
+    // frame — take those off the sheet.
+    pushHistory();
+    setItems((prev) => resolveItems(prev, lib));
+  }
+
+  function designActions(design: LibraryDesign): DesignAction[] {
+    return [
+      {
+        key: "place",
+        label: "Size it up",
+        hint: brand.id === "sugar" ? "True size, or on a photo" : "True size, or on the skin",
+        icon: "resize-outline",
+        onPress: () => setPlacing(design),
+      },
+      {
+        key: "view",
+        label: "View full screen",
+        icon: "expand-outline",
+        onPress: () => setPreview(design),
+      },
+      // Icing colors are a Sugar Haus question; flash is inked.
+      ...(brand.id === "sugar"
+        ? [
+            {
+              key: "icing",
+              label: "Try icing colors",
+              hint: "Flood and piping",
+              icon: "color-palette-outline" as const,
+              onPress: () => setIcing(design),
+            },
+          ]
+        : []),
+      {
+        key: "rename",
+        label: "Rename",
+        icon: "text-outline",
+        onPress: () => openPrompt({ kind: "rename-design", id: design.id, initial: design.title }),
+      },
+      {
+        key: "share",
+        label: "Share",
+        hint: "AirDrop, Messages, anywhere",
+        icon: "share-outline",
+        onPress: async () => {
+          try {
+            await shareUri(design.uri);
+          } catch (e) {
+            Alert.alert("Couldn't share", e instanceof Error ? e.message : "Try again.");
+          }
+        },
+      },
+      {
+        key: "delete",
+        label: "Delete",
+        icon: "trash-outline",
+        tone: "danger",
+        onPress: () =>
+          Alert.alert(`Delete "${design.title}"?`, "This can't be undone.", [
+            { text: "Cancel", style: "cancel" },
+            { text: "Delete", style: "destructive", onPress: () => deleteDesign(design) },
+          ]),
+      },
+    ];
+  }
+
+  async function shareSheet() {
+    if (items.length === 0) {
+      Alert.alert("Nothing to share", "Add a design to the sheet first.");
+      return;
+    }
+    try {
+      const dataUrl = await renderSheet();
+      await shareDataUrl(dataUrl, `sheet-${Date.now()}.png`);
+    } catch (e) {
+      Alert.alert("Couldn't share", e instanceof Error ? e.message : "Try again.");
+    }
+  }
+
   async function pickUpload() {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
@@ -768,6 +855,7 @@ export default function BuilderScreen() {
           onPress={handleSave}
           style={{ flex: 1 }}
         />
+        <IconAction icon="share-outline" label="Share sheet" onPress={shareSheet} tall />
       </View>
 
       {sheets.length > 0 && (
@@ -860,35 +948,11 @@ export default function BuilderScreen() {
               onPress={() => addItem(d)}
               onLongPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                Alert.alert(d.title, undefined, [
-                  { text: "View", onPress: () => setPreview(d) },
-                  // Icing colors are a Sugar Haus question; flash is inked.
-                  ...(brand.id === "sugar"
-                    ? [{ text: "Try icing colors", onPress: () => setIcing(d) }]
-                    : []),
-                  {
-                    text: "Rename",
-                    onPress: () =>
-                      openPrompt({ kind: "rename-design", id: d.id, initial: d.title }),
-                  },
-                  {
-                    text: "Delete",
-                    style: "destructive",
-                    onPress: async () => {
-                      await removeFromLibrary(brand.id, d.id);
-                      const lib = await getLibrary(brand.id);
-                      setLibrary(lib);
-                      // Its file is gone, so anything placed from it would
-                      // render as a blank frame — take those off the sheet.
-                      setItems((prev) => resolveItems(prev, lib));
-                    },
-                  },
-                  { text: "Cancel", style: "cancel" },
-                ]);
+                setMenu(d);
               }}
               accessibilityRole="button"
               accessibilityLabel={`Add ${d.title} to sheet`}
-              accessibilityHint="Long press to view or delete"
+              accessibilityHint="Long press for more actions"
               style={({ pressed }) => [
                 styles.libraryThumb,
                 { borderColor: theme.line, backgroundColor: theme.stock, opacity: pressed ? 0.7 : 1 },
@@ -935,6 +999,23 @@ export default function BuilderScreen() {
         onClose={() => setPrompt(null)}
       />
 
+      {menu && (
+        <DesignActions
+          title={menu.title}
+          uri={menu.uri}
+          actions={designActions(menu)}
+          onClose={() => setMenu(null)}
+        />
+      )}
+
+      {placing && (
+        <PlacementPreview
+          uri={placing.uri}
+          title={placing.title}
+          onClose={() => setPlacing(null)}
+        />
+      )}
+
       {icing && (
         <IcingPreview
           uri={icing.uri}
@@ -960,11 +1041,14 @@ function IconAction({
   label,
   onPress,
   disabled,
+  tall,
 }: {
   icon: keyof typeof Ionicons.glyphMap;
   label: string;
   onPress: () => void;
   disabled?: boolean;
+  /** Matches the height of the Buttons it sits beside. */
+  tall?: boolean;
 }) {
   const { theme } = useBrand();
   return (
@@ -981,6 +1065,7 @@ function IconAction({
       hitSlop={8}
       style={({ pressed }) => [
         styles.iconAction,
+        tall && styles.iconActionTall,
         {
           borderColor: theme.line,
           backgroundColor: theme.surfaceAlt,
@@ -1176,6 +1261,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  iconActionTall: { width: 52, height: 52, borderRadius: RADIUS.pill },
   sheetRow: { gap: SPACE.sm, paddingRight: SPACE.md },
   sheetCard: {
     width: 132,

@@ -43,3 +43,12 @@ export async function shareDataUrl(dataUrl: string, filename: string): Promise<v
   if (!available) throw new Error("Sharing isn't available on this device.");
   await Sharing.shareAsync(file.uri);
 }
+
+/** Shares a file that already exists on disk — a saved design, say, which
+ *  doesn't need to be re-written to a temp file first. */
+export async function shareUri(uri: string): Promise<void> {
+  const Sharing = await import("expo-sharing");
+  const available = await Sharing.isAvailableAsync();
+  if (!available) throw new Error("Sharing isn't available on this device.");
+  await Sharing.shareAsync(uri);
+}
