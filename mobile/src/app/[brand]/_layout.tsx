@@ -3,6 +3,8 @@ import { View, Text, Pressable, StyleSheet } from "react-native";
 import { Tabs, useLocalSearchParams, router, Redirect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { StatusBar } from "expo-status-bar";
+import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
 import { getBrand } from "@/lib/brands";
 import { THEMES, SPACE, RADIUS } from "@/lib/theme";
@@ -30,7 +32,9 @@ export default function BrandLayout() {
   return (
     <BrandProvider value={value}>
       <View style={{ flex: 1, backgroundColor: theme.background }}>
+        <StatusBar style={brand.id === "ink" ? "light" : "dark"} />
         <StudioHeader
+          brandId={brand.id}
           wordmark={brand.wordmark}
           wordmarkFont={brand.id === "sugar" ? theme.fontScript : theme.fontDisplay}
           switchTo={brand.switchTo}
@@ -47,11 +51,20 @@ export default function BrandLayout() {
               tabBarStyle: {
                 backgroundColor: theme.surface,
                 borderTopColor: theme.line,
+                borderTopWidth: 1,
                 height: 88,
-                paddingTop: 8,
+                paddingTop: 6,
+                paddingHorizontal: 6,
               },
+              tabBarItemStyle: {
+                borderRadius: RADIUS.lg,
+                marginHorizontal: 3,
+                marginVertical: 4,
+              },
+              tabBarActiveBackgroundColor: `${theme.accent}16`,
               tabBarActiveTintColor: theme.accent,
               tabBarInactiveTintColor: theme.muted,
+              tabBarHideOnKeyboard: true,
               tabBarLabelStyle: {
                 fontFamily: theme.fontBodyMedium,
                 fontSize: 11,
@@ -77,11 +90,13 @@ export default function BrandLayout() {
 }
 
 function StudioHeader({
+  brandId,
   wordmark,
   wordmarkFont,
   switchTo,
   theme,
 }: {
+  brandId: "ink" | "sugar";
   wordmark: string;
   wordmarkFont: string;
   switchTo: { id: string; label: string };
@@ -96,16 +111,31 @@ function StudioHeader({
         borderBottomColor: theme.line,
       }}
     >
-      <View style={styles.header}>
+      <LinearGradient
+        colors={brandId === "ink" ? [theme.surface, "#211715"] : [theme.surface, "#fdf0f4"]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.header}
+      >
         <View style={styles.brandRow}>
-          {/* A small ink-dot lockup so the wordmark isn't floating alone. */}
-          <View style={[styles.dot, { backgroundColor: theme.accent }]} />
-          <Text
-            accessibilityRole="header"
-            style={{ fontFamily: wordmarkFont, fontSize: 25, color: theme.foreground }}
-          >
-            {wordmark}
-          </Text>
+          <View style={[styles.brandSeal, { backgroundColor: theme.accent }]}>
+            <Ionicons
+              name={brandId === "ink" ? "flash" : "color-palette"}
+              size={15}
+              color={theme.accentText}
+            />
+          </View>
+          <View>
+            <Text
+              accessibilityRole="header"
+              style={{ fontFamily: wordmarkFont, fontSize: 25, lineHeight: 27, color: theme.foreground }}
+            >
+              {wordmark}
+            </Text>
+            <Text style={{ color: theme.muted, fontSize: 7, letterSpacing: 1.5, fontFamily: theme.fontBodyMedium }}>
+              CREATIVE WORKBENCH
+            </Text>
+          </View>
         </View>
 
         <Pressable
@@ -126,7 +156,7 @@ function StudioHeader({
             {switchTo.label}
           </Text>
         </Pressable>
-      </View>
+      </LinearGradient>
     </SafeAreaView>
   );
 }
@@ -140,7 +170,7 @@ const styles = StyleSheet.create({
     paddingVertical: SPACE.sm,
   },
   brandRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  dot: { width: 7, height: 7, borderRadius: 4 },
+  brandSeal: { width: 34, height: 34, borderRadius: 12, alignItems: "center", justifyContent: "center", transform: [{ rotate: "-3deg" }] },
   switch: {
     flexDirection: "row",
     alignItems: "center",
