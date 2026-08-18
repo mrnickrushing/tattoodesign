@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { View, Text, StyleSheet, ScrollView, Alert, Linking } from "react-native";
+import { useEffect, useState } from "react";
+import { View, Text, TextInput, StyleSheet, ScrollView, Alert, Linking } from "react-native";
 import * as Updates from "expo-updates";
 import * as Application from "expo-application";
 import * as Haptics from "expo-haptics";
@@ -9,6 +9,7 @@ import { API_BASE_URL } from "@/lib/api";
 import { Button } from "@/components/Button";
 import { ScreenHeader, Card, SectionLabel, Notice } from "@/components/ui";
 import { SPACE } from "@/lib/theme";
+import { getGenerationUsage, getSpendLimit, setSpendLimit, totalEstimatedSpend } from "@/lib/generationUsage";
 
 export default function SettingsScreen() {
   const { brand, theme } = useBrand();
@@ -25,6 +26,23 @@ export default function SettingsScreen() {
   } = Updates.useUpdates();
 
   const [checkedOnce, setCheckedOnce] = useState(false);
+  const [limit, setLimit] = useState("10");
+  const [spend, setSpend] = useState(0);
+
+  useEffect(() => {
+    Promise.all([getSpendLimit(), getGenerationUsage()]).then(([savedLimit, usage]) => {
+      setLimit(savedLimit.toFixed(2));
+      setSpend(totalEstimatedSpend(usage));
+    });
+  }, []);
+
+  async function saveLimit() {
+    const value = Number(limit);
+    if (!Number.isFinite(value) || value < 0) return setLimit("10.00");
+    await setSpendLimit(value);
+    setLimit(value.toFixed(2));
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  }
 
   async function handleCheck() {
     setCheckedOnce(true);
@@ -214,6 +232,33 @@ export default function SettingsScreen() {
         />
       </Card>
 
+      <View style={{ height: SPACE.lg }} />
+
+      <SectionLabel>AI control center</SectionLabel>
+      <Card>
+        <View style={styles.spendHero}>
+          <View>
+            <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 11 }}>ESTIMATED THIS MONTH</Text>
+            <Text style={{ color: theme.accent, fontFamily: theme.fontDisplay, fontSize: 34 }}>${spend.toFixed(2)}</Text>
+          </View>
+          <Ionicons name="pulse-outline" size={30} color={theme.accent} />
+        </View>
+        <Text style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium, fontSize: 13, marginTop: SPACE.sm }}>Monthly spending guard</Text>
+        <View style={styles.limitRow}>
+          <Text style={{ color: theme.muted, fontSize: 18 }}>$</Text>
+          <TextInput
+            value={limit}
+            onChangeText={setLimit}
+            onEndEditing={saveLimit}
+            onSubmitEditing={saveLimit}
+            keyboardType="decimal-pad"
+            accessibilityLabel="Monthly AI spending guard"
+            style={[styles.limitInput, { color: theme.foreground, borderColor: theme.line, backgroundColor: theme.surfaceAlt, fontFamily: theme.fontBodyMedium }]}
+          />
+        </View>
+        <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 11, lineHeight: 16 }}>Inkline blocks a generation before its estimate would pass this device-only limit. Set 0 for no guard.</Text>
+      </Card>
+
       <Text style={[styles.footer, { color: theme.muted, fontFamily: theme.fontBody }]}>
         Convert and Sheet work offline. Generate needs the API.
       </Text>
@@ -289,6 +334,9 @@ const styles = StyleSheet.create({
   statusRow: { flexDirection: "row", alignItems: "center", gap: 9 },
   statusDot: { width: 8, height: 8, borderRadius: 4 },
   meta: { fontSize: 11, marginTop: 6, marginLeft: 17 },
+  spendHero: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  limitRow: { flexDirection: "row", alignItems: "center", gap: 8, marginVertical: SPACE.sm },
+  limitInput: { flex: 1, borderWidth: 1, borderRadius: 12, minHeight: 46, paddingHorizontal: 12, fontSize: 17 },
   footer: {
     fontSize: 12,
     textAlign: "center",

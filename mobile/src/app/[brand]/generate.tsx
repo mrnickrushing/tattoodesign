@@ -11,14 +11,22 @@ import {
   Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { Image } from "expo-image";
+import * as ImagePicker from "expo-image-picker";
 import * as Haptics from "expo-haptics";
 import { useBrand } from "@/context/BrandContext";
 import {
   generateDesign,
   checkGeneratorAvailable,
+  getGeneratorStatus,
   IMAGE_PROVIDERS,
   type ImageProvider,
+  type ImageQuality,
+  type ProviderStatus,
+  type ReferenceStrength,
 } from "@/lib/api";
+import { pickImageFile } from "@/lib/imageImport";
+import { getGenerationUsage, getSpendLimit, recordGeneration, totalEstimatedSpend } from "@/lib/generationUsage";
 import { stencilize } from "@/lib/stencil";
 import { addToLibrary } from "@/lib/designLibrary";
 import { saveDataUrlToPhotos } from "@/lib/files";
@@ -56,6 +64,12 @@ export default function GenerateScreen() {
   const [prompt, setPrompt] = useState("");
   const [style, setStyle] = useState(brand.generate.styles[0]?.id ?? "");
   const [provider, setProvider] = useState<ImageProvider>("gemini");
+  const [quality, setQuality] = useState<ImageQuality>("standard");
+  const [referenceStrength, setReferenceStrength] = useState<ReferenceStrength>("balanced");
+  const [reference, setReference] = useState<{ dataUrl: string; data: string; mimeType: string; name: string } | null>(null);
+  const [providerStatus, setProviderStatus] = useState<ProviderStatus[]>([]);
+  const [monthlySpend, setMonthlySpend] = useState(0);
+  const [spendLimit, setSpendLimitState] = useState(10);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [disabledReason, setDisabledReason] = useState<string | null>(null);
@@ -73,6 +87,14 @@ export default function GenerateScreen() {
       active = false;
     };
   }, [provider]);
+
+  useEffect(() => {
+    Promise.all([getGeneratorStatus(), getGenerationUsage(), getSpendLimit()]).then(([status, usage, limit]) => {
+      setProviderStatus(status);
+      setMonthlySpend(totalEstimatedSpend(usage));
+      setSpendLimitState(limit);
+    });
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -121,7 +143,16 @@ export default function GenerateScreen() {
     setLoading(true);
     setError(null);
     setSaved(false);
-    const result = await generateDesign(brand.id, prompt, style, provider);
+    const estimate = providerStatus.find((entry) => entry.id === provider)?.estimates[quality] ?? 0;
+    if (spendLimit > 0 && monthlySpend + estimate > spendLimit) {
+      setError(`This generation would pass the $${spendLimit.toFixed(2)} monthly guard. Raise it in Settings first.`);
+      setLoading(false);
+      return;
+    }
+    const result = await generateDesign(brand.id, prompt, style, provider, {
+      quality,
+      reference: reference ? { data: reference.data, mimeType: reference.mimeType, strength: referenceStrength } : undefined,
+    });
     if (!result.ok) {
       if (result.disabled) setDisabledReason(result.error);
       else setError(result.error);
@@ -130,6 +161,8 @@ export default function GenerateScreen() {
       return;
     }
     setRawUrl(result.dataUrl);
+    const usage = await recordGeneration({ provider, quality, estimatedCost: estimate });
+    setMonthlySpend(totalEstimatedSpend(usage));
     // Only prompts that actually produced something are worth keeping.
     setHistory(await rememberPrompt(brand.id, prompt, style));
     try {
@@ -146,6 +179,23 @@ export default function GenerateScreen() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function chooseReferenceFromPhotos() {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) return Alert.alert("Photo access needed", "Allow photo access to choose a reference.");
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], base64: true, quality: 0.8 });
+    const asset = result.canceled ? null : result.assets[0];
+    if (!asset?.base64) return;
+    const mimeType = asset.mimeType || "image/jpeg";
+    setReference({ dataUrl: `data:${mimeType};base64,${asset.base64}`, data: asset.base64, mimeType, name: asset.fileName || "Photo reference" });
+  }
+
+  async function chooseReferenceFromFiles() {
+    const file = await pickImageFile();
+    if (!file) return;
+    const data = file.dataUrl.slice(file.dataUrl.indexOf(",") + 1);
+    setReference({ dataUrl: file.dataUrl, data, mimeType: file.mimeType, name: file.name });
   }
 
   async function handleSave() {
@@ -280,7 +330,9 @@ export default function GenerateScreen() {
                       {engine.label}
                     </Text>
                     <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 10, lineHeight: 14 }}>
-                      {engine.detail}
+                      {providerStatus.find((entry) => entry.id === engine.id)?.available === false
+                        ? "Setup needed"
+                        : `${providerStatus.find((entry) => entry.id === engine.id)?.speed ?? "Checking"} · ${engine.detail}`}
                     </Text>
                   </View>
                   <Ionicons
@@ -292,6 +344,48 @@ export default function GenerateScreen() {
               );
             })}
           </View>
+
+          <View style={styles.controlSplit}>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.field, { color: theme.muted, fontFamily: theme.fontBodyMedium }]}>QUALITY</Text>
+              <View style={styles.compactChips} accessibilityRole="radiogroup">
+                {(["draft", "standard", "best"] as ImageQuality[]).map((value) => (
+                  <Chip key={value} label={value[0].toUpperCase() + value.slice(1)} active={quality === value} onPress={() => setQuality(value)} />
+                ))}
+              </View>
+            </View>
+            <View style={[styles.costTile, { backgroundColor: theme.surfaceAlt, borderColor: theme.line }]}>
+              <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 10 }}>ESTIMATE</Text>
+              <Text style={{ color: theme.accent, fontFamily: theme.fontDisplay, fontSize: 24 }}>
+                ${(providerStatus.find((entry) => entry.id === provider)?.estimates[quality] ?? 0).toFixed(2)}
+              </Text>
+              <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 9 }}>${monthlySpend.toFixed(2)} this month</Text>
+            </View>
+          </View>
+
+          <Text style={[styles.field, { color: theme.muted, fontFamily: theme.fontBodyMedium, marginTop: SPACE.md }]}>REFERENCE IMAGE · OPTIONAL</Text>
+          {reference ? (
+            <View style={[styles.referenceCard, { borderColor: theme.accent, backgroundColor: `${theme.accent}10` }]}>
+              <Image source={{ uri: reference.dataUrl }} style={styles.referenceImage} contentFit="cover" />
+              <View style={{ flex: 1, gap: 4 }}>
+                <Text numberOfLines={1} style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium, fontSize: 13 }}>{reference.name}</Text>
+                <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 10 }}>Composition guide attached</Text>
+              </View>
+              <Pressable onPress={() => setReference(null)} accessibilityLabel="Remove reference"><Ionicons name="close-circle" size={24} color={theme.muted} /></Pressable>
+            </View>
+          ) : (
+            <View style={styles.referenceActions}>
+              <Button label="Choose photo" icon="images-outline" onPress={chooseReferenceFromPhotos} style={{ flex: 1 }} />
+              <Button label="Open Files" icon="folder-open-outline" onPress={chooseReferenceFromFiles} style={{ flex: 1 }} />
+            </View>
+          )}
+          {reference && (
+            <View style={[styles.compactChips, { marginTop: SPACE.sm }]} accessibilityRole="radiogroup">
+              {(["loose", "balanced", "faithful"] as ReferenceStrength[]).map((value) => (
+                <Chip key={value} label={value[0].toUpperCase() + value.slice(1)} active={referenceStrength === value} onPress={() => setReferenceStrength(value)} />
+              ))}
+            </View>
+          )}
 
           <Text
             style={[
@@ -428,6 +522,12 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   providerIcon: { width: 34, height: 34, borderRadius: 11, alignItems: "center", justifyContent: "center" },
+  controlSplit: { flexDirection: "row", alignItems: "flex-end", gap: SPACE.sm, marginTop: SPACE.md },
+  compactChips: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  costTile: { width: 104, borderWidth: 1, borderRadius: RADIUS.md, padding: 10 },
+  referenceActions: { flexDirection: "row", gap: SPACE.sm },
+  referenceCard: { minHeight: 72, borderWidth: 1, borderRadius: RADIUS.md, padding: 8, flexDirection: "row", alignItems: "center", gap: 10 },
+  referenceImage: { width: 56, height: 56, borderRadius: RADIUS.sm },
   actions: { flexDirection: "row", gap: SPACE.sm, marginTop: SPACE.sm },
   history: { borderWidth: 1, borderRadius: RADIUS.md, overflow: "hidden" },
   historyRow: {
