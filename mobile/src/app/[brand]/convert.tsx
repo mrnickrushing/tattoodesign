@@ -1,12 +1,12 @@
-import { useCallback, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, Switch, Alert } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { View, Text, StyleSheet, ScrollView, Switch, Alert, Pressable } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { pickImageFile } from "@/lib/imageImport";
 import Slider from "@react-native-community/slider";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 import { useBrand } from "@/context/BrandContext";
-import { DEFAULT_STENCIL_OPTIONS, stencilize, type StencilOptions } from "@/lib/stencil";
+import { DEFAULT_STENCIL_OPTIONS, stencilize, type StencilMode, type StencilOptions } from "@/lib/stencil";
 import { addToLibrary } from "@/lib/designLibrary";
 import { saveDataUrlToPhotos } from "@/lib/files";
 import { cropImage, isFullCrop, type CropRect } from "@/lib/crop";
@@ -29,27 +29,37 @@ export default function ConvertScreen() {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [opts, setOpts] = useState<StencilOptions>(DEFAULT_STENCIL_OPTIONS);
+  const [overlayOpacity, setOverlayOpacity] = useState(0);
+  const pipelineSeq = useRef(0);
 
-  const runPipeline = useCallback(async (src: string, options: StencilOptions) => {
+  const runPipeline = useCallback(async (src: string, options: StencilOptions, seq: number) => {
     setProcessing(true);
     setError(null);
     try {
-      setResultUrl(await stencilize(src, options));
+      const next = await stencilize(src, options);
+      if (seq === pipelineSeq.current) setResultUrl(next);
     } catch {
-      setError("Couldn't process that image. Try a different photo.");
+      if (seq === pipelineSeq.current) setError("Couldn't process that image. Try a different photo.");
     } finally {
-      setProcessing(false);
+      if (seq === pipelineSeq.current) setProcessing(false);
     }
   }, []);
+
+  const workingSource = cropped?.uri ?? sourceUrl;
+  useEffect(() => {
+    if (!workingSource) return;
+    const seq = ++pipelineSeq.current;
+    const timer = setTimeout(() => runPipeline(workingSource, opts, seq), 180);
+    return () => clearTimeout(timer);
+  }, [workingSource, opts, runPipeline]);
 
   const updateOpts = useCallback(
     (patch: Partial<StencilOptions>) => {
       const next = { ...opts, ...patch };
       setOpts(next);
-      const working = cropped?.uri ?? sourceUrl;
-      if (working) runPipeline(working, next);
+      setSaved(false);
     },
-    [opts, cropped, sourceUrl, runPipeline]
+    [opts]
   );
 
   async function pickImage() {
@@ -71,7 +81,6 @@ export default function ConvertScreen() {
     setCropped(null);
     setSaved(false);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    runPipeline(dataUrl, opts);
   }
 
   async function pickFromFiles() {
@@ -82,7 +91,6 @@ export default function ConvertScreen() {
     setCropped(null);
     setSaved(false);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    runPipeline(file.dataUrl, opts);
   }
 
   async function applyCrop(rect: CropRect) {
@@ -92,7 +100,6 @@ export default function ConvertScreen() {
       // Nothing was trimmed — go back to the untouched photo rather than
       // spending a re-encode to produce a copy of it.
       setCropped(null);
-      runPipeline(sourceUrl, opts);
       return;
     }
     setProcessing(true);
@@ -100,7 +107,6 @@ export default function ConvertScreen() {
       const uri = await cropImage(sourceUrl, rect);
       setCropped({ uri, rect });
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      runPipeline(uri, opts);
     } catch (e) {
       setProcessing(false);
       Alert.alert("Couldn't crop", e instanceof Error ? e.message : "Try again.");
@@ -154,6 +160,8 @@ export default function ConvertScreen() {
           index={2}
           label="Line art"
           uri={resultUrl}
+          overlayUri={workingSource}
+          overlayOpacity={overlayOpacity}
           loading={processing}
           loadingLabel="Tracing"
           emptyIcon="git-branch-outline"
@@ -185,8 +193,51 @@ export default function ConvertScreen() {
 
       <Card>
         <Text style={[styles.field, { color: theme.muted, fontFamily: theme.fontBodyMedium }]}>
-          TRACE CONTROLS
+          STENCIL ENGINE
         </Text>
+
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.engineRow}>
+          {ENGINE_OPTIONS.map((engine) => (
+            <EngineButton
+              key={engine.id}
+              engine={engine}
+              active={(opts.mode ?? "outline") === engine.id}
+              onPress={() => updateOpts({ mode: engine.id })}
+            />
+          ))}
+        </ScrollView>
+
+        <View style={[styles.divider, { backgroundColor: theme.line }]} />
+        <View style={styles.lineHeader}>
+          <View>
+            <Text style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium, fontSize: 15 }}>Pro line weight</Text>
+            <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 11 }}>Tune transfer lines for the needle grouping and printer.</Text>
+          </View>
+          <Pressable onPress={() => setOpts(DEFAULT_STENCIL_OPTIONS)} accessibilityRole="button">
+            <Text style={{ color: theme.accent, fontFamily: theme.fontBodyMedium, fontSize: 12 }}>Reset</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.presetRow}>
+          {LINE_PRESETS.map((preset) => (
+            <Pressable
+              key={preset.label}
+              onPress={() => updateOpts({ lineWeight: preset.value })}
+              accessibilityRole="button"
+              accessibilityState={{ selected: Math.round(opts.lineWeight ?? 1) === preset.value }}
+              style={[
+                styles.preset,
+                {
+                  borderColor: Math.round(opts.lineWeight ?? 1) === preset.value ? theme.accent : theme.line,
+                  backgroundColor: Math.round(opts.lineWeight ?? 1) === preset.value ? `${theme.accent}18` : theme.surfaceAlt,
+                },
+              ]}
+            >
+              <View style={[styles.lineSample, { height: preset.value + 1, backgroundColor: theme.foreground }]} />
+              <Text style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium, fontSize: 11 }}>{preset.label}</Text>
+            </Pressable>
+          ))}
+        </View>
 
         <SliderRow
           label="Detail"
@@ -199,6 +250,7 @@ export default function ConvertScreen() {
         />
         <SliderRow
           label="Line weight"
+          hint={`${Math.round(opts.lineWeight ?? 1) + 1}px source line · printer proof adjusts for output DPI`}
           icon="brush-outline"
           value={opts.lineWeight ?? 1}
           min={0}
@@ -231,6 +283,38 @@ export default function ConvertScreen() {
             accessibilityLabel="Invert"
           />
         </View>
+
+        <View style={[styles.switchRow, { borderTopColor: theme.line }]}>
+          <View style={styles.switchCopy}>
+            <View style={styles.switchLabel}>
+              <Ionicons name="cut-outline" size={15} color={theme.muted} />
+              <Text style={{ color: theme.foreground, fontFamily: theme.fontBody, fontSize: 14 }}>Isolate background</Text>
+            </View>
+            <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 10 }}>Removes flat paper and wall colors locally.</Text>
+          </View>
+          <Switch
+            value={!!opts.isolateBackground}
+            onValueChange={(value) => updateOpts({ isolateBackground: value })}
+            trackColor={{ true: theme.accent }}
+            accessibilityLabel="Isolate background"
+          />
+        </View>
+
+        {!!workingSource && !!resultUrl && (
+          <View style={[styles.overlayControl, { borderTopColor: theme.line }]}>
+            <SliderRow
+              label="Original overlay"
+              hint={overlayOpacity === 0 ? "Slide to check registration against the source." : `${Math.round(overlayOpacity * 100)}% original over stencil`}
+              icon="layers-outline"
+              value={overlayOpacity}
+              min={0}
+              max={1}
+              step={0.05}
+              displayValue={`${Math.round(overlayOpacity * 100)}%`}
+              onChange={setOverlayOpacity}
+            />
+          </View>
+        )}
 
         {error && (
           <View style={{ marginTop: SPACE.sm }}>
@@ -278,6 +362,8 @@ function SliderRow({
   value,
   min,
   max,
+  step,
+  displayValue,
   onChange,
 }: {
   label: string;
@@ -286,6 +372,8 @@ function SliderRow({
   value: number;
   min: number;
   max: number;
+  step?: number;
+  displayValue?: string;
   onChange: (v: number) => void;
 }) {
   const { theme } = useBrand();
@@ -306,12 +394,13 @@ function SliderRow({
             fontVariant: ["tabular-nums"],
           }}
         >
-          {Math.round(value)}
+          {displayValue ?? Math.round(value)}
         </Text>
       </View>
       <Slider
         minimumValue={min}
         maximumValue={max}
+        step={step}
         value={value}
         onValueChange={onChange}
         onSlidingComplete={() => Haptics.selectionAsync()}
@@ -328,11 +417,49 @@ function SliderRow({
   );
 }
 
+const ENGINE_OPTIONS: { id: StencilMode; label: string; hint: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+  { id: "outline", label: "Classic", hint: "Clean contour", icon: "git-branch-outline" },
+  { id: "fine", label: "Fine line", hint: "Delicate detail", icon: "pencil-outline" },
+  { id: "photocopy", label: "Copy", hint: "Solid transfer", icon: "copy-outline" },
+  { id: "halftone", label: "Halftone", hint: "Dot shading", icon: "ellipsis-horizontal-circle-outline" },
+  { id: "crosshatch", label: "Hatch", hint: "Tone guides", icon: "grid-outline" },
+];
+
+const LINE_PRESETS = [
+  { label: "Fine", value: 0 },
+  { label: "Standard", value: 1 },
+  { label: "Bold", value: 2 },
+  { label: "Heavy", value: 4 },
+] as const;
+
+function EngineButton({ engine, active, onPress }: { engine: (typeof ENGINE_OPTIONS)[number]; active: boolean; onPress: () => void }) {
+  const { theme } = useBrand();
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="radio"
+      accessibilityState={{ selected: active }}
+      style={[styles.engine, { borderColor: active ? theme.accent : theme.line, backgroundColor: active ? `${theme.accent}18` : theme.surfaceAlt }]}
+    >
+      <Ionicons name={engine.icon} size={18} color={active ? theme.accent : theme.muted} />
+      <Text style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium, fontSize: 12 }}>{engine.label}</Text>
+      <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 9 }}>{engine.hint}</Text>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   scroll: { padding: SPACE.md, paddingTop: SPACE.lg, paddingBottom: SPACE.xxl },
   panes: { flexDirection: "row", gap: SPACE.sm },
   photoActions: { flexDirection: "row", gap: SPACE.sm, marginTop: SPACE.lg, marginBottom: SPACE.sm },
   field: { fontSize: 10, letterSpacing: 1.5, marginBottom: SPACE.sm },
+  engineRow: { gap: 8, paddingBottom: 2 },
+  engine: { width: 96, borderWidth: 1, borderRadius: 12, padding: 10, gap: 4 },
+  divider: { height: 1, marginVertical: SPACE.md },
+  lineHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: SPACE.sm },
+  presetRow: { flexDirection: "row", gap: 7, marginBottom: SPACE.sm },
+  preset: { flex: 1, minHeight: 54, borderWidth: 1, borderRadius: 10, padding: 8, justifyContent: "flex-end", gap: 7 },
+  lineSample: { width: "100%", borderRadius: 3 },
   sliderTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   sliderLabel: { flexDirection: "row", alignItems: "center", gap: 7 },
   switchRow: {
@@ -344,5 +471,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   switchLabel: { flexDirection: "row", alignItems: "center", gap: 7 },
+  switchCopy: { flex: 1, gap: 3, paddingRight: SPACE.sm },
+  overlayControl: { borderTopWidth: 1, paddingTop: SPACE.sm, marginTop: SPACE.sm },
   actions: { flexDirection: "row", gap: SPACE.sm, marginTop: SPACE.sm },
 });

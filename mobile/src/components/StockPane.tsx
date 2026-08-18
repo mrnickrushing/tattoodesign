@@ -26,6 +26,8 @@ export function StockPane({
   index,
   label,
   uri,
+  overlayUri,
+  overlayOpacity = 0,
   loading,
   loadingLabel = "Working",
   emptyIcon = "scan-outline",
@@ -36,6 +38,9 @@ export function StockPane({
   index?: number;
   label: string;
   uri: string | null;
+  /** Optional comparison layer, useful for registering a trace against source art. */
+  overlayUri?: string | null;
+  overlayOpacity?: number;
   loading?: boolean;
   loadingLabel?: string;
   emptyIcon?: keyof typeof Ionicons.glyphMap;
@@ -74,7 +79,18 @@ export function StockPane({
       {!filled && <DotGrid color={theme.stockGrid} />}
 
       {filled ? (
-        <Image source={{ uri: uri! }} style={styles.image} contentFit="contain" alt={label} />
+        <>
+          <Image source={{ uri: uri! }} style={styles.image} contentFit="contain" alt={label} />
+          {!!overlayUri && overlayOpacity > 0 && (
+            <Image
+              source={{ uri: overlayUri }}
+              style={[styles.overlayImage, { opacity: overlayOpacity }]}
+              contentFit="contain"
+              alt="Original comparison overlay"
+              pointerEvents="none"
+            />
+          )}
+        </>
       ) : (
         <View style={styles.empty}>
           <Ionicons name={emptyIcon} size={28} color={theme.stockMark} />
@@ -170,6 +186,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   image: { width: "100%", height: "100%" },
+  overlayImage: { ...StyleSheet.absoluteFill },
   mark: { position: "absolute", width: 12, height: 12 },
   dot: { position: "absolute", width: 1.5, height: 1.5, borderRadius: 1 },
   empty: { alignItems: "center", gap: 6, paddingHorizontal: 16 },

@@ -12,6 +12,7 @@ import { Directory, File, Paths } from "expo-file-system";
 import { generateId } from "./id";
 import { stripDataUrlPrefix } from "./files";
 import type { BrandId } from "./brands";
+import { Skia } from "@shopify/react-native-skia";
 
 export type LibraryDesign = {
   id: string;
@@ -23,6 +24,8 @@ export type LibraryDesign = {
   title: string;
   source: "generated" | "converted" | "uploaded";
   createdAt: number;
+  width?: number;
+  height?: number;
 };
 
 /** Shape written by the original base64-in-AsyncStorage version. */
@@ -75,8 +78,20 @@ export async function getLibrary(brand: BrandId): Promise<LibraryDesign[]> {
         // reason at all.
         const file = new File(dir, entry.file ?? `${entry.id}.png`);
         const uri = file.exists ? file.uri : entry.uri;
+        let normalized = { ...(entry as LibraryDesign), uri };
+        if ((!normalized.width || !normalized.height) && file.exists) {
+          try {
+            const decoded = Skia.Image.MakeImageFromEncoded(Skia.Data.fromBase64(await file.base64()));
+            if (decoded) {
+              normalized = { ...normalized, width: decoded.width(), height: decoded.height() };
+              migrated = true;
+            }
+          } catch {
+            // Keep the design available even when optional metadata can't be recovered.
+          }
+        }
         if (uri !== entry.uri) migrated = true;
-        result.push({ ...(entry as LibraryDesign), uri });
+        result.push(normalized);
         continue;
       }
       if (entry.dataUrl) {
@@ -85,7 +100,14 @@ export async function getLibrary(brand: BrandId): Promise<LibraryDesign[]> {
           const name = `${entry.id}.png`;
           const uri = writePng(brand, name, entry.dataUrl);
           const { dataUrl: _drop, ...rest } = entry;
-          result.push({ ...(rest as Omit<LibraryDesign, "uri">), file: name, uri });
+          const decoded = Skia.Image.MakeImageFromEncoded(Skia.Data.fromBase64(stripDataUrlPrefix(entry.dataUrl)));
+          result.push({
+            ...(rest as Omit<LibraryDesign, "uri">),
+            file: name,
+            uri,
+            width: decoded?.width(),
+            height: decoded?.height(),
+          });
           migrated = true;
         } catch {
           // A single unreadable entry shouldn't take the library down.
@@ -109,6 +131,7 @@ export async function addToLibrary(
 ): Promise<LibraryDesign> {
   const id = generateId();
   const name = `${id}.png`;
+  const decoded = Skia.Image.MakeImageFromEncoded(Skia.Data.fromBase64(stripDataUrlPrefix(design.dataUrl)));
   const entry: LibraryDesign = {
     id,
     file: name,
@@ -116,6 +139,8 @@ export async function addToLibrary(
     title: design.title,
     source: design.source,
     createdAt: Date.now(),
+    width: decoded?.width(),
+    height: decoded?.height(),
   };
   await save(brand, [entry, ...(await getLibrary(brand))]);
   return entry;
