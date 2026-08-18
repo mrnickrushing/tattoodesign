@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -40,6 +40,7 @@ import {
 import { generateId } from "@/lib/id";
 import { saveDataUrlToPhotos } from "@/lib/files";
 import { composeSheet } from "@/lib/sheet";
+import { fillGrid, packGrid } from "@/lib/layout";
 import { Button } from "@/components/Button";
 import { ScreenHeader, Chip, SectionLabel, Card } from "@/components/ui";
 import { ImageViewer } from "@/components/ImageViewer";
@@ -113,6 +114,9 @@ export default function BuilderScreen() {
   /** Bumped to remount the placed designs when their geometry changes from
    *  outside a gesture, so the view re-seeds from state. */
   const [syncKey, setSyncKey] = useState(0);
+  /** Snapshots of the layout before each change. Deep history isn't the point
+   *  — being able to take back the drag that just wrecked an even row is. */
+  const [history, setHistory] = useState<SheetItem[][]>([]);
   /** Autosave stays off until the stored draft has been read back, or the
    *  first render would overwrite it with an empty canvas. */
   const restored = useRef(false);
@@ -170,10 +174,49 @@ export default function BuilderScreen() {
     getLibrary(brand.id).then(setLibrary);
   }
 
+  function sameLayout(a: SheetItem[], b: SheetItem[]) {
+    return (
+      a.length === b.length &&
+      a.every((item, i) => {
+        const other = b[i];
+        return (
+          item.id === other.id &&
+          item.xIn === other.xIn &&
+          item.yIn === other.yIn &&
+          item.wIn === other.wIn &&
+          item.hIn === other.hIn &&
+          item.rotation === other.rotation &&
+          item.mirrored === other.mirrored
+        );
+      })
+    );
+  }
+
+  /** Call before changing `items`. Skips no-op snapshots, because ending a
+   *  two-finger gesture commits pinch and rotation separately and would
+   *  otherwise cost two undos to take back one move. */
+  function pushHistory(snapshot: SheetItem[] = items) {
+    setHistory((prev) => {
+      const last = prev[prev.length - 1];
+      if (last && sameLayout(last, snapshot)) return prev;
+      return [...prev.slice(-29), snapshot];
+    });
+  }
+
+  function undo() {
+    if (history.length === 0) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setItems(history[history.length - 1]);
+    setHistory((prev) => prev.slice(0, -1));
+    setSelectedId(null);
+    setSyncKey((k) => k + 1);
+  }
+
   function changeTemplate(id: string) {
     const next = TEMPLATES.find((t) => t.id === id);
     if (!next) return;
     Haptics.selectionAsync();
+    pushHistory();
     setTemplateId(id);
     setSyncKey((k) => k + 1);
     // Trying a different sheet size shouldn't throw the layout away. Keep
@@ -193,6 +236,7 @@ export default function BuilderScreen() {
   function addItem(design: LibraryDesign) {
     const wIn = Math.min(3, template.widthIn * 0.35);
     const id = generateId();
+    pushHistory();
     setItems((prev) => [
       ...prev,
       {
@@ -221,31 +265,35 @@ export default function BuilderScreen() {
    * these numbers at print time rather than screenshotted, so a position
    * that never makes it back here is a design that prints in the wrong place.
    */
-  const commitItem = useCallback(
-    (id: string, next: { xIn: number; yIn: number; wIn: number; hIn: number; rotation: number }) => {
-      const wIn = clamp(next.wIn, 0.25, template.widthIn);
-      const hIn = clamp(next.hIn, 0.25, template.heightIn);
-      const xIn = clamp(next.xIn, 0, Math.max(0, template.widthIn - wIn));
-      const yIn = clamp(next.yIn, 0, Math.max(0, template.heightIn - hIn));
-      setItems((prev) =>
-        prev.map((item) => (item.id === id ? { ...item, xIn, yIn, wIn, hIn, rotation: next.rotation } : item))
-      );
-      // Dragged past the edge: state now says "on the page", so the view has
-      // to be re-seeded or it would sit somewhere the sheet won't print.
-      const snapped =
-        Math.abs(xIn - next.xIn) > 0.005 ||
-        Math.abs(yIn - next.yIn) > 0.005 ||
-        Math.abs(wIn - next.wIn) > 0.005 ||
-        Math.abs(hIn - next.hIn) > 0.005;
-      if (snapped) setSyncKey((k) => k + 1);
-    },
-    [template.widthIn, template.heightIn]
-  );
+  function commitItem(
+    id: string,
+    next: { xIn: number; yIn: number; wIn: number; hIn: number; rotation: number }
+  ) {
+    const wIn = clamp(next.wIn, 0.25, template.widthIn);
+    const hIn = clamp(next.hIn, 0.25, template.heightIn);
+    const xIn = clamp(next.xIn, 0, Math.max(0, template.widthIn - wIn));
+    const yIn = clamp(next.yIn, 0, Math.max(0, template.heightIn - hIn));
+    pushHistory();
+    setItems((prev) =>
+      prev.map((item) =>
+        item.id === id ? { ...item, xIn, yIn, wIn, hIn, rotation: next.rotation } : item
+      )
+    );
+    // Dragged past the edge: state now says "on the page", so the view has
+    // to be re-seeded or it would sit somewhere the sheet won't print.
+    const snapped =
+      Math.abs(xIn - next.xIn) > 0.005 ||
+      Math.abs(yIn - next.yIn) > 0.005 ||
+      Math.abs(wIn - next.wIn) > 0.005 ||
+      Math.abs(hIn - next.hIn) > 0.005;
+    if (snapped) setSyncKey((k) => k + 1);
+  }
 
   function duplicateSelected() {
     const src = items.find((i) => i.id === selectedId);
     if (!src) return;
     const id = generateId();
+    pushHistory();
     // Offset slightly so the copy is visibly its own object, and keep it
     // on the page even when duplicating something near the edge.
     const step = 0.25;
@@ -267,6 +315,7 @@ export default function BuilderScreen() {
   function setSelectedWidth(nextWidthIn: number) {
     const item = items.find((i) => i.id === selectedId);
     if (!item) return;
+    pushHistory();
     const maxW = template.widthIn;
     const ratio = item.hIn / item.wIn;
     const w = Math.max(0.25, Math.min(nextWidthIn, maxW));
@@ -303,14 +352,83 @@ export default function BuilderScreen() {
   function mirrorSelected() {
     if (!selectedId) return;
     Haptics.selectionAsync();
+    pushHistory();
     setItems((prev) =>
       prev.map((i) => (i.id === selectedId ? { ...i, mirrored: !i.mirrored } : i))
     );
   }
 
+  function fmtIn(value: number) {
+    return value.toFixed(2).replace(/\.?0+$/, "");
+  }
+
+  /** Tile the page with copies of the selected design at its current size —
+   *  a dozen toppers or a sheet of the same flash, in one tap. */
+  function fillSheet() {
+    if (!selected) return;
+    const cells = fillGrid(template.widthIn, template.heightIn, selected.wIn, selected.hIn);
+    if (cells.length === 0) {
+      Alert.alert("Too big to tile", "Make the design smaller and try again.");
+      return;
+    }
+    const source = selected;
+    Alert.alert(
+      "Fill the sheet?",
+      `${cells.length} ${cells.length === 1 ? "copy" : "copies"} at ${fmtIn(source.wIn)}in wide. This replaces what's on the sheet.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: `Place ${cells.length}`,
+          onPress: () => {
+            pushHistory();
+            setItems(
+              cells.map((cell) => ({
+                ...source,
+                id: generateId(),
+                xIn: cell.xIn,
+                yIn: cell.yIn,
+              }))
+            );
+            setSelectedId(null);
+            setSyncKey((k) => k + 1);
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          },
+        },
+      ]
+    );
+  }
+
+  /** Even out what's already on the sheet: one grid, everything the same
+   *  size, each design scaled to fit its cell rather than stretched. */
+  function arrange() {
+    if (items.length < 2) return;
+    const cells = packGrid(template.widthIn, template.heightIn, items.length);
+    if (cells.length < items.length) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    pushHistory();
+    setItems(
+      items.map((item, i) => {
+        const cell = cells[i];
+        const scale = Math.min(cell.wIn / item.wIn, cell.hIn / item.hIn);
+        const wIn = item.wIn * scale;
+        const hIn = item.hIn * scale;
+        return {
+          ...item,
+          wIn,
+          hIn,
+          xIn: cell.xIn + (cell.wIn - wIn) / 2,
+          yIn: cell.yIn + (cell.hIn - hIn) / 2,
+        };
+      })
+    );
+    setSelectedId(null);
+    setSyncKey((k) => k + 1);
+  }
+
   function removeSelected() {
     if (!selectedId) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    pushHistory();
     setItems((prev) => prev.filter((i) => i.id !== selectedId));
     setSelectedId(null);
   }
@@ -528,6 +646,18 @@ export default function BuilderScreen() {
             {sheetName ? " · saved" : ""}
           </Text>
         </View>
+        <IconAction
+          icon="arrow-undo-outline"
+          label="Undo"
+          onPress={undo}
+          disabled={history.length === 0}
+        />
+        <IconAction
+          icon="grid-outline"
+          label="Arrange evenly"
+          onPress={arrange}
+          disabled={items.length < 2}
+        />
         <IconAction icon="add-outline" label="New sheet" onPress={newSheet} />
         <IconAction icon="bookmark-outline" label="Save sheet" onPress={openSavePrompt} />
       </View>
@@ -589,8 +719,14 @@ export default function BuilderScreen() {
             </View>
           </View>
           <Text style={{ color: theme.muted, fontSize: 11, marginTop: 6 }}>
-            Prints at exactly this size · {selected.hIn.toFixed(2).replace(/\.?0+$/, "")}in tall
+            Prints at exactly this size · {fmtIn(selected.hIn)}in tall
           </Text>
+          <Button
+            label="Fill sheet with copies"
+            icon="grid-outline"
+            onPress={fillSheet}
+            style={{ marginTop: SPACE.sm }}
+          />
         </Card>
       )}
 
@@ -823,27 +959,32 @@ function IconAction({
   icon,
   label,
   onPress,
+  disabled,
 }: {
   icon: keyof typeof Ionicons.glyphMap;
   label: string;
   onPress: () => void;
+  disabled?: boolean;
 }) {
   const { theme } = useBrand();
   return (
     <Pressable
       onPress={() => {
+        if (disabled) return;
         Haptics.selectionAsync();
         onPress();
       }}
+      disabled={disabled}
       accessibilityRole="button"
       accessibilityLabel={label}
+      accessibilityState={{ disabled: !!disabled }}
       hitSlop={8}
       style={({ pressed }) => [
         styles.iconAction,
         {
           borderColor: theme.line,
           backgroundColor: theme.surfaceAlt,
-          opacity: pressed ? 0.6 : 1,
+          opacity: disabled ? 0.35 : pressed ? 0.6 : 1,
         },
       ]}
     >
