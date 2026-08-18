@@ -23,7 +23,11 @@ export function writeDataUrlToTempFile(dataUrl: string, filename: string): File 
 }
 
 export async function saveDataUrlToPhotos(dataUrl: string, filename: string): Promise<void> {
-  const MediaLibrary = await import("expo-media-library");
+  // SDK 57 deprecated the top-level saveToLibraryAsync and it now throws at
+  // call time. The legacy entrypoint keeps the simple "save this file" API;
+  // the new class-based one is built around querying/managing the library,
+  // which is more than saving one PNG needs.
+  const MediaLibrary = await import("expo-media-library/legacy");
   const permission = await MediaLibrary.requestPermissionsAsync();
   if (!permission.granted) {
     throw new Error("Photo library access was denied.");

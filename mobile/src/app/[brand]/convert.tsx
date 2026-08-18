@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { View, Text, Pressable, StyleSheet, ScrollView, Switch, Alert } from "react-native";
+import { View, Text, StyleSheet, ScrollView, Switch, Alert } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import Slider from "@react-native-community/slider";
 import * as Haptics from "expo-haptics";
@@ -97,16 +97,14 @@ export default function ConvertScreen() {
       />
 
       <View style={styles.panes}>
-        <Pressable onPress={pickImage} style={{ flex: 1 }} accessibilityRole="button"
-          accessibilityLabel={sourceUrl ? "Change reference photo" : "Choose a reference photo"}>
-          <StockPane
-            index={1}
-            label="Source"
-            uri={sourceUrl}
-            emptyIcon="image-outline"
-            emptyHint="Tap to pick a photo"
-          />
-        </Pressable>
+        <StockPane
+          index={1}
+          label="Source"
+          uri={sourceUrl}
+          emptyIcon="image-outline"
+          emptyHint="Tap to pick a photo"
+          onPressEmpty={pickImage}
+        />
         <StockPane
           index={2}
           label="Line art"

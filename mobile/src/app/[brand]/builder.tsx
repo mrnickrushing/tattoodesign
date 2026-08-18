@@ -30,6 +30,7 @@ import { generateId } from "@/lib/id";
 import { saveDataUrlToPhotos } from "@/lib/files";
 import { Button } from "@/components/Button";
 import { ScreenHeader, Chip, SectionLabel } from "@/components/ui";
+import { ImageViewer } from "@/components/ImageViewer";
 import { SPACE, RADIUS, lift } from "@/lib/theme";
 
 type SheetTemplate = { id: string; label: string; widthIn: number; heightIn: number };
@@ -61,6 +62,7 @@ export default function BuilderScreen() {
   const [templateId, setTemplateId] = useState("letter");
   const [items, setItems] = useState<SheetItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [preview, setPreview] = useState<LibraryDesign | null>(null);
   const [library, setLibrary] = useState<LibraryDesign[]>([]);
   const sheetRef = useRef<View>(null);
 
@@ -264,8 +266,13 @@ export default function BuilderScreen() {
             <Pressable
               key={d.id}
               onPress={() => addItem(d)}
+              onLongPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                setPreview(d);
+              }}
               accessibilityRole="button"
               accessibilityLabel={`Add ${d.title} to sheet`}
+              accessibilityHint="Long press to view it full screen"
               style={({ pressed }) => [
                 styles.libraryThumb,
                 { borderColor: theme.line, backgroundColor: theme.stock, opacity: pressed ? 0.7 : 1 },
@@ -282,6 +289,11 @@ export default function BuilderScreen() {
         </View>
       )}
 
+      <ImageViewer
+        uri={preview?.dataUrl ?? null}
+        title={preview?.title}
+        onClose={() => setPreview(null)}
+      />
     </ScrollView>
   );
 }
