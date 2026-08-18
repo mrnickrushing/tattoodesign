@@ -11,6 +11,17 @@ export const API_BASE_URL =
   process.env.EXPO_PUBLIC_API_BASE_URL || DEFAULT_BASE_URL;
 
 export type ImageProvider = "gemini" | "openai" | "claude";
+export type ImageQuality = "draft" | "standard" | "best";
+export type ReferenceStrength = "loose" | "balanced" | "faithful";
+
+export type ProviderStatus = {
+  id: ImageProvider;
+  available: boolean;
+  model: string;
+  speed: "Fast" | "Balanced" | "Detailed";
+  estimates: Record<ImageQuality, number>;
+  reason?: string;
+};
 
 export const IMAGE_PROVIDERS: {
   id: ImageProvider;
@@ -30,13 +41,17 @@ export async function generateDesign(
   brand: BrandId,
   prompt: string,
   style: string,
-  provider: ImageProvider
+  provider: ImageProvider,
+  options?: {
+    quality?: ImageQuality;
+    reference?: { data: string; mimeType: string; strength: ReferenceStrength };
+  }
 ): Promise<GenerateResult> {
   try {
     const res = await fetch(`${API_BASE_URL}/api/generate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ brand, prompt, style, provider }),
+      body: JSON.stringify({ brand, prompt, style, provider, ...options }),
     });
     const data = await res.json();
 
@@ -57,6 +72,16 @@ export async function generateDesign(
       disabled: false,
       error: "Couldn't reach the server. Check your connection and try again.",
     };
+  }
+}
+
+export async function getGeneratorStatus(): Promise<ProviderStatus[]> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/generate`, { method: "GET" });
+    const data = await res.json();
+    return res.ok && Array.isArray(data.providers) ? data.providers : [];
+  } catch {
+    return [];
   }
 }
 

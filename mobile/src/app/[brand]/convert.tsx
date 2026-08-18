@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { View, Text, StyleSheet, ScrollView, Switch, Alert } from "react-native";
 import * as ImagePicker from "expo-image-picker";
+import { pickImageFile } from "@/lib/imageImport";
 import Slider from "@react-native-community/slider";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
@@ -71,6 +72,17 @@ export default function ConvertScreen() {
     setSaved(false);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     runPipeline(dataUrl, opts);
+  }
+
+  async function pickFromFiles() {
+    const file = await pickImageFile();
+    if (!file) return;
+    setSourceUrl(file.dataUrl);
+    setSourceSize(null);
+    setCropped(null);
+    setSaved(false);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    runPipeline(file.dataUrl, opts);
   }
 
   async function applyCrop(rect: CropRect) {
@@ -154,6 +166,12 @@ export default function ConvertScreen() {
           label={sourceUrl ? "Change photo" : "Choose photo"}
           icon="image-outline"
           onPress={pickImage}
+          style={{ flex: 1 }}
+        />
+        <Button
+          label="Open Files"
+          icon="folder-open-outline"
+          onPress={pickFromFiles}
           style={{ flex: 1 }}
         />
         <Button

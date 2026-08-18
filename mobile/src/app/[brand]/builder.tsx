@@ -40,6 +40,7 @@ import {
   type SavedSheet,
 } from "@/lib/sheetLibrary";
 import { generateId } from "@/lib/id";
+import { pickImageFile } from "@/lib/imageImport";
 import { saveDataUrlToPhotos, shareDataUrl, shareUri } from "@/lib/files";
 import { composeSheet } from "@/lib/sheet";
 import { fillGrid, packGrid } from "@/lib/layout";
@@ -76,6 +77,7 @@ type SheetItem = {
   rotation: number;
   /** Stencils are often applied reversed, so mirroring is a first-class op. */
   mirrored: boolean;
+  locked?: boolean;
 };
 
 const MAX_PX_PER_IN = 50;
@@ -126,6 +128,8 @@ export default function BuilderScreen() {
   /** Snapshots of the layout before each change. Deep history isn't the point
    *  — being able to take back the drag that just wrecked an even row is. */
   const [history, setHistory] = useState<SheetItem[][]>([]);
+  const [snapEnabled, setSnapEnabled] = useState(true);
+  const [guidesVisible, setGuidesVisible] = useState(true);
   /** Autosave stays off until the stored draft has been read back, or the
    *  first render would overwrite it with an empty canvas. */
   const restored = useRef(false);
@@ -204,7 +208,8 @@ export default function BuilderScreen() {
           item.wIn === other.wIn &&
           item.hIn === other.hIn &&
           item.rotation === other.rotation &&
-          item.mirrored === other.mirrored
+          item.mirrored === other.mirrored &&
+          !!item.locked === !!other.locked
         );
       })
     );
@@ -268,6 +273,7 @@ export default function BuilderScreen() {
         hIn: wIn,
         rotation: 0,
         mirrored: false,
+        locked: false,
       },
     ]);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -287,10 +293,14 @@ export default function BuilderScreen() {
     id: string,
     next: { xIn: number; yIn: number; wIn: number; hIn: number; rotation: number }
   ) {
-    const wIn = clamp(next.wIn, 0.25, template.widthIn);
-    const hIn = clamp(next.hIn, 0.25, template.heightIn);
-    const xIn = clamp(next.xIn, 0, Math.max(0, template.widthIn - wIn));
-    const yIn = clamp(next.yIn, 0, Math.max(0, template.heightIn - hIn));
+    const source = items.find((item) => item.id === id);
+    if (source?.locked) return;
+    const step = 0.125;
+    const quantize = (value: number) => snapEnabled ? Math.round(value / step) * step : value;
+    const wIn = clamp(quantize(next.wIn), 0.25, template.widthIn);
+    const hIn = clamp(quantize(next.hIn), 0.25, template.heightIn);
+    const xIn = clamp(quantize(next.xIn), 0, Math.max(0, template.widthIn - wIn));
+    const yIn = clamp(quantize(next.yIn), 0, Math.max(0, template.heightIn - hIn));
     pushHistory();
     setItems((prev) =>
       prev.map((item) =>
@@ -320,6 +330,7 @@ export default function BuilderScreen() {
       {
         ...src,
         id,
+        locked: false,
         xIn: Math.min(src.xIn + step, Math.max(0, template.widthIn - src.wIn)),
         yIn: Math.min(src.yIn + step, Math.max(0, template.heightIn - src.hIn)),
       },
@@ -374,6 +385,36 @@ export default function BuilderScreen() {
     setItems((prev) =>
       prev.map((i) => (i.id === selectedId ? { ...i, mirrored: !i.mirrored } : i))
     );
+  }
+
+  function toggleLockSelected() {
+    if (!selectedId) return;
+    pushHistory();
+    setItems((prev) => prev.map((item) => item.id === selectedId ? { ...item, locked: !item.locked } : item));
+    Haptics.selectionAsync();
+  }
+
+  function nudgeSelected(axis: "x" | "y", delta: number) {
+    if (!selected || selected.locked) return;
+    pushHistory();
+    setItems((prev) => prev.map((item) => item.id === selected.id ? {
+      ...item,
+      [axis === "x" ? "xIn" : "yIn"]: axis === "x"
+        ? clamp(item.xIn + delta, 0, template.widthIn - item.wIn)
+        : clamp(item.yIn + delta, 0, template.heightIn - item.hIn),
+    } : item));
+    setSyncKey((key) => key + 1);
+  }
+
+  function alignSelected(edge: "left" | "center" | "right" | "top" | "middle" | "bottom") {
+    if (!selected || selected.locked) return;
+    pushHistory();
+    setItems((prev) => prev.map((item) => item.id === selected.id ? {
+      ...item,
+      xIn: edge === "left" ? 0 : edge === "center" ? (template.widthIn - item.wIn) / 2 : edge === "right" ? template.widthIn - item.wIn : item.xIn,
+      yIn: edge === "top" ? 0 : edge === "middle" ? (template.heightIn - item.hIn) / 2 : edge === "bottom" ? template.heightIn - item.hIn : item.yIn,
+    } : item));
+    setSyncKey((key) => key + 1);
   }
 
   function fmtIn(value: number) {
@@ -640,7 +681,15 @@ export default function BuilderScreen() {
     }
   }
 
-  async function pickUpload() {
+  function pickUpload() {
+    Alert.alert("Import a design", "Choose where to open it from.", [
+      { text: "Photos", onPress: pickUploadFromPhotos },
+      { text: "Files / iCloud", onPress: pickUploadFromFiles },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  }
+
+  async function pickUploadFromPhotos() {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
       Alert.alert("Photo access needed", "Allow photo access to upload a design.");
@@ -659,6 +708,18 @@ export default function BuilderScreen() {
       source: "uploaded",
     });
     refreshLibrary();
+  }
+
+  async function pickUploadFromFiles() {
+    const file = await pickImageFile();
+    if (!file) return;
+    await addToLibrary(brand.id, {
+      dataUrl: file.dataUrl,
+      title: file.name.replace(/\.[^.]+$/, "") || "Imported design",
+      source: "uploaded",
+    });
+    refreshLibrary();
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   }
 
   /** Re-composite from the original design files at print resolution. */
@@ -716,6 +777,43 @@ export default function BuilderScreen() {
     }
   }
 
+  function chooseTiledPrint() {
+    if (!selected) return Alert.alert("Choose a design", "Select one design to print oversized.");
+    Alert.alert("Oversized tiled print", "Inkline adds ¼-inch overlap, alignment marks, and page numbers.", [
+      { text: "2× on Letter", onPress: () => printTiled(2, "letter") },
+      { text: "4× on Letter", onPress: () => printTiled(4, "letter") },
+      { text: "3× on A4", onPress: () => printTiled(3, "a4") },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  }
+
+  async function printTiled(scale: number, paper: "letter" | "a4") {
+    if (!selected) return;
+    try {
+      const widthIn = selected.wIn * scale;
+      const heightIn = selected.hIn * scale;
+      const dataUrl = await composeSheet([{ ...selected, xIn: 0, yIn: 0, wIn: widthIn, hIn: heightIn }], widthIn, heightIn, 150);
+      const page = paper === "letter" ? { w: 8.5, h: 11 } : { w: 8.27, h: 11.69 };
+      const margin = 0.5;
+      const overlap = 0.25;
+      const tileW = page.w - margin * 2;
+      const tileH = page.h - margin * 2;
+      const stepX = tileW - overlap;
+      const stepY = tileH - overlap;
+      const cols = Math.max(1, Math.ceil((widthIn - overlap) / stepX));
+      const rows = Math.max(1, Math.ceil((heightIn - overlap) / stepY));
+      const pages = Array.from({ length: rows * cols }, (_, index) => {
+        const col = index % cols;
+        const row = Math.floor(index / cols);
+        return `<section><div class="tile"><img src="${dataUrl}" style="width:${widthIn}in;height:${heightIn}in;left:${-col * stepX}in;top:${-row * stepY}in"/></div><span>${row + 1}.${col + 1} · page ${index + 1}/${rows * cols}</span><i class="tl">+</i><i class="tr">+</i><i class="bl">+</i><i class="br">+</i></section>`;
+      }).join("");
+      const html = `<html><head><style>@page{size:${page.w}in ${page.h}in;margin:0}*{box-sizing:border-box}body{margin:0}section{width:${page.w}in;height:${page.h}in;padding:${margin}in;position:relative;page-break-after:always}.tile{width:${tileW}in;height:${tileH}in;overflow:hidden;position:relative;border:1px dashed #999}.tile img{position:absolute;max-width:none}span{position:absolute;right:.5in;bottom:.18in;font:9pt sans-serif}i{position:absolute;font:14pt monospace;font-style:normal}.tl{left:.38in;top:.29in}.tr{right:.38in;top:.29in}.bl{left:.38in;bottom:.28in}.br{right:.38in;bottom:.28in}</style></head><body>${pages}</body></html>`;
+      await Print.printAsync({ html, width: Math.round(page.w * 72), height: Math.round(page.h * 72) });
+    } catch (error) {
+      Alert.alert("Couldn't tile print", error instanceof Error ? error.message : "Try again.");
+    }
+  }
+
   return (
     <ScrollView
       style={{ backgroundColor: theme.background }}
@@ -770,17 +868,38 @@ export default function BuilderScreen() {
         <IconAction icon="bookmark-outline" label="Save sheet" onPress={openSavePrompt} />
       </View>
 
+      <View style={[styles.precisionBar, { borderColor: theme.line, backgroundColor: theme.surface }]}>
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium, fontSize: 12 }}>Precision mode</Text>
+          <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 9 }}>⅛-inch grid · safe edge · exact output</Text>
+        </View>
+        <IconAction icon={snapEnabled ? "magnet" : "magnet-outline"} label="Toggle snapping" onPress={() => setSnapEnabled((value) => !value)} />
+        <IconAction icon={guidesVisible ? "grid" : "grid-outline"} label="Toggle guides" onPress={() => setGuidesVisible((value) => !value)} />
+      </View>
+
       <View style={styles.sheetWrap}>
         <View
           collapsable={false}
           style={[styles.sheet, { width: sheetWidth, height: sheetHeight }]}
         >
+          {guidesVisible && (
+            <>
+              <View pointerEvents="none" style={[styles.safeGuide, { borderColor: theme.stockMark }]} />
+              {Array.from({ length: Math.floor(template.widthIn) }).map((_, index) => (
+                <View key={`vx-${index}`} pointerEvents="none" style={[styles.gridV, { left: (index + 1) * pxPerIn, backgroundColor: theme.stockGrid }]} />
+              ))}
+              {Array.from({ length: Math.floor(template.heightIn) }).map((_, index) => (
+                <View key={`hy-${index}`} pointerEvents="none" style={[styles.gridH, { top: (index + 1) * pxPerIn, backgroundColor: theme.stockGrid }]} />
+              ))}
+            </>
+          )}
           {items.map((item) => (
             <DraggableItem
               key={`${item.id}:${syncKey}`}
               item={item}
               pxPerIn={pxPerIn}
               selected={item.id === selectedId}
+              locked={!!item.locked}
               accent={theme.accent}
               onSelect={() => setSelectedId(item.id)}
               onCommit={commitItem}
@@ -827,8 +946,27 @@ export default function BuilderScreen() {
             </View>
           </View>
           <Text style={{ color: theme.muted, fontSize: 11, marginTop: 6 }}>
-            Prints at exactly this size · {fmtIn(selected.hIn)}in tall
+            Prints at exactly this size · {fmtIn(selected.hIn)}in tall {selected.locked ? "· locked" : ""}
           </Text>
+          <View style={styles.precisionControls}>
+            <View style={styles.controlGroup}>
+              <Text style={[styles.miniLabel, { color: theme.muted }]}>NUDGE ⅛ IN</Text>
+              <View style={styles.miniActions}>
+                <IconAction icon="arrow-back" label="Nudge left" onPress={() => nudgeSelected("x", -0.125)} disabled={!!selected.locked} />
+                <IconAction icon="arrow-up" label="Nudge up" onPress={() => nudgeSelected("y", -0.125)} disabled={!!selected.locked} />
+                <IconAction icon="arrow-down" label="Nudge down" onPress={() => nudgeSelected("y", 0.125)} disabled={!!selected.locked} />
+                <IconAction icon="arrow-forward" label="Nudge right" onPress={() => nudgeSelected("x", 0.125)} disabled={!!selected.locked} />
+              </View>
+            </View>
+            <View style={styles.controlGroup}>
+              <Text style={[styles.miniLabel, { color: theme.muted }]}>ALIGN TO PAGE</Text>
+              <View style={styles.miniActions}>
+                {(["left", "center", "right", "top", "middle", "bottom"] as const).map((edge) => (
+                  <IconAction key={edge} icon={({ left: "play-back", center: "contract", right: "play-forward", top: "caret-up", middle: "remove", bottom: "caret-down" } as const)[edge]} label={`Align ${edge}`} onPress={() => alignSelected(edge)} disabled={!!selected.locked} />
+                ))}
+              </View>
+            </View>
+          </View>
           <Button
             label="Fill sheet with copies"
             icon="grid-outline"
@@ -853,6 +991,12 @@ export default function BuilderScreen() {
             style={{ flex: 1 }}
           />
           <Button
+            label={selected?.locked ? "Unlock" : "Lock"}
+            icon={selected?.locked ? "lock-open-outline" : "lock-closed-outline"}
+            onPress={toggleLockSelected}
+            style={{ flex: 1 }}
+          />
+          <Button
             label="Remove"
             icon="trash-outline"
             variant="danger"
@@ -868,6 +1012,12 @@ export default function BuilderScreen() {
           icon="print-outline"
           variant="primary"
           onPress={handlePrint}
+          style={{ flex: 1 }}
+        />
+        <Button
+          label="Tiled print"
+          icon="albums-outline"
+          onPress={chooseTiledPrint}
           style={{ flex: 1 }}
         />
         <Button
@@ -1167,6 +1317,7 @@ function DraggableItem({
   item,
   pxPerIn,
   selected,
+  locked,
   accent,
   onSelect,
   onCommit,
@@ -1174,6 +1325,7 @@ function DraggableItem({
   item: SheetItem;
   pxPerIn: number;
   selected: boolean;
+  locked: boolean;
   accent: string;
   onSelect: () => void;
   onCommit: (
@@ -1220,7 +1372,7 @@ function DraggableItem({
   // Mutating `.value` on a shared value from inside a gesture worklet is the
   // documented, correct Reanimated pattern (worklets run on the UI thread,
   // not as React render code).
-  const pan = Gesture.Pan()
+  const pan = Gesture.Pan().enabled(!locked)
     .onStart(() => {
       startX.value = translateX.value;
       startY.value = translateY.value;
@@ -1234,7 +1386,7 @@ function DraggableItem({
       commit();
     });
 
-  const pinch = Gesture.Pinch()
+  const pinch = Gesture.Pinch().enabled(!locked)
     .onStart(() => {
       startW.value = width.value;
       startH.value = height.value;
@@ -1247,7 +1399,7 @@ function DraggableItem({
       commit();
     });
 
-  const rotate = Gesture.Rotation()
+  const rotate = Gesture.Rotation().enabled(!locked)
     .onStart(() => {
       startRotation.value = rotation.value;
     })
@@ -1269,6 +1421,7 @@ function DraggableItem({
     transform: [{ rotateZ: `${rotation.value}deg` }],
     borderWidth: selected ? 2 : 0,
     borderColor: accent,
+    opacity: locked && !selected ? 0.82 : 1,
   }));
 
   return (
@@ -1279,7 +1432,9 @@ function DraggableItem({
         accessibilityRole="button"
         accessibilityLabel={item.title}
         accessibilityHint={
-          selected
+          locked
+            ? "Locked. Select it and use Unlock before moving or resizing."
+            : selected
             ? "Selected. Drag to move, pinch to resize, twist to rotate."
             : "Double tap to select, then duplicate, mirror, or remove it."
         }
@@ -1310,6 +1465,7 @@ const styles = StyleSheet.create({
     marginBottom: SPACE.md,
   },
   sheetBarText: { flex: 1, gap: 2 },
+  precisionBar: { flexDirection: "row", alignItems: "center", gap: SPACE.sm, borderWidth: 1, borderRadius: RADIUS.md, padding: SPACE.sm, marginBottom: SPACE.md },
   iconAction: {
     width: 38,
     height: 38,
@@ -1334,10 +1490,17 @@ const styles = StyleSheet.create({
     borderRadius: 2,
     ...lift("md"),
   },
+  safeGuide: { position: "absolute", left: 10, right: 10, top: 10, bottom: 10, borderWidth: 1, borderStyle: "dashed" },
+  gridV: { position: "absolute", top: 0, bottom: 0, width: StyleSheet.hairlineWidth },
+  gridH: { position: "absolute", left: 0, right: 0, height: StyleSheet.hairlineWidth },
   actions: { flexDirection: "row", gap: SPACE.sm, marginBottom: SPACE.lg },
   itemActions: { flexDirection: "row", gap: SPACE.sm, marginBottom: SPACE.md },
   sizeRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   sizeLabel: { flexDirection: "row", alignItems: "center", gap: 7 },
+  precisionControls: { flexDirection: "row", flexWrap: "wrap", gap: SPACE.sm, marginTop: SPACE.md },
+  controlGroup: { flex: 1, minWidth: 140, gap: 6 },
+  miniLabel: { fontSize: 9, letterSpacing: 1 },
+  miniActions: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
   stepper: { flexDirection: "row", alignItems: "center", gap: 8 },
   sizeInput: {
     borderWidth: 1,

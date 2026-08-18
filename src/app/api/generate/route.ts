@@ -8,9 +8,32 @@ const GEMINI_MODEL = process.env.GEMINI_IMAGE_MODEL || "gemini-2.5-flash-image";
 const OPENAI_IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL || "gpt-image-2";
 const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5";
 const MAX_PROMPT_LENGTH = 500;
+const MAX_REFERENCE_BASE64_LENGTH = 12_000_000;
 
 const PROVIDERS = ["gemini", "openai", "claude"] as const;
 type ImageProvider = (typeof PROVIDERS)[number];
+type ImageQuality = "draft" | "standard" | "best";
+type ReferenceStrength = "loose" | "balanced" | "faithful";
+type ReferenceImage = { data: string; mimeType: string; strength: ReferenceStrength };
+
+const QUALITY_ESTIMATES: Record<ImageProvider, Record<ImageQuality, number>> = {
+  gemini: { draft: 0.02, standard: 0.04, best: 0.06 },
+  openai: { draft: 0.01, standard: 0.05, best: 0.21 },
+  claude: { draft: 0.03, standard: 0.05, best: 0.07 },
+};
+
+export async function GET() {
+  return NextResponse.json({
+    providers: PROVIDERS.map((id) => ({
+      id,
+      available: !missingConfiguration(id),
+      reason: missingConfiguration(id) || undefined,
+      model: id === "gemini" ? GEMINI_MODEL : id === "openai" ? OPENAI_IMAGE_MODEL : ANTHROPIC_MODEL,
+      speed: id === "gemini" ? "Fast" : id === "openai" ? "Detailed" : "Balanced",
+      estimates: QUALITY_ESTIMATES[id],
+    })),
+  });
+}
 
 function isProvider(value: unknown): value is ImageProvider {
   return typeof value === "string" && PROVIDERS.includes(value as ImageProvider);
@@ -35,7 +58,14 @@ function missingConfiguration(provider: ImageProvider): string | null {
 }
 
 export async function POST(req: NextRequest) {
-  let body: { prompt?: string; style?: string; brand?: string; provider?: string };
+  let body: {
+    prompt?: string;
+    style?: string;
+    brand?: string;
+    provider?: string;
+    quality?: string;
+    reference?: { data?: string; mimeType?: string; strength?: string };
+  };
   try {
     body = await req.json();
   } catch {
@@ -62,6 +92,22 @@ export async function POST(req: NextRequest) {
       { status: 400 }
     );
   }
+  const quality: ImageQuality = ["draft", "standard", "best"].includes(body.quality || "")
+    ? (body.quality as ImageQuality)
+    : "standard";
+  let reference: ReferenceImage | undefined;
+  if (body.reference) {
+    const { data, mimeType, strength } = body.reference;
+    if (
+      !data ||
+      data.length > MAX_REFERENCE_BASE64_LENGTH ||
+      !["image/png", "image/jpeg", "image/webp"].includes(mimeType || "") ||
+      !["loose", "balanced", "faithful"].includes(strength || "")
+    ) {
+      return NextResponse.json({ error: "That reference image isn't supported or is too large." }, { status: 400 });
+    }
+    reference = { data, mimeType: mimeType!, strength: strength as ReferenceStrength };
+  }
 
   // This endpoint is unauthenticated and calls paid APIs, so every configured
   // provider shares the same abuse guard.
@@ -76,21 +122,29 @@ export async function POST(req: NextRequest) {
   const style =
     brand.generate.styles.find((candidate) => candidate.id === body.style) ||
     brand.generate.styles[0];
+  const referenceDirection = reference
+    ? {
+        loose: "Use the reference only for broad inspiration; freely reinterpret its composition.",
+        balanced: "Preserve the reference's main silhouette and composition while refining it into production-ready line art.",
+        faithful: "Follow the reference's silhouette, placement, and defining details as closely as possible.",
+      }[reference.strength]
+    : "";
   const fullPrompt = [
     `${brand.generate.subjectFraming}: ${prompt}.`,
     style.promptDescription + ".",
     "Pure black ink linework only, no shading, no color, no gradients, no gray.",
     "Isolated on a solid pure white background, centered composition.",
     `Clean unbroken outlines ${brand.generate.outputFraming}.`,
-  ].join(" ");
+    referenceDirection,
+  ].filter(Boolean).join(" ");
 
   try {
-    if (provider === "openai") return await generateWithOpenAI(fullPrompt);
+    if (provider === "openai") return await generateWithOpenAI(fullPrompt, quality, reference);
     if (provider === "claude") {
-      const directedPrompt = await directWithClaude(fullPrompt);
-      return await generateWithGemini(directedPrompt, "Claude-directed Gemini");
+      const directedPrompt = await directWithClaude(fullPrompt, reference);
+      return await generateWithGemini(directedPrompt, "Claude-directed Gemini", reference);
     }
-    return await generateWithGemini(fullPrompt, "Gemini");
+    return await generateWithGemini(fullPrompt, "Gemini", reference);
   } catch (error) {
     console.error(`${provider} generation request failed`, error);
     return NextResponse.json(
@@ -100,7 +154,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-async function generateWithGemini(prompt: string, label: string) {
+async function generateWithGemini(prompt: string, label: string, reference?: ReferenceImage) {
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
     {
@@ -110,7 +164,10 @@ async function generateWithGemini(prompt: string, label: string) {
         "x-goog-api-key": process.env.GEMINI_API_KEY!,
       },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
+        contents: [{ parts: [
+          { text: prompt },
+          ...(reference ? [{ inlineData: { data: reference.data, mimeType: reference.mimeType } }] : []),
+        ] }],
         generationConfig: { responseModalities: ["IMAGE"] },
       }),
     }
@@ -161,21 +218,26 @@ async function generateWithGemini(prompt: string, label: string) {
   });
 }
 
-async function generateWithOpenAI(prompt: string) {
-  const res = await fetch("https://api.openai.com/v1/images/generations", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: OPENAI_IMAGE_MODEL,
-      prompt,
-      size: "1024x1024",
-      quality: "medium",
-      output_format: "png",
-    }),
-  });
+async function generateWithOpenAI(prompt: string, quality: ImageQuality, reference?: ReferenceImage) {
+  const openAIQuality = { draft: "low", standard: "medium", best: "high" }[quality];
+  let endpoint = "https://api.openai.com/v1/images/generations";
+  let body: BodyInit;
+  let headers: HeadersInit = { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` };
+  if (reference) {
+    endpoint = "https://api.openai.com/v1/images/edits";
+    const form = new FormData();
+    form.append("model", OPENAI_IMAGE_MODEL);
+    form.append("prompt", prompt);
+    form.append("size", "1024x1024");
+    form.append("quality", openAIQuality);
+    form.append("output_format", "png");
+    form.append("image", new Blob([Buffer.from(reference.data, "base64")], { type: reference.mimeType }), "reference.png");
+    body = form;
+  } else {
+    headers = { ...headers, "Content-Type": "application/json" };
+    body = JSON.stringify({ model: OPENAI_IMAGE_MODEL, prompt, size: "1024x1024", quality: openAIQuality, output_format: "png" });
+  }
+  const res = await fetch(endpoint, { method: "POST", headers, body });
 
   if (!res.ok) {
     const text = await res.text();
@@ -212,7 +274,7 @@ async function generateWithOpenAI(prompt: string) {
   return NextResponse.json({ imageBase64, mimeType: "image/png" });
 }
 
-async function directWithClaude(prompt: string): Promise<string> {
+async function directWithClaude(prompt: string, reference?: ReferenceImage): Promise<string> {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -225,7 +287,15 @@ async function directWithClaude(prompt: string): Promise<string> {
       max_tokens: 700,
       system:
         "You are an expert tattoo and bakery line-art director. Return only a refined image-generation prompt. Preserve every production constraint and never add commentary.",
-      messages: [{ role: "user", content: prompt }],
+      messages: [{
+        role: "user",
+        content: reference
+          ? [
+              { type: "image", source: { type: "base64", media_type: reference.mimeType, data: reference.data } },
+              { type: "text", text: prompt },
+            ]
+          : prompt,
+      }],
     }),
   });
 

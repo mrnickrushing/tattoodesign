@@ -24,6 +24,7 @@ export type SavedSheetItem = {
   hIn: number;
   rotation: number;
   mirrored: boolean;
+  locked?: boolean;
 };
 
 export type SavedSheet = {
