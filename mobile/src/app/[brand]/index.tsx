@@ -1,356 +1,242 @@
-import { useEffect, useState } from "react";
-import {
-  View,
-  Text,
-  TextInput,
-  StyleSheet,
-  ScrollView,
-  Alert,
-  Pressable,
-  KeyboardAvoidingView,
-  Platform,
-} from "react-native";
+import { useCallback, useState } from "react";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
+import { router, useFocusEffect } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { useBrand } from "@/context/BrandContext";
-import { generateDesign, checkGeneratorAvailable } from "@/lib/api";
-import { stencilize } from "@/lib/stencil";
-import { addToLibrary } from "@/lib/designLibrary";
-import { saveDataUrlToPhotos } from "@/lib/files";
-import {
-  clearPrompts,
-  forgetPrompt,
-  getPrompts,
-  rememberPrompt,
-  type PromptEntry,
-} from "@/lib/promptHistory";
-import { StockPane } from "@/components/StockPane";
-import { Button } from "@/components/Button";
-import { ScreenHeader, Chip, Notice, Card, SectionLabel } from "@/components/ui";
-import { RADIUS, SPACE } from "@/lib/theme";
+import { ScreenHeader, SectionLabel } from "@/components/ui";
+import { ImageViewer } from "@/components/ImageViewer";
+import { getLibrary, type LibraryDesign } from "@/lib/designLibrary";
+import { getDraft, listSheets, type SavedSheet, type SheetDraft } from "@/lib/sheetLibrary";
+import { RADIUS, SPACE, glow, lift } from "@/lib/theme";
 
-const STYLE_ICONS: Record<string, "flash" | "remove" | "square" | "color-filter" | "brush"> = {
-  traditional: "flash",
-  fineline: "remove",
-  blackwork: "square",
-  irezumi: "color-filter",
-  cookie: "flash",
-  cakepop: "color-filter",
-  topper: "square",
-  piping: "brush",
-};
+const TOOL_ICONS = {
+  generate: "sparkles-outline",
+  convert: "scan-outline",
+  builder: "grid-outline",
+} as const;
 
-export default function GenerateScreen() {
+export default function StudioDashboard() {
   const { brand, theme } = useBrand();
-  const [prompt, setPrompt] = useState("");
-  const [style, setStyle] = useState(brand.generate.styles[0]?.id ?? "");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [disabledReason, setDisabledReason] = useState<string | null>(null);
-  const [rawUrl, setRawUrl] = useState<string | null>(null);
-  const [stencilUrl, setStencilUrl] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-  const [history, setHistory] = useState<PromptEntry[]>([]);
+  const [designs, setDesigns] = useState<LibraryDesign[]>([]);
+  const [sheets, setSheets] = useState<SavedSheet[]>([]);
+  const [draft, setDraft] = useState<SheetDraft | null>(null);
+  const [preview, setPreview] = useState<LibraryDesign | null>(null);
 
-  useEffect(() => {
-    checkGeneratorAvailable().then(setDisabledReason);
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      Promise.all([getLibrary(brand.id), listSheets(brand.id), getDraft(brand.id)]).then(
+        ([nextDesigns, nextSheets, nextDraft]) => {
+          if (!active) return;
+          setDesigns(nextDesigns);
+          setSheets(nextSheets);
+          setDraft(nextDraft);
+        }
+      );
+      return () => {
+        active = false;
+      };
+    }, [brand.id])
+  );
 
-  useEffect(() => {
-    let active = true;
-    getPrompts(brand.id).then((entries) => {
-      if (active) setHistory(entries);
-    });
-    return () => {
-      active = false;
-    };
-  }, [brand.id]);
+  const hasDraft = !!draft?.items.length;
+  const resumeLabel = draft?.sheetName ?? "Untitled sheet";
+  const recentDesigns = designs.slice(0, 8);
+  const recentSheets = sheets.slice(0, 4);
 
-  function recall(entry: PromptEntry) {
-    Haptics.selectionAsync();
-    setPrompt(entry.prompt);
-    // The style is half of what made the result, so it comes back too — but
-    // only if it still exists for this brand.
-    if (brand.generate.styles.some((s) => s.id === entry.style)) setStyle(entry.style);
+  function go(path: "generate" | "convert" | "builder") {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    router.push(`/${brand.id}/${path}`);
   }
-
-  function promptOptions(entry: PromptEntry) {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    Alert.alert(entry.prompt, undefined, [
-      { text: "Use this prompt", onPress: () => recall(entry) },
-      {
-        text: "Remove",
-        style: "destructive",
-        onPress: async () => setHistory(await forgetPrompt(brand.id, entry.prompt)),
-      },
-      { text: "Cancel", style: "cancel" },
-    ]);
-  }
-
-  function confirmClearHistory() {
-    Alert.alert("Clear prompt history?", "The designs you already made are kept.", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Clear",
-        style: "destructive",
-        onPress: async () => setHistory(await clearPrompts(brand.id)),
-      },
-    ]);
-  }
-
-  async function handleGenerate() {
-    if (!prompt.trim() || loading) return;
-    setLoading(true);
-    setError(null);
-    setSaved(false);
-    const result = await generateDesign(brand.id, prompt, style);
-    if (!result.ok) {
-      if (result.disabled) setDisabledReason(result.error);
-      else setError(result.error);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      setLoading(false);
-      return;
-    }
-    setRawUrl(result.dataUrl);
-    // Only prompts that actually produced something are worth keeping.
-    setHistory(await rememberPrompt(brand.id, prompt, style));
-    try {
-      const stencil = await stencilize(result.dataUrl, {
-        threshold: 70,
-        lineWeight: 1,
-        denoise: 1,
-      });
-      setStencilUrl(stencil);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } catch {
-      setError("Generated, but couldn't clean it up into a stencil.");
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleSave() {
-    if (!stencilUrl) return;
-    try {
-      await saveDataUrlToPhotos(stencilUrl, `design-${Date.now()}.png`);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert("Saved", "Added to your Photos.");
-    } catch (e) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert("Couldn't save", e instanceof Error ? e.message : "Try again.");
-    }
-  }
-
-  async function handleSend() {
-    if (!stencilUrl) return;
-    await addToLibrary(brand.id, {
-      dataUrl: stencilUrl,
-      title: prompt.slice(0, 40) || "Generated design",
-      source: "generated",
-    });
-    setSaved(true);
-  }
-
-  const canGenerate = !!prompt.trim() && !loading && !disabledReason;
 
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1 }}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-    >
+    <>
       <ScrollView
         style={{ backgroundColor: theme.background }}
         contentContainerStyle={styles.scroll}
-        keyboardShouldPersistTaps="handled"
       >
         <ScreenHeader
-          eyebrow={brand.generate.tabLabel}
-          title={brand.generate.title}
-          subtitle={brand.generate.subtitle}
+          eyebrow="Studio home"
+          title={brand.id === "ink" ? "Your next piece starts here" : "Something sweet starts here"}
+          subtitle="Resume the work in progress, or jump straight into a fresh idea."
         />
 
-        {disabledReason && (
-          <View style={{ marginBottom: SPACE.md }}>
-            <Notice icon="cloud-offline-outline">{disabledReason}</Notice>
+        <Pressable
+          onPress={() => go(hasDraft ? "builder" : "generate")}
+          accessibilityRole="button"
+          accessibilityLabel={hasDraft ? `Resume ${resumeLabel}` : brand.home.cards[0].cta}
+          style={({ pressed }) => [
+            styles.resume,
+            { borderColor: theme.accent },
+            brand.id === "ink" ? glow(theme, "md") : lift("md"),
+            pressed && { transform: [{ scale: 0.985 }], opacity: 0.9 },
+          ]}
+        >
+          <LinearGradient
+            colors={
+              brand.id === "ink"
+                ? (["#5f111c", "#241615", theme.surface] as const)
+                : (["#f7c9d8", "#fff0f4", theme.surface] as const)
+            }
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={StyleSheet.absoluteFill}
+          />
+          <View style={[styles.resumeIcon, { backgroundColor: theme.accent }]}>
+            <Ionicons name={hasDraft ? "arrow-forward" : "sparkles"} size={21} color={theme.accentText} />
           </View>
-        )}
+          <View style={styles.resumeCopy}>
+            <Text style={[styles.kicker, { color: theme.accent, fontFamily: theme.fontBodyMedium }]}>
+              {hasDraft ? "CONTINUE WORKING" : "START SOMETHING NEW"}
+            </Text>
+            <Text numberOfLines={1} style={[styles.resumeTitle, { color: theme.foreground, fontFamily: theme.fontDisplay }]}>
+              {hasDraft ? resumeLabel : brand.home.cards[0].title}
+            </Text>
+            <Text style={[styles.resumeMeta, { color: theme.muted, fontFamily: theme.fontBody }]}>
+              {hasDraft
+                ? `${draft.items.length} design${draft.items.length === 1 ? "" : "s"} on the active canvas`
+                : "Turn a description into clean, printable linework"}
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={22} color={theme.foreground} />
+        </Pressable>
 
-        <View style={styles.panes}>
-          <StockPane
-            index={1}
-            label="Raw"
-            uri={rawUrl}
-            loading={loading}
-            loadingLabel="Drawing"
-            emptyIcon="sparkles-outline"
-            emptyHint="AI draft lands here"
-          />
-          <StockPane
-            index={2}
-            label="Stencil"
-            uri={stencilUrl}
-            loading={loading}
-            loadingLabel="Cleaning"
-            emptyIcon="git-branch-outline"
-            emptyHint="Cleaned linework"
-          />
-        </View>
-
-        <Card style={{ marginTop: SPACE.lg }}>
-          <Text style={[styles.field, { color: theme.muted, fontFamily: theme.fontBodyMedium }]}>
-            WHAT ARE WE MAKING
-          </Text>
-          <TextInput
-            value={prompt}
-            onChangeText={setPrompt}
-            placeholder={brand.generate.promptPlaceholder}
-            placeholderTextColor={theme.muted}
-            multiline
-            accessibilityLabel="Prompt"
-            style={[
-              styles.input,
-              {
-                backgroundColor: theme.surfaceAlt,
-                borderColor: theme.line,
-                color: theme.foreground,
-                fontFamily: theme.fontBody,
-              },
-            ]}
-          />
-
-          <Text
-            style={[
-              styles.field,
-              { color: theme.muted, fontFamily: theme.fontBodyMedium, marginTop: SPACE.md },
-            ]}
-          >
-            STYLE
-          </Text>
-          <View style={styles.chips} accessibilityRole="radiogroup">
-            {brand.generate.styles.map((s) => (
-              <Chip
-                key={s.id}
-                label={s.label}
-                icon={STYLE_ICONS[s.id]}
-                active={s.id === style}
-                onPress={() => setStyle(s.id)}
-              />
+        <View style={styles.section}>
+          <SectionLabel>Quick start</SectionLabel>
+          <View style={styles.tools}>
+            {brand.home.cards.map((card) => (
+              <Pressable
+                key={card.tool}
+                onPress={() => go(card.tool)}
+                accessibilityRole="button"
+                accessibilityLabel={card.cta}
+                style={({ pressed }) => [
+                  styles.tool,
+                  { backgroundColor: theme.surface, borderColor: theme.line },
+                  pressed && { backgroundColor: theme.surfaceAlt },
+                ]}
+              >
+                <View style={[styles.toolIcon, { backgroundColor: `${theme.accent}18` }]}>
+                  <Ionicons name={TOOL_ICONS[card.tool]} size={20} color={theme.accent} />
+                </View>
+                <Text numberOfLines={2} style={[styles.toolTitle, { color: theme.foreground, fontFamily: theme.fontBodyMedium }]}>
+                  {card.title.replace("Stencil Linework ", "").replace("Flash Sheet ", "")}
+                </Text>
+                <Ionicons name="arrow-forward" size={14} color={theme.muted} />
+              </Pressable>
             ))}
           </View>
-
-          {error && (
-            <View style={{ marginTop: SPACE.md }}>
-              <Notice>{error}</Notice>
-            </View>
-          )}
-
-          <Button
-            label={loading ? "Generating" : "Generate"}
-            icon="sparkles"
-            variant="primary"
-            onPress={handleGenerate}
-            disabled={!canGenerate}
-            loading={loading}
-            style={{ marginTop: SPACE.md }}
-          />
-        </Card>
-
-        <View style={styles.actions}>
-          <Button
-            label="Save to Photos"
-            icon="download-outline"
-            onPress={handleSave}
-            disabled={!stencilUrl}
-            style={{ flex: 1 }}
-          />
-          <Button
-            label={saved ? "On the sheet" : "Add to sheet"}
-            icon={saved ? "checkmark" : "add"}
-            onPress={handleSend}
-            disabled={!stencilUrl}
-            style={{ flex: 1 }}
-          />
         </View>
 
-        {history.length > 0 && (
-          <View style={{ marginTop: SPACE.xl }}>
-            <SectionLabel
-              action={{ label: "Clear", icon: "trash-outline", onPress: confirmClearHistory }}
-            >
-              Recent prompts
-            </SectionLabel>
-            <View style={[styles.history, { borderColor: theme.line }]}>
-              {history.map((entry, i) => {
-                const styleLabel = brand.generate.styles.find((s) => s.id === entry.style)?.label;
-                return (
-                  <Pressable
-                    key={entry.prompt}
-                    onPress={() => recall(entry)}
-                    onLongPress={() => promptOptions(entry)}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Use prompt: ${entry.prompt}`}
-                    accessibilityHint="Long press to remove it"
-                    style={({ pressed }) => [
-                      styles.historyRow,
-                      i > 0 && { borderTopWidth: 1, borderTopColor: theme.line },
-                      pressed && { backgroundColor: theme.surfaceAlt },
-                    ]}
-                  >
-                    <View style={styles.historyText}>
-                      <Text
-                        numberOfLines={1}
-                        style={{
-                          color: theme.foreground,
-                          fontFamily: theme.fontBody,
-                          fontSize: 14,
-                        }}
-                      >
-                        {entry.prompt}
-                      </Text>
-                      {styleLabel && (
-                        <Text
-                          style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 11 }}
-                        >
-                          {styleLabel}
-                        </Text>
-                      )}
-                    </View>
-                    <Ionicons name="return-down-back-outline" size={16} color={theme.muted} />
-                  </Pressable>
-                );
-              })}
+        <View style={styles.section}>
+          <SectionLabel action={{ label: "Open sheet", icon: "grid-outline", onPress: () => go("builder") }}>
+            Recent designs
+          </SectionLabel>
+          {recentDesigns.length ? (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.designRow}>
+              {recentDesigns.map((design) => (
+                <Pressable
+                  key={design.id}
+                  onPress={() => setPreview(design)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`View ${design.title}`}
+                  style={({ pressed }) => [styles.designCard, { backgroundColor: theme.stock, borderColor: theme.line }, pressed && { opacity: 0.75 }]}
+                >
+                  <Image source={{ uri: design.uri }} style={styles.designImage} contentFit="contain" />
+                  <View style={[styles.designCaption, { backgroundColor: theme.surface }]}>
+                    <Text numberOfLines={1} style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium, fontSize: 12 }}>
+                      {design.title}
+                    </Text>
+                    <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 10 }}>
+                      {design.source}
+                    </Text>
+                  </View>
+                </Pressable>
+              ))}
+            </ScrollView>
+          ) : (
+            <EmptyRow icon="images-outline" title="No designs yet" detail="Generate or convert one and it will stay close at hand." />
+          )}
+        </View>
+
+        <View style={styles.section}>
+          <SectionLabel action={{ label: "All sheets", icon: "albums-outline", onPress: () => go("builder") }}>
+            Saved sheets
+          </SectionLabel>
+          {recentSheets.length ? (
+            <View style={styles.sheetList}>
+              {recentSheets.map((sheet) => (
+                <Pressable
+                  key={sheet.id}
+                  onPress={() => router.push({ pathname: "/[brand]/builder", params: { brand: brand.id, sheet: sheet.id } })}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Resume ${sheet.name}`}
+                  style={({ pressed }) => [styles.sheetItem, { backgroundColor: theme.surface, borderColor: theme.line }, pressed && { backgroundColor: theme.surfaceAlt }]}
+                >
+                  <View style={[styles.sheetIcon, { borderColor: theme.line }]}>
+                    <Ionicons name="document-text-outline" size={19} color={theme.accent} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text numberOfLines={1} style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium, fontSize: 14 }}>{sheet.name}</Text>
+                    <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 11 }}>
+                      {sheet.items.length} design{sheet.items.length === 1 ? "" : "s"} · {new Date(sheet.updatedAt).toLocaleDateString()}
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={17} color={theme.muted} />
+                </Pressable>
+              ))}
             </View>
-          </View>
-        )}
+          ) : (
+            <EmptyRow icon="document-outline" title="No saved sheets" detail="Build a layout once, then resume it from here anytime." />
+          )}
+        </View>
       </ScrollView>
-    </KeyboardAvoidingView>
+
+      <ImageViewer
+        uri={preview?.uri ?? null}
+        title={preview?.title}
+        actions={[{ icon: "grid-outline", label: "Open sheet builder", onPress: () => go("builder") }]}
+        onClose={() => setPreview(null)}
+      />
+    </>
+  );
+}
+
+function EmptyRow({ icon, title, detail }: { icon: keyof typeof Ionicons.glyphMap; title: string; detail: string }) {
+  const { theme } = useBrand();
+  return (
+    <View style={[styles.empty, { backgroundColor: theme.surface, borderColor: theme.line }]}>
+      <Ionicons name={icon} size={22} color={theme.muted} />
+      <View style={{ flex: 1 }}>
+        <Text style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium, fontSize: 13 }}>{title}</Text>
+        <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 11, lineHeight: 16 }}>{detail}</Text>
+      </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   scroll: { padding: SPACE.md, paddingTop: SPACE.lg, paddingBottom: SPACE.xxl },
-  panes: { flexDirection: "row", gap: SPACE.sm },
-  field: { fontSize: 10, letterSpacing: 1.5, marginBottom: 8 },
-  input: {
-    borderWidth: 1,
-    borderRadius: RADIUS.md,
-    padding: 12,
-    minHeight: 84,
-    textAlignVertical: "top",
-    fontSize: 15,
-    lineHeight: 21,
-  },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  actions: { flexDirection: "row", gap: SPACE.sm, marginTop: SPACE.sm },
-  history: { borderWidth: 1, borderRadius: RADIUS.md, overflow: "hidden" },
-  historyRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: SPACE.sm,
-    paddingHorizontal: 12,
-    paddingVertical: 11,
-    minHeight: 52,
-  },
-  historyText: { flex: 1, gap: 2 },
+  section: { marginTop: SPACE.xl },
+  resume: { minHeight: 112, borderWidth: 1, borderRadius: RADIUS.lg, padding: SPACE.md, flexDirection: "row", alignItems: "center", gap: SPACE.md, overflow: "hidden" },
+  resumeIcon: { width: 46, height: 46, borderRadius: 16, alignItems: "center", justifyContent: "center", zIndex: 1 },
+  resumeCopy: { flex: 1, zIndex: 1 },
+  kicker: { fontSize: 9, letterSpacing: 1.6, marginBottom: 4 },
+  resumeTitle: { fontSize: 25, lineHeight: 28 },
+  resumeMeta: { fontSize: 11, marginTop: 3 },
+  tools: { flexDirection: "row", gap: SPACE.sm },
+  tool: { flex: 1, minHeight: 132, borderWidth: 1, borderRadius: RADIUS.md, padding: 12, justifyContent: "space-between" },
+  toolIcon: { width: 38, height: 38, borderRadius: 13, alignItems: "center", justifyContent: "center" },
+  toolTitle: { fontSize: 12, lineHeight: 17 },
+  designRow: { gap: SPACE.sm, paddingRight: SPACE.md },
+  designCard: { width: 148, height: 180, borderWidth: 1, borderRadius: RADIUS.md, overflow: "hidden" },
+  designImage: { width: "100%", flex: 1 },
+  designCaption: { paddingHorizontal: 10, paddingVertical: 8, gap: 2 },
+  sheetList: { gap: SPACE.sm },
+  sheetItem: { minHeight: 68, borderWidth: 1, borderRadius: RADIUS.md, padding: 11, flexDirection: "row", alignItems: "center", gap: SPACE.sm },
+  sheetIcon: { width: 42, height: 42, borderWidth: 1, borderRadius: 13, alignItems: "center", justifyContent: "center" },
+  empty: { minHeight: 74, borderWidth: 1, borderRadius: RADIUS.md, padding: 13, flexDirection: "row", alignItems: "center", gap: SPACE.sm },
 });

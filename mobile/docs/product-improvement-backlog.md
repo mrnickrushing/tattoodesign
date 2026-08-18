@@ -7,7 +7,7 @@ history, icing previews, and OTA updates.
 
 ## Now — highest product value
 
-1. **Studio dashboard with recent work**
+1. **Studio dashboard with recent work — shipped**
    - Show recent designs and saved sheets directly beneath the primary create actions.
    - Let people resume an unfinished sheet in one tap.
    - This turns the app from a collection of tools into an ongoing workspace.
