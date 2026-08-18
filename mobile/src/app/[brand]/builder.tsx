@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   View,
   Text,
   Pressable,
+  TextInput,
   StyleSheet,
   ScrollView,
   Alert,
@@ -13,7 +14,6 @@ import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import * as Print from "expo-print";
 import * as Haptics from "expo-haptics";
-import { captureRef } from "react-native-view-shot";
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -29,8 +29,9 @@ import {
 } from "@/lib/designLibrary";
 import { generateId } from "@/lib/id";
 import { saveDataUrlToPhotos } from "@/lib/files";
+import { composeSheet } from "@/lib/sheet";
 import { Button } from "@/components/Button";
-import { ScreenHeader, Chip, SectionLabel } from "@/components/ui";
+import { ScreenHeader, Chip, SectionLabel, Card } from "@/components/ui";
 import { ImageViewer } from "@/components/ImageViewer";
 import { SPACE, RADIUS, lift } from "@/lib/theme";
 
@@ -66,8 +67,8 @@ export default function BuilderScreen() {
   const [items, setItems] = useState<SheetItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [preview, setPreview] = useState<LibraryDesign | null>(null);
+  const [widthDraft, setWidthDraft] = useState("");
   const [library, setLibrary] = useState<LibraryDesign[]>([]);
-  const sheetRef = useRef<View>(null);
 
   const template = TEMPLATES.find((t) => t.id === templateId)!;
   const pxPerIn = Math.min(MAX_PX_PER_IN, (screenWidth - 40) / template.widthIn);
@@ -83,6 +84,8 @@ export default function BuilderScreen() {
       active = false;
     };
   }, [brand.id]);
+
+  const selected = items.find((i) => i.id === selectedId) ?? null;
 
   function refreshLibrary() {
     getLibrary(brand.id).then(setLibrary);
@@ -148,6 +151,43 @@ export default function BuilderScreen() {
     setSelectedId(id);
   }
 
+  /** Resize about the design's center so it doesn't jump when retyped, keep
+   *  the aspect ratio, and clamp so it can't exceed the page. */
+  function setSelectedWidth(nextWidthIn: number) {
+    const item = items.find((i) => i.id === selectedId);
+    if (!item) return;
+    const maxW = template.widthIn;
+    const ratio = item.hIn / item.wIn;
+    const w = Math.max(0.25, Math.min(nextWidthIn, maxW));
+    const h = w * ratio;
+    setItems((prev) =>
+      prev.map((i) =>
+        i.id === item.id
+          ? {
+              ...i,
+              wIn: w,
+              hIn: h,
+              xIn: Math.max(0, Math.min(i.xIn + (i.wIn - w) / 2, template.widthIn - w)),
+              yIn: Math.max(0, Math.min(i.yIn + (i.hIn - h) / 2, template.heightIn - h)),
+            }
+          : i
+      )
+    );
+  }
+
+  function nudgeWidth(delta: number) {
+    const item = items.find((i) => i.id === selectedId);
+    if (!item) return;
+    Haptics.selectionAsync();
+    setSelectedWidth(Number((item.wIn + delta).toFixed(2)));
+  }
+
+  function commitWidth() {
+    const parsed = parseFloat(widthDraft);
+    if (Number.isFinite(parsed)) setSelectedWidth(parsed);
+    setWidthDraft("");
+  }
+
   function mirrorSelected() {
     if (!selectedId) return;
     Haptics.selectionAsync();
@@ -184,13 +224,21 @@ export default function BuilderScreen() {
     refreshLibrary();
   }
 
-  async function captureSheet(): Promise<string> {
-    const uri = await captureRef(sheetRef, {
-      format: "png",
-      quality: 1,
-      result: "base64",
-    });
-    return `data:image/png;base64,${uri}`;
+  /** Re-composite from the original design files at print resolution. */
+  async function renderSheet(): Promise<string> {
+    return composeSheet(
+      items.map((i) => ({
+        uri: i.uri,
+        xIn: i.xIn,
+        yIn: i.yIn,
+        wIn: i.wIn,
+        hIn: i.hIn,
+        rotation: i.rotation,
+        mirrored: i.mirrored,
+      })),
+      template.widthIn,
+      template.heightIn
+    );
   }
 
   async function handleSave() {
@@ -199,7 +247,7 @@ export default function BuilderScreen() {
       return;
     }
     try {
-      const dataUrl = await captureSheet();
+      const dataUrl = await renderSheet();
       await saveDataUrlToPhotos(dataUrl, `sheet-${Date.now()}.png`);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       Alert.alert("Saved", "Sheet added to your Photos.");
@@ -215,10 +263,15 @@ export default function BuilderScreen() {
       return;
     }
     try {
-      const dataUrl = await captureSheet();
+      const dataUrl = await renderSheet();
       const widthPx = Math.round(template.widthIn * 72);
       const heightPx = Math.round(template.heightIn * 72);
-      const html = `<html><body style="margin:0;padding:0;"><img src="${dataUrl}" style="width:${widthPx}px;height:${heightPx}px;object-fit:contain;" /></body></html>`;
+      const html =
+        `<html><head><style>` +
+        `@page { size: ${template.widthIn}in ${template.heightIn}in; margin: 0; }` +
+        `html,body { margin:0; padding:0; }` +
+        `img { width:${template.widthIn}in; height:${template.heightIn}in; display:block; }` +
+        `</style></head><body><img src="${dataUrl}" /></body></html>`;
       await Print.printAsync({ html, width: widthPx, height: heightPx });
     } catch (e) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -250,7 +303,6 @@ export default function BuilderScreen() {
 
       <View style={styles.sheetWrap}>
         <View
-          ref={sheetRef}
           collapsable={false}
           style={[styles.sheet, { width: sheetWidth, height: sheetHeight }]}
         >
@@ -266,6 +318,49 @@ export default function BuilderScreen() {
           ))}
         </View>
       </View>
+
+      {selected && (
+        <Card style={{ marginBottom: SPACE.md }}>
+          <View style={styles.sizeRow}>
+            <View style={styles.sizeLabel}>
+              <Ionicons name="resize-outline" size={15} color={theme.muted} />
+              <Text style={{ color: theme.foreground, fontFamily: theme.fontBody, fontSize: 14 }}>
+                Width
+              </Text>
+            </View>
+            <View style={styles.stepper}>
+              <Stepper icon="remove" onPress={() => nudgeWidth(-0.25)} />
+              <TextInput
+                value={widthDraft}
+                onChangeText={setWidthDraft}
+                onFocus={() => setWidthDraft(selected.wIn.toFixed(2).replace(/\.?0+$/, ""))}
+                onEndEditing={commitWidth}
+                onSubmitEditing={commitWidth}
+                keyboardType="decimal-pad"
+                returnKeyType="done"
+                selectTextOnFocus
+                accessibilityLabel="Width in inches"
+                style={[
+                  styles.sizeInput,
+                  {
+                    backgroundColor: theme.surfaceAlt,
+                    borderColor: theme.line,
+                    color: theme.foreground,
+                    fontFamily: theme.fontBodyMedium,
+                  },
+                ]}
+              />
+              <Text style={{ color: theme.muted, fontSize: 13, fontFamily: theme.fontBody }}>
+                in
+              </Text>
+              <Stepper icon="add" onPress={() => nudgeWidth(0.25)} />
+            </View>
+          </View>
+          <Text style={{ color: theme.muted, fontSize: 11, marginTop: 6 }}>
+            Prints at exactly this size · {selected.hIn.toFixed(2).replace(/\.?0+$/, "")}in tall
+          </Text>
+        </Card>
+      )}
 
       {selectedId && (
         <View style={styles.itemActions}>
@@ -364,6 +459,34 @@ export default function BuilderScreen() {
         onClose={() => setPreview(null)}
       />
     </ScrollView>
+  );
+}
+
+function Stepper({
+  icon,
+  onPress,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  onPress: () => void;
+}) {
+  const { theme } = useBrand();
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={icon === "add" ? "Increase width" : "Decrease width"}
+      hitSlop={6}
+      style={({ pressed }) => [
+        styles.stepBtn,
+        {
+          borderColor: theme.line,
+          backgroundColor: theme.surfaceAlt,
+          opacity: pressed ? 0.6 : 1,
+        },
+      ]}
+    >
+      <Ionicons name={icon} size={16} color={theme.foreground} />
+    </Pressable>
   );
 }
 
@@ -481,6 +604,26 @@ const styles = StyleSheet.create({
   },
   actions: { flexDirection: "row", gap: SPACE.sm, marginBottom: SPACE.lg },
   itemActions: { flexDirection: "row", gap: SPACE.sm, marginBottom: SPACE.md },
+  sizeRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  sizeLabel: { flexDirection: "row", alignItems: "center", gap: 7 },
+  stepper: { flexDirection: "row", alignItems: "center", gap: 8 },
+  sizeInput: {
+    borderWidth: 1,
+    borderRadius: RADIUS.sm,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    minWidth: 66,
+    textAlign: "center",
+    fontSize: 15,
+  },
+  stepBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: RADIUS.sm,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+  },
   emptyLib: {
     alignItems: "center",
     gap: SPACE.sm,
