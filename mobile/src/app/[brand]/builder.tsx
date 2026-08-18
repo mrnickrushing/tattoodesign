@@ -26,6 +26,7 @@ import {
   getLibrary,
   removeFromLibrary,
   renameInLibrary,
+  replaceInLibrary,
   type LibraryDesign,
 } from "@/lib/designLibrary";
 import {
@@ -48,6 +49,7 @@ import { NamePrompt } from "@/components/NamePrompt";
 import { IcingPreview } from "@/components/IcingPreview";
 import { PlacementPreview } from "@/components/PlacementPreview";
 import { DesignActions, type DesignAction } from "@/components/DesignActions";
+import { DesignEditor } from "@/components/DesignEditor";
 import { SPACE, RADIUS, lift } from "@/lib/theme";
 
 type SheetTemplate = { id: string; label: string; widthIn: number; heightIn: number };
@@ -114,6 +116,7 @@ export default function BuilderScreen() {
   const [icing, setIcing] = useState<LibraryDesign | null>(null);
   const [menu, setMenu] = useState<LibraryDesign | null>(null);
   const [placing, setPlacing] = useState<LibraryDesign | null>(null);
+  const [editing, setEditing] = useState<LibraryDesign | null>(null);
   const [promptSeq, setPromptSeq] = useState(0);
   /** Bumped to remount the placed designs when their geometry changes from
    *  outside a gesture, so the view re-seeds from state. */
@@ -554,6 +557,13 @@ export default function BuilderScreen() {
         hint: brand.id === "sugar" ? "True size, or on a photo" : "True size, or on the skin",
         icon: "resize-outline",
         onPress: () => setPlacing(design),
+      },
+      {
+        key: "edit",
+        label: "Edit",
+        hint: "Touch up, crop, cut line",
+        icon: "brush-outline",
+        onPress: () => setEditing(design),
       },
       {
         key: "view",
@@ -1005,6 +1015,30 @@ export default function BuilderScreen() {
           uri={menu.uri}
           actions={designActions(menu)}
           onClose={() => setMenu(null)}
+        />
+      )}
+
+      {editing && (
+        <DesignEditor
+          uri={editing.uri}
+          title={editing.title}
+          onSave={async (dataUrl, replace) => {
+            if (replace) {
+              await replaceInLibrary(brand.id, editing.id, dataUrl);
+            } else {
+              await addToLibrary(brand.id, {
+                dataUrl,
+                title: `${editing.title} (edited)`,
+                source: "converted",
+              });
+            }
+            const lib = await getLibrary(brand.id);
+            setLibrary(lib);
+            // A replaced design keeps its id, so anything already on the
+            // sheet picks up the edit rather than pointing at the old file.
+            setItems((prev) => resolveItems(prev, lib));
+          }}
+          onClose={() => setEditing(null)}
         />
       )}
 
