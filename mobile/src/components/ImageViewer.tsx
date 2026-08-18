@@ -23,10 +23,14 @@ const DOUBLE_TAP_SCALE = 2.5;
 export function ImageViewer({
   uri,
   title,
+  actions,
   onClose,
 }: {
   uri: string | null;
   title?: string;
+  /** Shown beside the close button. Viewing a design is usually the moment
+   *  you decide to change it, so the way out shouldn't be back and re-find. */
+  actions?: { icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void }[];
   onClose: () => void;
 }) {
   const { theme } = useBrand();
@@ -150,15 +154,32 @@ export function ImageViewer({
               ) : (
                 <View />
               )}
-              <Pressable
-                onPress={handleClose}
-                accessibilityRole="button"
-                accessibilityLabel="Close"
-                hitSlop={14}
-                style={({ pressed }) => [styles.close, { opacity: pressed ? 0.6 : 1 }]}
-              >
-                <Ionicons name="close" size={22} color="#fff" />
-              </Pressable>
+              <View style={styles.actions}>
+                {actions?.map((action) => (
+                  <Pressable
+                    key={action.label}
+                    onPress={() => {
+                      handleClose();
+                      action.onPress();
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel={action.label}
+                    hitSlop={14}
+                    style={({ pressed }) => [styles.close, { opacity: pressed ? 0.6 : 1 }]}
+                  >
+                    <Ionicons name={action.icon} size={20} color="#fff" />
+                  </Pressable>
+                ))}
+                <Pressable
+                  onPress={handleClose}
+                  accessibilityRole="button"
+                  accessibilityLabel="Close"
+                  hitSlop={14}
+                  style={({ pressed }) => [styles.close, { opacity: pressed ? 0.6 : 1 }]}
+                >
+                  <Ionicons name="close" size={22} color="#fff" />
+                </Pressable>
+              </View>
             </View>
           </SafeAreaView>
 
@@ -188,6 +209,7 @@ const styles = StyleSheet.create({
     gap: SPACE.md,
   },
   title: { color: "#fff", fontSize: 14, flex: 1 },
+  actions: { flexDirection: "row", alignItems: "center", gap: SPACE.sm },
   close: {
     width: 36,
     height: 36,

@@ -982,6 +982,18 @@ export default function BuilderScreen() {
       <ImageViewer
         uri={preview?.uri ?? null}
         title={preview?.title}
+        actions={
+          preview
+            ? [
+                {
+                  icon: "resize-outline",
+                  label: "Size it up",
+                  onPress: () => setPlacing(preview),
+                },
+                { icon: "brush-outline", label: "Edit", onPress: () => setEditing(preview) },
+              ]
+            : undefined
+        }
         onClose={() => setPreview(null)}
       />
 
