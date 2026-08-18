@@ -1,22 +1,17 @@
 import { useCallback, useState } from "react";
-import {
-  View,
-  Text,
-  Pressable,
-  StyleSheet,
-  ScrollView,
-  ActivityIndicator,
-  Switch,
-  Alert,
-} from "react-native";
-import { Image } from "expo-image";
+import { View, Text, Pressable, StyleSheet, ScrollView, Switch, Alert } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import Slider from "@react-native-community/slider";
 import * as Haptics from "expo-haptics";
+import { Ionicons } from "@expo/vector-icons";
 import { useBrand } from "@/context/BrandContext";
 import { DEFAULT_STENCIL_OPTIONS, stencilize, type StencilOptions } from "@/lib/stencil";
 import { addToLibrary } from "@/lib/designLibrary";
 import { saveDataUrlToPhotos } from "@/lib/files";
+import { StockPane } from "@/components/StockPane";
+import { Button } from "@/components/Button";
+import { ScreenHeader, Notice, Card } from "@/components/ui";
+import { SPACE } from "@/lib/theme";
 
 export default function ConvertScreen() {
   const { brand, theme } = useBrand();
@@ -31,8 +26,7 @@ export default function ConvertScreen() {
     setProcessing(true);
     setError(null);
     try {
-      const result = await stencilize(src, options);
-      setResultUrl(result);
+      setResultUrl(await stencilize(src, options));
     } catch {
       setError("Couldn't process that image. Try a different photo.");
     } finally {
@@ -96,151 +90,107 @@ export default function ConvertScreen() {
       style={{ backgroundColor: theme.background }}
       contentContainerStyle={styles.scroll}
     >
-      <Text
-        accessibilityRole="header"
-        style={[styles.title, { color: theme.foreground, fontFamily: theme.fontDisplay }]}
-      >
-        {brand.convert.title}
-      </Text>
-      <Text style={[styles.subtitle, { color: theme.muted, fontFamily: theme.fontBody }]}>
-        {brand.convert.subtitle}
-      </Text>
+      <ScreenHeader
+        eyebrow={brand.convert.tabLabel}
+        title={brand.convert.title}
+        subtitle={brand.convert.subtitle}
+      />
 
-      <View style={styles.previewRow}>
-        <Pressable
-          onPress={pickImage}
-          accessibilityRole="button"
-          accessibilityLabel={sourceUrl ? "Change reference photo" : "Choose a reference photo"}
-          style={({ pressed }) => [
-            styles.pane,
-            { borderColor: theme.line, backgroundColor: theme.paper, opacity: pressed ? 0.85 : 1 },
-          ]}
-        >
-          {sourceUrl ? (
-            <Image
-              source={{ uri: sourceUrl }}
-              style={styles.image}
-              contentFit="contain"
-              alt="Selected reference photo"
-            />
-          ) : (
-            <Text style={{ color: theme.muted, fontSize: 12, textAlign: "center", padding: 12 }}>
-              Tap to choose a photo
-            </Text>
-          )}
+      <View style={styles.panes}>
+        <Pressable onPress={pickImage} style={{ flex: 1 }} accessibilityRole="button"
+          accessibilityLabel={sourceUrl ? "Change reference photo" : "Choose a reference photo"}>
+          <StockPane
+            index={1}
+            label="Source"
+            uri={sourceUrl}
+            emptyIcon="image-outline"
+            emptyHint="Tap to pick a photo"
+          />
         </Pressable>
-
-        <View
-          accessibilityLabel={resultUrl ? "Converted line art" : "Result"}
-          style={[styles.pane, { borderColor: theme.line, backgroundColor: "#fff" }]}
-        >
-          {resultUrl ? (
-            <Image
-              source={{ uri: resultUrl }}
-              style={styles.image}
-              contentFit="contain"
-              alt="Converted line art"
-            />
-          ) : (
-            <Text style={{ color: "#00000055", fontSize: 12, textAlign: "center", padding: 12 }}>
-              {processing ? "Processing…" : "Result"}
-            </Text>
-          )}
-          {processing && (
-            <View style={styles.overlay}>
-              <ActivityIndicator color={theme.accent} />
-            </View>
-          )}
-        </View>
-      </View>
-
-      <SliderRow
-        label="Sensitivity"
-        hint="Lower = more detail picked up as lines"
-        value={opts.threshold ?? 60}
-        min={10}
-        max={180}
-        theme={theme}
-        onChange={(v) => updateOpts({ threshold: v })}
-      />
-      <SliderRow
-        label="Line weight"
-        value={opts.lineWeight ?? 1}
-        min={0}
-        max={4}
-        theme={theme}
-        onChange={(v) => updateOpts({ lineWeight: v })}
-      />
-      <SliderRow
-        label="Denoise"
-        value={opts.denoise ?? 1}
-        min={0}
-        max={4}
-        theme={theme}
-        onChange={(v) => updateOpts({ denoise: v })}
-      />
-
-      <View style={styles.switchRow}>
-        <Text style={{ color: theme.foreground, fontFamily: theme.fontBody }}>Invert</Text>
-        <Switch
-          value={!!opts.invert}
-          onValueChange={(v) => {
-            Haptics.selectionAsync();
-            updateOpts({ invert: v });
-          }}
-          trackColor={{ true: theme.accent }}
-          accessibilityLabel="Invert"
+        <StockPane
+          index={2}
+          label="Line art"
+          uri={resultUrl}
+          loading={processing}
+          loadingLabel="Tracing"
+          emptyIcon="git-branch-outline"
+          emptyHint="Traced result"
         />
       </View>
 
-      {error && (
-        <Text
-          accessibilityRole="alert"
-          style={{ color: theme.danger, marginTop: 12, fontFamily: theme.fontBody }}
-        >
-          {error}
+      <Card style={{ marginTop: SPACE.lg }}>
+        <Text style={[styles.field, { color: theme.muted, fontFamily: theme.fontBodyMedium }]}>
+          TRACE CONTROLS
         </Text>
-      )}
 
-      <Pressable
-        onPress={handleSave}
-        disabled={!resultUrl}
-        accessibilityRole="button"
-        accessibilityLabel="Save to Photos"
-        accessibilityState={{ disabled: !resultUrl }}
-        style={({ pressed }) => [
-          styles.primaryButton,
-          {
-            backgroundColor: theme.accent,
-            opacity: !resultUrl ? 0.4 : pressed ? 0.85 : 1,
-            transform: [{ scale: pressed && resultUrl ? 0.98 : 1 }],
-          },
-        ]}
-      >
-        <Text style={{ color: theme.accentText, fontFamily: theme.fontBodyMedium }}>
-          Save to Photos
-        </Text>
-      </Pressable>
+        <SliderRow
+          label="Detail"
+          hint="Lower picks up more lines"
+          icon="options-outline"
+          value={opts.threshold ?? 60}
+          min={10}
+          max={180}
+          onChange={(v) => updateOpts({ threshold: v })}
+        />
+        <SliderRow
+          label="Line weight"
+          icon="brush-outline"
+          value={opts.lineWeight ?? 1}
+          min={0}
+          max={4}
+          onChange={(v) => updateOpts({ lineWeight: v })}
+        />
+        <SliderRow
+          label="Smoothing"
+          icon="water-outline"
+          value={opts.denoise ?? 1}
+          min={0}
+          max={4}
+          onChange={(v) => updateOpts({ denoise: v })}
+        />
 
-      <Pressable
-        onPress={handleSend}
-        disabled={!resultUrl}
-        accessibilityRole="button"
-        accessibilityLabel={saved ? "Added to sheet" : "Send to Sheet Builder"}
-        accessibilityState={{ disabled: !resultUrl }}
-        style={({ pressed }) => [
-          styles.secondaryButton,
-          {
-            borderColor: theme.line,
-            opacity: !resultUrl ? 0.4 : pressed ? 0.7 : 1,
-            transform: [{ scale: pressed && resultUrl ? 0.98 : 1 }],
-          },
-        ]}
-      >
-        <Text style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium }}>
-          {saved ? "Added to Sheet ✓" : "Send to Sheet Builder"}
-        </Text>
-      </Pressable>
+        <View style={[styles.switchRow, { borderTopColor: theme.line }]}>
+          <View style={styles.switchLabel}>
+            <Ionicons name="contrast-outline" size={15} color={theme.muted} />
+            <Text style={{ color: theme.foreground, fontFamily: theme.fontBody, fontSize: 14 }}>
+              Invert
+            </Text>
+          </View>
+          <Switch
+            value={!!opts.invert}
+            onValueChange={(v) => {
+              Haptics.selectionAsync();
+              updateOpts({ invert: v });
+            }}
+            trackColor={{ true: theme.accent }}
+            accessibilityLabel="Invert"
+          />
+        </View>
+
+        {error && (
+          <View style={{ marginTop: SPACE.sm }}>
+            <Notice>{error}</Notice>
+          </View>
+        )}
+      </Card>
+
+      <View style={styles.actions}>
+        <Button
+          label="Save to Photos"
+          icon="download-outline"
+          variant="primary"
+          onPress={handleSave}
+          disabled={!resultUrl}
+          style={{ flex: 1 }}
+        />
+        <Button
+          label={saved ? "On the sheet" : "Add to sheet"}
+          icon={saved ? "checkmark" : "add"}
+          onPress={handleSend}
+          disabled={!resultUrl}
+          style={{ flex: 1 }}
+        />
+      </View>
     </ScrollView>
   );
 }
@@ -248,27 +198,40 @@ export default function ConvertScreen() {
 function SliderRow({
   label,
   hint,
+  icon,
   value,
   min,
   max,
-  theme,
   onChange,
 }: {
   label: string;
   hint?: string;
+  icon: keyof typeof Ionicons.glyphMap;
   value: number;
   min: number;
   max: number;
-  theme: ReturnType<typeof useBrand>["theme"];
   onChange: (v: number) => void;
 }) {
+  const { theme } = useBrand();
   return (
-    <View style={{ marginBottom: 14 }}>
-      <View style={styles.sliderLabelRow}>
-        <Text style={{ color: theme.foreground, fontFamily: theme.fontBody, fontSize: 13 }}>
-          {label}
+    <View style={{ marginBottom: SPACE.sm }}>
+      <View style={styles.sliderTop}>
+        <View style={styles.sliderLabel}>
+          <Ionicons name={icon} size={14} color={theme.muted} />
+          <Text style={{ color: theme.foreground, fontFamily: theme.fontBody, fontSize: 14 }}>
+            {label}
+          </Text>
+        </View>
+        <Text
+          style={{
+            color: theme.accent,
+            fontFamily: theme.fontBodyMedium,
+            fontSize: 13,
+            fontVariant: ["tabular-nums"],
+          }}
+        >
+          {Math.round(value)}
         </Text>
-        <Text style={{ color: theme.muted, fontSize: 12 }}>{Math.round(value)}</Text>
       </View>
       <Slider
         minimumValue={min}
@@ -277,51 +240,32 @@ function SliderRow({
         onValueChange={onChange}
         onSlidingComplete={() => Haptics.selectionAsync()}
         minimumTrackTintColor={theme.accent}
+        maximumTrackTintColor={theme.line}
         thumbTintColor={theme.accent}
         accessibilityLabel={label}
         accessibilityValue={{ min, max, now: Math.round(value) }}
       />
       {hint && (
-        <Text style={{ color: theme.muted, fontSize: 11, marginTop: 2 }}>{hint}</Text>
+        <Text style={{ color: theme.muted, fontSize: 11, marginTop: -2 }}>{hint}</Text>
       )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  scroll: { padding: 20, paddingBottom: 60 },
-  title: { fontSize: 30, marginBottom: 6 },
-  subtitle: { fontSize: 14, lineHeight: 20, marginBottom: 16 },
-  previewRow: { flexDirection: "row", gap: 10, marginBottom: 20 },
-  pane: {
-    flex: 1,
-    aspectRatio: 1,
-    borderRadius: 16,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    overflow: "hidden",
-  },
-  image: { width: "100%", height: "100%" },
-  overlay: {
-    ...StyleSheet.absoluteFill,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#ffffff99",
-  },
-  sliderLabelRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 2 },
+  scroll: { padding: SPACE.md, paddingTop: SPACE.lg, paddingBottom: SPACE.xxl },
+  panes: { flexDirection: "row", gap: SPACE.sm },
+  field: { fontSize: 10, letterSpacing: 1.5, marginBottom: SPACE.sm },
+  sliderTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  sliderLabel: { flexDirection: "row", alignItems: "center", gap: 7 },
   switchRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 16,
+    borderTopWidth: 1,
+    paddingTop: SPACE.sm,
+    marginTop: 2,
   },
-  primaryButton: { marginTop: 8, borderRadius: 999, paddingVertical: 14, alignItems: "center" },
-  secondaryButton: {
-    marginTop: 10,
-    borderRadius: 999,
-    paddingVertical: 14,
-    alignItems: "center",
-    borderWidth: 1,
-  },
+  switchLabel: { flexDirection: "row", alignItems: "center", gap: 7 },
+  actions: { flexDirection: "row", gap: SPACE.sm, marginTop: SPACE.sm },
 });
