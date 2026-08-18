@@ -23,7 +23,8 @@ export default function BrandLayout() {
   if (!brand || !theme || !value) return <Redirect href="/" />;
 
   const icons = {
-    index: ["sparkles", "sparkles-outline"],
+    index: ["home", "home-outline"],
+    generate: ["sparkles", "sparkles-outline"],
     convert: ["scan", "scan-outline"],
     builder: ["grid", "grid-outline"],
     settings: ["settings", "settings-outline"],
@@ -78,7 +79,8 @@ export default function BrandLayout() {
               },
             })}
           >
-            <Tabs.Screen name="index" options={{ title: brand.generate.tabLabel }} />
+            <Tabs.Screen name="index" options={{ title: "Home" }} />
+            <Tabs.Screen name="generate" options={{ title: brand.generate.tabLabel }} />
             <Tabs.Screen name="convert" options={{ title: brand.convert.tabLabel }} />
             <Tabs.Screen name="builder" options={{ title: brand.builder.tabLabel }} />
             <Tabs.Screen name="settings" options={{ title: "Settings" }} />

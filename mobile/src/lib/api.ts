@@ -10,6 +10,18 @@ const DEFAULT_BASE_URL = "https://web-production-523e7.up.railway.app";
 export const API_BASE_URL =
   process.env.EXPO_PUBLIC_API_BASE_URL || DEFAULT_BASE_URL;
 
+export type ImageProvider = "gemini" | "openai" | "claude";
+
+export const IMAGE_PROVIDERS: {
+  id: ImageProvider;
+  label: string;
+  detail: string;
+}[] = [
+  { id: "gemini", label: "Gemini", detail: "Fast native image generation" },
+  { id: "openai", label: "OpenAI", detail: "GPT Image 2 rendering" },
+  { id: "claude", label: "Claude", detail: "Claude directs · Gemini renders" },
+];
+
 export type GenerateResult =
   | { ok: true; dataUrl: string }
   | { ok: false; disabled: boolean; error: string };
@@ -17,13 +29,14 @@ export type GenerateResult =
 export async function generateDesign(
   brand: BrandId,
   prompt: string,
-  style: string
+  style: string,
+  provider: ImageProvider
 ): Promise<GenerateResult> {
   try {
     const res = await fetch(`${API_BASE_URL}/api/generate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ brand, prompt, style }),
+      body: JSON.stringify({ brand, prompt, style, provider }),
     });
     const data = await res.json();
 
@@ -48,12 +61,12 @@ export async function generateDesign(
 }
 
 /** Cheap way to surface the "not connected" state before the user types anything. */
-export async function checkGeneratorAvailable(): Promise<string | null> {
+export async function checkGeneratorAvailable(provider: ImageProvider): Promise<string | null> {
   try {
     const res = await fetch(`${API_BASE_URL}/api/generate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: "{}",
+      body: JSON.stringify({ provider }),
     });
     if (res.status === 501) {
       const data = await res.json();

@@ -1,6 +1,6 @@
 // Two skins, one app. Everything that differs between "Ink Lab" (tattoo
 // flash) and "Sugar Haus" (cookie / cake pop / topper design) lives here —
-// copy, style-chip options, and the Gemini prompt language — so the tool
+// copy, style-chip options, and image-model prompt language — so the tool
 // screens themselves stay brand-agnostic. Mirrors the web app's
 // src/lib/brands.ts so both clients speak the same brand contract.
 
@@ -82,7 +82,7 @@ export const BRANDS: Record<BrandId, BrandConfig> = {
       tabLabel: "Generate",
       title: "Words or a vibe in, stencils out",
       subtitle:
-        "Describe the piece — subject, mood, style — and generate clean black-line flash art on a white background, powered by Gemini.",
+        "Describe the piece — subject, mood, style — then choose the AI that turns it into clean black-line flash art.",
       promptPlaceholder: "e.g. a swallow wrapped around a dagger, bold traditional",
       subjectFraming: "Tattoo flash design",
       outputFraming: "suitable for a tattoo stencil, like classic flash sheet art",
@@ -165,7 +165,7 @@ export const BRANDS: Record<BrandId, BrandConfig> = {
       tabLabel: "Generate",
       title: "Words or a vibe in, templates out",
       subtitle:
-        "Describe the design — subject, mood, style — and generate clean black-line cookie and cake art on a white background, powered by Gemini.",
+        "Describe the design — subject, mood, style — then choose the AI that turns it into clean bakery-ready line art.",
       promptPlaceholder: "e.g. a daisy wreath cookie, simple outline for flooding",
       subjectFraming: "Cookie and cake decorating design",
       outputFraming: "suitable for a royal icing stencil or cutter template",

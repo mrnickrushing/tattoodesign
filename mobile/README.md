@@ -4,9 +4,10 @@ The mobile client for [Inkline](../README.md): Ink Lab (tattoo flash) and
 Sugar Haus (cookie / cake pop / topper design), same three tools as the web
 app, built native with Expo + React Native.
 
-- **Generate** — describe a design, calls the same `/api/generate` Gemini
-  endpoint the web app exposes (deployed on Railway), then cleans the result
-  through an on-device stencil pipeline.
+- **Generate** — describe a design, choose Gemini, OpenAI GPT Image, or
+  Claude-directed generation, then clean the result through an on-device
+  stencil pipeline. Claude provides art direction and Gemini renders because
+  Claude itself returns text, not images.
 - **Convert** — pick a photo from your library and run it through Sobel
   edge detection entirely on-device via `react-native-skia` — no network
   call, same algorithm as the web app's canvas pipeline.
@@ -14,7 +15,7 @@ app, built native with Expo + React Native.
   to resize, twist to rotate. Export via the native print dialog
   (`expo-print`) or save the composed sheet straight to Photos.
 
-Brand copy, style-chip options, and Gemini prompt language live in
+Brand copy, style-chip options, and image-model prompt language live in
 `src/lib/brands.ts` — kept in sync by hand with the web app's
 `../src/lib/brands.ts` (a shared package would be the next step if these
 drift).

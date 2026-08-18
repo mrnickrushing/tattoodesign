@@ -14,6 +14,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import * as Print from "expo-print";
 import * as Haptics from "expo-haptics";
+import { useLocalSearchParams } from "expo-router";
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -101,6 +102,7 @@ function clamp(value: number, min: number, max: number) {
 
 export default function BuilderScreen() {
   const { brand, theme } = useBrand();
+  const { sheet: requestedSheetId } = useLocalSearchParams<{ sheet?: string }>();
   const { width: screenWidth } = useWindowDimensions();
 
   const [templateId, setTemplateId] = useState("letter");
@@ -145,7 +147,16 @@ export default function BuilderScreen() {
       if (!active) return;
       setLibrary(lib);
       setSheets(saved);
-      if (draft) {
+      const requested = requestedSheetId
+        ? saved.find((sheet) => sheet.id === requestedSheetId)
+        : null;
+      if (requested) {
+        if (TEMPLATES.some((t) => t.id === requested.templateId)) setTemplateId(requested.templateId);
+        setItems(resolveItems(requested.items, lib));
+        setSheetId(requested.id);
+        setSheetName(requested.name);
+        setSyncKey((k) => k + 1);
+      } else if (draft) {
         if (TEMPLATES.some((t) => t.id === draft.templateId)) setTemplateId(draft.templateId);
         setItems(resolveItems(draft.items, lib));
         setSheetId(draft.sheetId);
@@ -157,7 +168,7 @@ export default function BuilderScreen() {
     return () => {
       active = false;
     };
-  }, [brand.id]);
+  }, [brand.id, requestedSheetId]);
 
   // Debounced so dragging a design doesn't write on every frame.
   useEffect(() => {
