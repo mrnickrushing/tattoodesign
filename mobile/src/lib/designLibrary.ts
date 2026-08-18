@@ -50,11 +50,20 @@ export async function getLibrary(brand: BrandId): Promise<LibraryDesign[]> {
     if (!raw) return [];
     const entries = JSON.parse(raw) as LegacyDesign[];
 
+    const dir = designsDir(brand);
     let migrated = false;
     const result: LibraryDesign[] = [];
     for (const entry of entries) {
       if (entry.uri) {
-        result.push(entry as LibraryDesign);
+        // Re-derive the path instead of trusting the stored one. An app
+        // update re-creates the iOS container under a new UUID, which
+        // invalidates every absolute file:// URI we wrote — the PNG is still
+        // there under the same name, so the library would go blank for no
+        // reason at all.
+        const file = new File(dir, `${entry.id}.png`);
+        const uri = file.exists ? file.uri : entry.uri;
+        if (uri !== entry.uri) migrated = true;
+        result.push({ ...(entry as LibraryDesign), uri });
         continue;
       }
       if (entry.dataUrl) {
