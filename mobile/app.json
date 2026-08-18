@@ -4,11 +4,11 @@
     "slug": "inkline",
     "version": "1.1.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/inkline-icon-v2.png",
     "scheme": "inkline",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon",
+      "icon": "./assets/images/inkline-icon-v2.png",
       "bundleIdentifier": "com.mrnickrushing.inkline",
       "supportsTablet": true,
       "infoPlist": {
@@ -18,10 +18,8 @@
     "android": {
       "package": "com.mrnickrushing.inkline",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "backgroundColor": "#090707",
+        "foregroundImage": "./assets/images/inkline-icon-v2.png"
       },
       "predictiveBackGestureEnabled": false,
       "permissions": [
