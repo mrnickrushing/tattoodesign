@@ -10,6 +10,7 @@ import { Card, Chip, Notice, SectionLabel } from "@/components/ui";
 import { BLE_PRINTING_AVAILABLE, printEscPosOverBle, requestBlePermission, scanBlePrinters, type BlePrinterDevice } from "@/lib/blePrinter";
 import { dataUrlToEscPos } from "@/lib/escpos";
 import { calibrationCorrection, PRINTER_PRESETS, profileWarnings, type PrinterProfile } from "@/lib/printerProfiles";
+import { DEFAULT_OVERLAP_IN, describeTiling, planTiles, tileCount, tileRects, tiledSheetHtml } from "@/lib/tiling";
 import { RADIUS, SPACE } from "@/lib/theme";
 
 type Props = {
@@ -32,10 +33,20 @@ export function PrinterStudio({ visible, profile, pageWidthIn, pageHeightIn, onC
   const [scanning, setScanning] = useState(false);
   const [printing, setPrinting] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [overlapIn, setOverlapIn] = useState(DEFAULT_OVERLAP_IN);
   const proofSeq = useRef(0);
   const proofDpi = profile.dpi;
   const proofScaleCorrection = profile.scaleCorrection;
   const warnings = useMemo(() => profileWarnings(profile, pageWidthIn), [profile, pageWidthIn]);
+  const tiling = useMemo(
+    () => planTiles(pageWidthIn, pageHeightIn, {
+      sheetWIn: profile.printableWidthIn,
+      sheetHIn: profile.printableHeightIn,
+      overlapIn,
+    }),
+    [pageWidthIn, pageHeightIn, profile.printableWidthIn, profile.printableHeightIn, overlapIn]
+  );
+  const needsTiling = tileCount(tiling) > 1;
 
   useEffect(() => {
     if (!visible) return;
@@ -78,6 +89,17 @@ export function PrinterStudio({ visible, profile, pageWidthIn, pageHeightIn, onC
     setMeasured("");
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     Alert.alert("Calibration applied", `Output scale is now ${(next * 100).toFixed(2)}%. Print the ruler once more to verify.`);
+  }
+
+  async function printTiled() {
+    if (!proof) return Alert.alert("No proof yet", "Wait for the proof to finish building, then try again.");
+    try {
+      await Print.printAsync({
+        html: tiledSheetHtml(tiling, proof, { mirrored: profile.mirrored }),
+      });
+    } catch (error) {
+      Alert.alert("Couldn't print tiles", error instanceof Error ? error.message : "Try again.");
+    }
   }
 
   async function scan() {
@@ -152,6 +174,38 @@ export function PrinterStudio({ visible, profile, pageWidthIn, pageHeightIn, onC
           </View>
           {warnings.map((warning) => <View key={warning} style={{ marginTop: SPACE.xs }}><Notice tone="info" icon="warning-outline">{warning}</Notice></View>)}
 
+          {needsTiling && (
+            <>
+              <SectionLabel>Large format</SectionLabel>
+              <Card>
+                <Text style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium, fontSize: 14 }}>
+                  {describeTiling(tiling)}
+                </Text>
+                <Text style={[styles.detail, { color: theme.muted }]}>
+                  This design is {pageWidthIn.toFixed(1)}in wide and the printer holds {profile.printableWidthIn.toFixed(2)}in. Each sheet carries corner and seam marks plus an R#C# label — align the marks, tape the seams.
+                </Text>
+                <Text style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium, fontSize: 13 }}>Seam overlap · {overlapIn.toFixed(2)}in</Text>
+                <Slider minimumValue={0} maximumValue={1} step={0.05} value={overlapIn} onValueChange={setOverlapIn} minimumTrackTintColor={theme.accent} maximumTrackTintColor={theme.line} thumbTintColor={theme.accent} accessibilityLabel="Seam overlap" />
+                <View style={styles.tileGrid}>
+                  {tileRects(tiling).map((rect) => (
+                    <View
+                      key={rect.index}
+                      style={[styles.tileCell, {
+                        borderColor: theme.line,
+                        backgroundColor: theme.surfaceAlt,
+                        width: `${100 / tiling.cols}%`,
+                        aspectRatio: rect.wIn / rect.hIn,
+                      }]}
+                    >
+                      <Text style={{ color: theme.muted, fontFamily: theme.fontBodyMedium, fontSize: 8 }}>R{rect.row + 1}C{rect.col + 1}</Text>
+                    </View>
+                  ))}
+                </View>
+                <Button label={`Print ${tileCount(tiling)} tiled sheets`} icon="grid-outline" variant="primary" onPress={() => void printTiled()} />
+              </Card>
+            </>
+          )}
+
           <SectionLabel>Calibration wizard</SectionLabel>
           <Card>
             <Text style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium, fontSize: 14 }}>1 · Print the six-inch ruler</Text>
@@ -210,5 +264,7 @@ const styles = StyleSheet.create({
   proofLoading: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: "rgba(255,255,255,.88)" },
   measureRow: { flexDirection: "row", alignItems: "center", gap: SPACE.sm, marginTop: SPACE.xs },
   input: { width: 80, minHeight: 44, borderWidth: 1, borderRadius: RADIUS.sm, paddingHorizontal: 12, fontSize: 16 },
+  tileGrid: { flexDirection: "row", flexWrap: "wrap", marginVertical: SPACE.sm },
+  tileCell: { borderWidth: 1, alignItems: "center", justifyContent: "center" },
   device: { minHeight: 58, flexDirection: "row", alignItems: "center", gap: SPACE.sm, borderWidth: 1, borderRadius: RADIUS.md, padding: SPACE.sm, marginTop: SPACE.sm },
 });

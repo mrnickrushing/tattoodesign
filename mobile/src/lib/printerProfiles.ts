@@ -11,6 +11,8 @@ export type PrinterProfile = {
   dpi: 203 | 300;
   paperWidthIn: number;
   printableWidthIn: number;
+  /** Usable length of one sheet. A roll is fed in chunks of this size. */
+  printableHeightIn: number;
   marginIn: number;
   density: number;
   scaleCorrection: number;
@@ -26,6 +28,7 @@ export const PRINTER_PRESETS: PrinterProfile[] = [
     dpi: 300,
     paperWidthIn: 8.5,
     printableWidthIn: 8,
+    printableHeightIn: 10.5,
     marginIn: 0.25,
     density: 5,
     scaleCorrection: 1,
@@ -39,6 +42,7 @@ export const PRINTER_PRESETS: PrinterProfile[] = [
     dpi: 203,
     paperWidthIn: 8.5,
     printableWidthIn: 8.1,
+    printableHeightIn: 10.6,
     marginIn: 0.2,
     density: 6,
     scaleCorrection: 1,
@@ -52,6 +56,7 @@ export const PRINTER_PRESETS: PrinterProfile[] = [
     dpi: 203,
     paperWidthIn: 8.27,
     printableWidthIn: 7.87,
+    printableHeightIn: 11.29,
     marginIn: 0.2,
     density: 6,
     scaleCorrection: 1,
@@ -65,6 +70,7 @@ export const PRINTER_PRESETS: PrinterProfile[] = [
     dpi: 203,
     paperWidthIn: 3.15,
     printableWidthIn: 2.83,
+    printableHeightIn: 8,
     marginIn: 0.16,
     density: 6,
     scaleCorrection: 1,

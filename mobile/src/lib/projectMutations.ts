@@ -3,6 +3,7 @@ import type {
   DesignLayer,
   EditableDesignProject,
   LayerTransform,
+  Point,
   ShapeLayer,
   StrokeLayer,
   TextLayer,
@@ -92,11 +93,28 @@ export function addLayer(project: EditableDesignProject, layer: DesignLayer): Ed
   return { ...project, layers: [...project.layers, layer], selectedLayerId: layer.id };
 }
 
-export function projectToSvg(project: EditableDesignProject): string {
+/**
+ * Serialises a project to SVG.
+ *
+ * Raster layers need their pixels supplied by the caller — this module stays
+ * free of filesystem access so it can be unit tested — so pass a map of
+ * `layer.asset` to data URL. A raster layer with no entry is skipped rather
+ * than emitted empty, and `rasterLayerAssets` lists what a complete export
+ * needs.
+ */
+export function projectToSvg(
+  project: EditableDesignProject,
+  assets: Record<string, string> = {}
+): string {
   const escape = (value: string) => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll('"', "&quot;");
-  const body = project.layers.filter((layer) => layer.visible && layer.kind !== "raster").map((layer) => {
-    if (layer.kind === "raster") return "";
+  const body = project.layers.filter((layer) => layer.visible).map((layer) => {
     const t = layer.transform;
+    if (layer.kind === "raster") {
+      const href = assets[layer.asset];
+      if (!href) return "";
+      const transform = `translate(${t.x + t.width / 2} ${t.y + t.height / 2}) rotate(${t.rotation}) scale(${t.scaleX} ${t.scaleY}) translate(${-t.width / 2} ${-t.height / 2})`;
+      return `<image href="${escape(href)}" x="0" y="0" width="${t.width}" height="${t.height}" opacity="${layer.opacity}" transform="${transform}" preserveAspectRatio="none"/>`;
+    }
     const transform = `translate(${t.x + t.width / 2} ${t.y + t.height / 2}) rotate(${t.rotation}) scale(${t.scaleX} ${t.scaleY}) translate(${-t.width / 2} ${-t.height / 2})`;
     if (layer.kind === "stroke") return layer.strokes.map((stroke) => {
       const d = stroke.points.map((point, index) => `${index ? "L" : "M"}${point.x} ${point.y}`).join(" ");
@@ -108,4 +126,43 @@ export function projectToSvg(project: EditableDesignProject): string {
     return `${tag} fill="${layer.fill ?? "none"}" stroke="${escape(layer.stroke)}" stroke-width="${layer.strokeWidth}" opacity="${layer.opacity}" transform="${transform}"/>`;
   }).join("");
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${project.canvas.width}" height="${project.canvas.height}" viewBox="0 0 ${project.canvas.width} ${project.canvas.height}">${body}</svg>`;
+}
+
+/**
+ * Every visible drawn stroke, flattened into canvas coordinates.
+ *
+ * Strokes are stored relative to their layer, so the layer transform has to be
+ * applied before the geometry means anything at the canvas level — which is
+ * what spacing analysis and any toolpath export need. Erase strokes are left
+ * out: they remove ink rather than lay it down.
+ */
+export function strokePathsInCanvasSpace(project: EditableDesignProject): Point[][] {
+  const paths: Point[][] = [];
+  for (const layer of project.layers) {
+    if (!layer.visible || layer.kind !== "stroke") continue;
+    const t = layer.transform;
+    const radians = (t.rotation * Math.PI) / 180;
+    const cos = Math.cos(radians);
+    const sin = Math.sin(radians);
+    const originX = t.x + t.width / 2;
+    const originY = t.y + t.height / 2;
+    for (const stroke of layer.strokes) {
+      if (stroke.mode === "erase" || stroke.points.length < 2) continue;
+      paths.push(
+        stroke.points.map((point) => {
+          const sx = (point.x - t.width / 2) * t.scaleX;
+          const sy = (point.y - t.height / 2) * t.scaleY;
+          return { x: originX + sx * cos - sy * sin, y: originY + sx * sin + sy * cos };
+        })
+      );
+    }
+  }
+  return paths;
+}
+
+/** Asset filenames a complete SVG export of this project needs to embed. */
+export function rasterLayerAssets(project: EditableDesignProject): string[] {
+  return project.layers
+    .filter((layer): layer is Extract<DesignLayer, { kind: "raster" }> => layer.visible && layer.kind === "raster")
+    .map((layer) => layer.asset);
 }
