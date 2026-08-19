@@ -40,7 +40,9 @@ import {
   saveDraft,
   saveSheet,
   type SavedSheet,
+  type SavedSheetItem,
 } from "@/lib/sheetLibrary";
+import { File, Paths } from "expo-file-system";
 import { generateId } from "@/lib/id";
 import { pickImageFile } from "@/lib/imageImport";
 import { saveDataUrlToPhotos, shareDataUrl, shareUri } from "@/lib/files";
@@ -55,6 +57,15 @@ import { PlacementPreview } from "@/components/PlacementPreview";
 import { DesignActions, type DesignAction } from "@/components/DesignActions";
 import { allTags, filterDesigns, normalizeTags, type SourceFilter } from "@/lib/libraryFilter";
 import { PREF_KEYS, isFiniteNumber, preferences } from "@/lib/preferences";
+import {
+  contentFingerprint,
+  decodeHandoff,
+  designPayload,
+  encodeDesignHandoff,
+  encodeSheetHandoff,
+  handoffFilename,
+  type DesignPayload,
+} from "@/lib/handoff";
 import { DesignEditor } from "@/components/DesignEditor";
 import { PrinterStudio } from "@/components/PrinterStudio";
 import { EmptyStock } from "@/components/EmptyStock";
@@ -663,6 +674,116 @@ export default function BuilderScreen() {
     setItems((prev) => resolveItems(prev, lib));
   }
 
+  async function handOffDesign(design: LibraryDesign) {
+    try {
+      const png = await new File(design.uri).base64();
+      const raw = encodeDesignHandoff(brand.id, designPayload(design, png));
+      const file = new File(Paths.cache, handoffFilename(design.title));
+      if (file.exists) file.delete();
+      file.write(raw);
+      await shareUri(file.uri);
+    } catch (e) {
+      Alert.alert("Couldn't hand off", e instanceof Error ? e.message : "Try again.");
+    }
+  }
+
+  async function handOffSheet(sheet: SavedSheet) {
+    try {
+      // The sheet travels with every design it references so it arrives whole.
+      const payloads: Record<string, DesignPayload> = {};
+      for (const item of sheet.items) {
+        if (!item.designId || payloads[item.designId]) continue;
+        const design = library.find((candidate) => candidate.id === item.designId);
+        if (!design) continue;
+        payloads[item.designId] = designPayload(design, await new File(design.uri).base64());
+      }
+      const raw = encodeSheetHandoff(brand.id, sheet, payloads);
+      const file = new File(Paths.cache, handoffFilename(sheet.name));
+      if (file.exists) file.delete();
+      file.write(raw);
+      await shareUri(file.uri);
+    } catch (e) {
+      Alert.alert("Couldn't hand off", e instanceof Error ? e.message : "Try again.");
+    }
+  }
+
+  async function importHandoff() {
+    try {
+      const picked = await File.pickFileAsync({ mimeTypes: ["application/json", "application/octet-stream", "*/*"] });
+      if (picked.canceled) return;
+      const raw = await picked.result.text();
+      const decoded = decodeHandoff(raw);
+      if (!decoded.ok) {
+        Alert.alert("Couldn't import", decoded.error);
+        return;
+      }
+      const envelope = decoded.envelope;
+      if (envelope.brand !== brand.id) {
+        Alert.alert(
+          "Wrong studio",
+          `This handoff belongs to ${envelope.brand === "ink" ? "Ink Lab" : "Sugar Haus"} — switch studios and import it there.`
+        );
+        return;
+      }
+
+      // Existing artwork by content, so re-imports point at what's already here.
+      const existingByPrint = new Map<string, LibraryDesign>();
+      for (const design of library) {
+        try {
+          existingByPrint.set(contentFingerprint(await new File(design.uri).base64()), design);
+        } catch {
+          // Unreadable file — it simply can't dedupe.
+        }
+      }
+
+      const importDesign = async (payload: DesignPayload): Promise<{ design: LibraryDesign; fresh: boolean }> => {
+        const existing = existingByPrint.get(contentFingerprint(payload.png));
+        if (existing) return { design: existing, fresh: false };
+        const entry = await addToLibrary(brand.id, {
+          dataUrl: `data:image/png;base64,${payload.png}`,
+          title: payload.title,
+          source: payload.source,
+        });
+        if (payload.tags.length) await setDesignTags(brand.id, entry.id, payload.tags);
+        if (payload.favorite) await setDesignFavorite(brand.id, entry.id, true);
+        return { design: { ...entry, tags: payload.tags, favorite: payload.favorite }, fresh: true };
+      };
+
+      if (envelope.kind === "design") {
+        const { design, fresh } = await importDesign(envelope.payload);
+        setLibrary(await getLibrary(brand.id));
+        Alert.alert(
+          fresh ? "Design imported" : "Already in the library",
+          fresh ? `"${design.title}" landed with its tags.` : `"${design.title}" matches artwork you already have.`
+        );
+        return;
+      }
+
+      // Sheet: land the artwork first, then rebuild the layout against it.
+      const designByKey = new Map<string, LibraryDesign>();
+      let freshCount = 0;
+      for (const [key, payload] of Object.entries(envelope.payload.designs)) {
+        const { design, fresh } = await importDesign(payload);
+        designByKey.set(key, design);
+        if (fresh) freshCount++;
+      }
+      const items: SavedSheetItem[] = envelope.payload.items.map(({ designKey, ...rest }) => {
+        const design = designKey ? designByKey.get(designKey) : undefined;
+        return { ...rest, designId: design?.id, uri: design?.uri ?? "" };
+      });
+      await saveSheet(brand.id, { name: envelope.payload.name, templateId: envelope.payload.templateId, items });
+      setLibrary(await getLibrary(brand.id));
+      setSheets(await listSheets(brand.id));
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert(
+        "Sheet imported",
+        `"${envelope.payload.name}" is in your saved sheets — ${freshCount} new design${freshCount === 1 ? "" : "s"} added, the rest matched your library.`
+      );
+    } catch (e) {
+      Alert.alert("Couldn't import", e instanceof Error ? e.message : "Try again.");
+    }
+  }
+
   function designActions(design: LibraryDesign): DesignAction[] {
     return [
       {
@@ -727,6 +848,16 @@ export default function BuilderScreen() {
         label: "Rename",
         icon: "text-outline",
         onPress: () => openPrompt({ kind: "rename-design", id: design.id, initial: design.title }),
+      },
+      {
+        key: "handoff",
+        label: "Hand off",
+        hint: "Send to the other phone, tags included",
+        icon: "paper-plane-outline",
+        onPress: () => {
+          setMenu(null);
+          void handOffDesign(design);
+        },
       },
       {
         key: "share",
@@ -1144,6 +1275,10 @@ export default function BuilderScreen() {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                     Alert.alert(s.name, undefined, [
                       {
+                        text: "Hand off",
+                        onPress: () => void handOffSheet(s),
+                      },
+                      {
                         text: "Rename",
                         onPress: () =>
                           openPrompt({ kind: "rename-sheet", id: s.id, initial: s.name }),
@@ -1194,6 +1329,20 @@ export default function BuilderScreen() {
       <SectionLabel action={{ label: "Upload", icon: "cloud-upload-outline", onPress: pickUpload }}>
         Your designs
       </SectionLabel>
+      <Pressable
+        onPress={() => void importHandoff()}
+        accessibilityRole="button"
+        accessibilityLabel="Import a handoff file"
+        style={[styles.importRow, { borderColor: theme.line, backgroundColor: theme.surfaceAlt }]}
+      >
+        <Icon name="download" size={15} color={theme.accent} />
+        <Text style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium, fontSize: 12 }}>
+          Import a handoff (.inkline)
+        </Text>
+        <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 10, flex: 1, textAlign: "right" }}>
+          AirDropped designs & sheets
+        </Text>
+      </Pressable>
 
       {library.length > 0 && (
         <View style={styles.libraryTools}>
@@ -1744,6 +1893,7 @@ const styles = StyleSheet.create({
   },
   libraryGrid: { flexDirection: "row", flexWrap: "wrap", gap: SPACE.xs + SPACE.xs / 3 },
   libraryTools: { gap: SPACE.xs, marginBottom: SPACE.sm },
+  importRow: { flexDirection: "row", alignItems: "center", gap: SPACE.xs, borderWidth: 1, borderRadius: RADIUS.sm, paddingHorizontal: SPACE.sm, minHeight: 40, marginBottom: SPACE.sm },
   librarySearch: { minHeight: 44, borderWidth: 1, borderRadius: RADIUS.sm, paddingHorizontal: 12, fontSize: 14 },
   libraryChips: { flexDirection: "row", gap: SPACE.xs, alignItems: "center" },
   libraryChip: { minHeight: 32, paddingHorizontal: 12, borderRadius: RADIUS.pill, borderWidth: 1, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 4 },
