@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { useLocalSearchParams } from "expo-router";
+import { File } from "expo-file-system";
 import {
   View,
   Text,
@@ -27,6 +29,8 @@ import {
   type ReferenceStrength,
 } from "@/lib/api";
 import { pickImageFile } from "@/lib/imageImport";
+import { REMIX_VERBS, applyRemixVerb, hasRemixVerb, stripRemixVerbs } from "@/lib/remix";
+import { getLibrary } from "@/lib/designLibrary";
 import {
   getGenerationUsage,
   getSpendLimit,
@@ -127,6 +131,7 @@ async function traceGeneratedStencil(
 
 export default function GenerateScreen() {
   const { brand, theme } = useBrand();
+  const { remix: remixId } = useLocalSearchParams<{ remix?: string }>();
   const [prompt, setPrompt] = useState("");
   const [style, setStyle] = useState(brand.generate.styles[0]?.id ?? "");
   const [provider, setProvider] = useState<ImageProvider>("gemini");
@@ -314,6 +319,42 @@ export default function GenerateScreen() {
     } finally {
       setLoading(false);
     }
+  }
+
+  useEffect(() => {
+    if (!remixId) return;
+    let active = true;
+    (async () => {
+      try {
+        const design = (await getLibrary(brand.id)).find((item) => item.id === remixId);
+        if (!design || !active) return;
+        const data = await new File(design.uri).base64();
+        if (!active) return;
+        setReference({
+          dataUrl: `data:image/png;base64,${data}`,
+          data,
+          mimeType: "image/png",
+          name: design.title,
+        });
+        setReferenceStrength("balanced");
+        if (!prompt.trim()) setPrompt(design.title);
+        Haptics.selectionAsync();
+      } catch {
+        // The design may have been deleted since the link was made; the
+        // screen still works as plain Generate.
+      }
+    })();
+    return () => {
+      active = false;
+    };
+    // Seeding depends only on which design was requested.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remixId, brand.id]);
+
+  function clearReference() {
+    setReference(null);
+    // Verb lines direct a remix of the reference; without it they dangle.
+    setPrompt((current) => stripRemixVerbs(current));
   }
 
   async function chooseReferenceFromPhotos() {
@@ -784,7 +825,7 @@ export default function GenerateScreen() {
                 </Text>
               </View>
               <Pressable
-                onPress={() => setReference(null)}
+                onPress={clearReference}
                 accessibilityLabel="Remove reference"
               >
                 <Ionicons name="close-circle" size={24} color={theme.muted} />
@@ -822,6 +863,34 @@ export default function GenerateScreen() {
                 ),
               )}
             </View>
+          )}
+          {reference && (
+            <>
+              <Text
+                style={{
+                  color: theme.muted,
+                  fontFamily: theme.fontBodyMedium,
+                  fontSize: 10,
+                  letterSpacing: 1,
+                  marginTop: SPACE.sm,
+                }}
+              >
+                REMIX DIRECTION
+              </Text>
+              <View style={[styles.compactChips, { marginTop: SPACE.xs }]}>
+                {REMIX_VERBS.map((verb) => (
+                  <Chip
+                    key={verb.id}
+                    label={verb.label}
+                    active={hasRemixVerb(prompt, verb.id)}
+                    onPress={() => {
+                      setPrompt((current) => applyRemixVerb(current, verb.id));
+                      Haptics.selectionAsync();
+                    }}
+                  />
+                ))}
+              </View>
+            </>
           )}
 
           <Text
