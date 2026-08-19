@@ -14,7 +14,7 @@ import type { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import * as Print from "expo-print";
 import * as Haptics from "expo-haptics";
-import { useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -701,6 +701,16 @@ export default function BuilderScreen() {
         icon: "pricetags-outline",
         onPress: () =>
           openPrompt({ kind: "tag-design", id: design.id, initial: (design.tags ?? []).join(", ") }),
+      },
+      {
+        key: "remix",
+        label: "Remix",
+        hint: "Generate variations from this design",
+        icon: "sparkles-outline",
+        onPress: () => {
+          setMenu(null);
+          router.push({ pathname: "/[brand]/generate", params: { brand: brand.id, remix: design.id } });
+        },
       },
       {
         key: "rename",
