@@ -1012,26 +1012,26 @@ export default function BuilderScreen() {
             label="Duplicate"
             icon="copy-outline"
             onPress={duplicateSelected}
-            style={{ flex: 1 }}
+            style={styles.actionPill}
           />
           <Button
             label="Mirror"
             icon="swap-horizontal-outline"
             onPress={mirrorSelected}
-            style={{ flex: 1 }}
+            style={styles.actionPill}
           />
           <Button
             label={selected?.locked ? "Unlock" : "Lock"}
             icon={selected?.locked ? "lock-open-outline" : "lock-closed-outline"}
             onPress={toggleLockSelected}
-            style={{ flex: 1 }}
+            style={styles.actionPill}
           />
           <Button
             label="Remove"
             icon="trash-outline"
             variant="danger"
             onPress={removeSelected}
-            style={{ flex: 1 }}
+            style={styles.actionPill}
           />
         </View>
       )}
@@ -1042,19 +1042,19 @@ export default function BuilderScreen() {
           icon="options-outline"
           variant="primary"
           onPress={() => setPrinterOpen(true)}
-          style={{ flex: 1 }}
+          style={styles.actionPill}
         />
         <Button
           label="Tiled print"
           icon="albums-outline"
           onPress={chooseTiledPrint}
-          style={{ flex: 1 }}
+          style={styles.actionPill}
         />
         <Button
           label="Save sheet"
           icon="download-outline"
           onPress={handleSave}
-          style={{ flex: 1 }}
+          style={styles.actionPill}
         />
         <IconAction icon="share-outline" label="Share sheet" onPress={shareSheet} tall />
       </View>
@@ -1562,8 +1562,9 @@ const styles = StyleSheet.create({
   safeGuide: { position: "absolute", left: 10, right: 10, top: 10, bottom: 10, borderWidth: 1, borderStyle: "dashed" },
   gridV: { position: "absolute", top: 0, bottom: 0, width: StyleSheet.hairlineWidth },
   gridH: { position: "absolute", left: 0, right: 0, height: StyleSheet.hairlineWidth },
-  actions: { flexDirection: "row", gap: SPACE.sm, marginBottom: SPACE.lg },
-  itemActions: { flexDirection: "row", gap: SPACE.sm, marginBottom: SPACE.md },
+  actionPill: { flexGrow: 1, flexBasis: "46%" },
+  actions: { flexDirection: "row", flexWrap: "wrap", gap: SPACE.sm, marginBottom: SPACE.lg },
+  itemActions: { flexDirection: "row", flexWrap: "wrap", gap: SPACE.sm, marginBottom: SPACE.md },
   sizeRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   sizeLabel: { flexDirection: "row", alignItems: "center", gap: SPACE.xs },
   precisionControls: { flexDirection: "row", flexWrap: "wrap", gap: SPACE.sm, marginTop: SPACE.md },

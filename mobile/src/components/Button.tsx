@@ -87,7 +87,12 @@ export function Button({
       ) : (
         <View style={[styles.row, styles.content]}>
           {icon && <Ionicons name={icon} size={17} color={fg} />}
-          <Text style={[styles.label, { color: fg, fontFamily: theme.fontBodyMedium }]}>
+          <Text
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.7}
+            style={[styles.label, { color: fg, fontFamily: theme.fontBodyMedium }]}
+          >
             {label}
           </Text>
         </View>
@@ -103,7 +108,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: SPACE.lg,
+    paddingHorizontal: SPACE.md,
     overflow: "hidden",
   },
   sheen: {
@@ -117,6 +122,9 @@ const styles = StyleSheet.create({
   },
   content: { zIndex: 2 },
   row: { flexDirection: "row", alignItems: "center", gap: 8 },
-  label: { fontSize: 15, letterSpacing: 0.2 },
+  // numberOfLines + adjustsFontSizeToFit on the Text keep a label on one
+  // line, shrinking it slightly instead of breaking words ("Dupl icate")
+  // when four pills share a row. flexShrink lets the text yield to the icon.
+  label: { fontSize: 15, letterSpacing: 0.2, flexShrink: 1 },
   off: { opacity: 0.35 },
 });

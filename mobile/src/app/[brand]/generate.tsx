@@ -871,21 +871,21 @@ export default function GenerateScreen() {
             icon="download-outline"
             onPress={handleSave}
             disabled={!stencilUrl}
-            style={{ flex: 1 }}
+            style={styles.actionPill}
           />
           <Button
             label={saved ? "On the sheet" : "Add to sheet"}
             icon={saved ? "checkmark" : "add"}
             onPress={handleSend}
             disabled={!stencilUrl}
-            style={{ flex: 1 }}
+            style={styles.actionPill}
           />
           <Button
             label="Edit stencil"
             icon="brush-outline"
             onPress={() => openEditor("stencil")}
             disabled={!stencilUrl}
-            style={{ flex: 0.8 }}
+            style={styles.actionPill}
           />
         </View>
         <Button
@@ -1223,7 +1223,8 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   referenceImage: { width: 56, height: 56, borderRadius: RADIUS.sm },
-  actions: { flexDirection: "row", gap: SPACE.sm, marginTop: SPACE.sm },
+  actions: { flexDirection: "row", flexWrap: "wrap", gap: SPACE.sm, marginTop: SPACE.sm },
+  actionPill: { flexGrow: 1, flexBasis: "46%" },
   history: { borderWidth: 1, borderRadius: RADIUS.md, overflow: "hidden" },
   historyRow: {
     flexDirection: "row",
