@@ -58,7 +58,8 @@ import { DEFAULT_STENCIL_OPTIONS, stencilMask, stencilize } from "@/lib/stencil"
 import { DEFAULT_TRACE, polylinesToStrokeLayer, skeletonize, tracePolylines } from "@/lib/vectorize";
 import { addCutLine, DEFAULT_CUT_LINE } from "@/lib/cutline";
 import { shareUri } from "@/lib/files";
-import { compareCapture, inspectProduction, wrapForSurface, type ProductionFinding } from "@/lib/productionTools";
+import { compareCapture, inspectProduction, simulateHealing, wrapForSurface, type ProductionFinding } from "@/lib/productionTools";
+import { HEAL_AGES, type HealAge } from "@/lib/healing";
 import { MIN_LINE_GAP_MM, checkLineSpacing, pxPerMmFromDpi, spacingFinding } from "@/lib/spacing";
 import {
   DEFAULT_SYMMETRY,
@@ -131,6 +132,8 @@ export function DesignEditor({
   const [wrapAmount, setWrapAmount] = useState(0.35);
   const [wrapTaper, setWrapTaper] = useState(0.2);
   const [findings, setFindings] = useState<ProductionFinding[]>([]);
+  const [healAge, setHealAge] = useState<HealAge>("fresh");
+  const [healed, setHealed] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -171,6 +174,8 @@ export function DesignEditor({
       const flattened = await renderProject(bumped);
       setProject(bumped);
       setPreview(flattened);
+      setHealed(null);
+      setHealAge("fresh");
       setDirty(true);
       return bumped;
     } catch (e) {
@@ -431,6 +436,21 @@ export function DesignEditor({
     await commit("Flatten visible copy", result.project);
   }
 
+  function runHealing(age: HealAge) {
+    setHealAge(age);
+    if (!preview || age === "fresh") {
+      setHealed(null);
+      return;
+    }
+    try {
+      setHealed(simulateHealing(preview, age, pxPerMmFromDpi(PRINT_DPI)));
+      Haptics.selectionAsync();
+    } catch (e) {
+      setHealed(null);
+      setError(e instanceof Error ? e.message : "Couldn't simulate healing.");
+    }
+  }
+
   function runProductionCheck() {
     if (!preview || !project) return;
     try {
@@ -522,6 +542,12 @@ export function DesignEditor({
                 <Ionicons name="albums-outline" size={14} color={theme.muted} />
                 <Text style={{ color: theme.muted, fontFamily: theme.fontBodyMedium, fontSize: 10 }}>{showOriginal ? "EDITED" : "ORIGINAL"}</Text>
               </Pressable>
+              {!!healed && !showOriginal && (
+                <View style={[styles.livePill, { backgroundColor: `${theme.accent}18` }]}>
+                  <Ionicons name="time-outline" size={12} color={theme.accent} />
+                  <Text style={[styles.liveText, { color: theme.accent, fontFamily: theme.fontBodyMedium }]}>SIMULATED</Text>
+                </View>
+              )}
               <Pressable onPress={() => setShowGrid((value) => !value)} accessibilityRole="button" accessibilityLabel="Toggle layout grid" style={[styles.compare, { borderColor: showGrid ? theme.accent : theme.line }]}>
                 <Ionicons name="grid-outline" size={14} color={showGrid ? theme.accent : theme.muted} />
                 <Text style={{ color: showGrid ? theme.accent : theme.muted, fontFamily: theme.fontBodyMedium, fontSize: 10 }}>GRID</Text>
@@ -530,8 +556,8 @@ export function DesignEditor({
 
             <GestureDetector gesture={stageGesture}>
               <View style={[styles.stage, { width: stageW, height: stageH, backgroundColor: project?.canvas.background ?? theme.stock }]}>
-                {(showOriginal ? originalPreview : preview) && (
-                  <Image source={{ uri: (showOriginal ? originalPreview : preview)! }} style={StyleSheet.absoluteFill} contentFit="fill" alt={project?.title ?? design.title} />
+                {(showOriginal ? originalPreview : healed ?? preview) && (
+                  <Image source={{ uri: (showOriginal ? originalPreview : healed ?? preview)! }} style={StyleSheet.absoluteFill} contentFit="fill" alt={project?.title ?? design.title} />
                 )}
                 {showGrid && <View pointerEvents="none" style={StyleSheet.absoluteFill}>{[1, 2, 3].map(index => <View key={`v${index}`} style={[styles.gridLine, { left: `${index * 25}%`, top: 0, bottom: 0, width: StyleSheet.hairlineWidth, backgroundColor: theme.accent }]} />)}{[1, 2, 3].map(index => <View key={`h${index}`} style={[styles.gridLine, { top: `${index * 25}%`, left: 0, right: 0, height: StyleSheet.hairlineWidth, backgroundColor: theme.accent }]} />)}</View>}
                 {!!selected && tool === "select" && !showOriginal && (
@@ -611,6 +637,8 @@ export function DesignEditor({
               onWrapTaper={setWrapTaper}
               onApplyWrap={applyWrap}
               onInspect={runProductionCheck}
+              healAge={healAge}
+              onHealAge={runHealing}
               onCheckCapture={checkCapture}
               onShareReview={shareReviewPacket}
               onFlatten={flattenVisibleCopy}
@@ -659,6 +687,8 @@ function Inspector({
   onWrapTaper,
   onApplyWrap,
   onInspect,
+  healAge,
+  onHealAge,
   onCheckCapture,
   onShareReview,
   onFlatten,
@@ -690,6 +720,8 @@ function Inspector({
   onWrapTaper: (value: number) => void;
   onApplyWrap: () => void;
   onInspect: () => void;
+  healAge: HealAge;
+  onHealAge: (age: HealAge) => void;
   onCheckCapture: () => void;
   onShareReview: () => void;
   onFlatten: () => void;
@@ -796,6 +828,28 @@ function Inspector({
       <PanelTitle icon="shield-checkmark-outline" title="Production desk" subtitle="Preflight, compensate for curved placement, compare a capture, and prepare a client proof.">
         <SliderRow label="Surface curvature" value={wrapAmount} min={0} max={1} step={0.05} display={`${Math.round(wrapAmount * 100)}%`} onChange={onWrapAmount} />
         <SliderRow label="Edge taper" value={wrapTaper} min={0} max={1} step={0.05} display={`${Math.round(wrapTaper * 100)}%`} onChange={onWrapTaper} />
+        <View style={styles.symmetryBlock}>
+          <Text style={{ color: theme.muted, fontFamily: theme.fontBodyMedium, fontSize: 10, letterSpacing: 1 }}>HOW IT WILL HEAL</Text>
+          <View style={styles.segmentRow}>
+            {HEAL_AGES.map((item) => {
+              const active = item.id === healAge;
+              return (
+                <Pressable
+                  key={item.id}
+                  onPress={() => onHealAge(item.id)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  style={[styles.symmetryChip, { backgroundColor: active ? theme.accent : theme.surfaceAlt, borderColor: active ? theme.accent : theme.line }]}
+                >
+                  <Text style={{ color: active ? theme.accentText : theme.muted, fontFamily: theme.fontBodyMedium, fontSize: 10 }}>{item.label.toUpperCase()}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 10, lineHeight: 14 }}>
+            {HEAL_AGES.find((item) => item.id === healAge)?.caption}. An estimate of ink spread at print size — useful for catching detail that will close up, not a promise.
+          </Text>
+        </View>
         <View style={styles.actionRow}>
           <MiniAction icon="body-outline" label="Apply wrap" onPress={onApplyWrap} />
           <MiniAction icon="shield-checkmark-outline" label="Preflight" onPress={onInspect} />
