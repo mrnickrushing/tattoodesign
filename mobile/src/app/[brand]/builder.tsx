@@ -57,6 +57,7 @@ import { PlacementPreview } from "@/components/PlacementPreview";
 import { DesignActions, type DesignAction } from "@/components/DesignActions";
 import { allTags, filterDesigns, normalizeTags, type SourceFilter } from "@/lib/libraryFilter";
 import { PREF_KEYS, isFiniteNumber, preferences } from "@/lib/preferences";
+import { DEFAULT_PACK, packItems } from "@/lib/autopack";
 import {
   contentFingerprint,
   decodeHandoff,
@@ -674,6 +675,42 @@ export default function BuilderScreen() {
     setItems((prev) => resolveItems(prev, lib));
   }
 
+  function autoArrange() {
+    if (items.length < 2) return;
+    const result = packItems(
+      items.map((item) => ({ id: item.id, wIn: item.wIn, hIn: item.hIn })),
+      { widthIn: template.widthIn, heightIn: template.heightIn, ...DEFAULT_PACK }
+    );
+    if (!result.placed.length) {
+      Alert.alert("Nothing fits", "These designs are larger than the sheet — try a bigger template or smaller sizes.");
+      return;
+    }
+    pushHistory();
+    setItems((current) =>
+      current.map((item) => {
+        const placement = result.placed.find((p) => p.id === item.id);
+        if (!placement) return item;
+        return {
+          ...item,
+          xIn: placement.xIn,
+          yIn: placement.yIn,
+          // Rotation from packing replaces the manual angle: the packer's
+          // geometry only holds for axis-aligned items.
+          rotation: placement.rotated ? 90 : 0,
+          wIn: placement.rotated ? item.hIn : item.wIn,
+          hIn: placement.rotated ? item.wIn : item.hIn,
+        };
+      })
+    );
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    if (result.overflow.length) {
+      Alert.alert(
+        "Sheet is full",
+        `${result.overflow.length} design${result.overflow.length === 1 ? "" : "s"} didn't fit and kept ${result.overflow.length === 1 ? "its" : "their"} old spot — try a larger template or smaller sizes.`
+      );
+    }
+  }
+
   async function handOffDesign(design: LibraryDesign) {
     try {
       const png = await new File(design.uri).base64();
@@ -1199,6 +1236,14 @@ export default function BuilderScreen() {
             onPress={fillSheet}
             style={{ marginTop: SPACE.sm }}
           />
+          {items.length >= 2 && (
+            <Button
+              label="Auto-arrange the sheet"
+              icon="apps-outline"
+              onPress={autoArrange}
+              style={{ marginTop: SPACE.sm }}
+            />
+          )}
         </Card>
       )}
 
