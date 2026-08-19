@@ -1,5 +1,6 @@
 import { AlphaType, ColorType, ImageFormat, Skia } from "@shopify/react-native-skia";
 import { stripDataUrlPrefix } from "./files";
+import { agePixels, healingProfile, type HealAge } from "./healing";
 
 export type ProductionFinding = { level: "pass" | "warn"; title: string; detail: string };
 
@@ -58,6 +59,55 @@ export function wrapForSurface(dataUrl: string, amount: number, taper: number): 
     canvas.drawImageRect(image, Skia.XYWHRect(sx, 0, sx2 - sx, height), Skia.XYWHRect(dx, (height - dh) / 2, Math.max(1, (sx2 - sx) * curveScale + 1), dh), Skia.Paint());
   }
   return `data:image/png;base64,${surface.makeImageSnapshot().encodeToBase64(ImageFormat.PNG)}`;
+}
+
+/**
+ * Renders the design as it will look after `age` of healing.
+ *
+ * The buffer is worked at a bounded size for speed, so the caller's print
+ * density has to be scaled to match — migration is defined in millimetres, and
+ * a downscaled buffer has proportionally fewer pixels per millimetre. Getting
+ * this wrong would make the simulation drift with image size, which is the one
+ * thing the model is built to avoid.
+ */
+export function simulateHealing(dataUrl: string, age: HealAge, pxPerMm: number): string {
+  const image = decode(dataUrl);
+  const width = Math.min(900, image.width());
+  const scale = width / image.width();
+  const height = Math.max(1, Math.round(image.height() * scale));
+  const surface = Skia.Surface.Make(width, height);
+  if (!surface) throw new Error("The healing preview is too large for this device.");
+  const canvas = surface.getCanvas();
+  canvas.clear(Skia.Color("white"));
+  canvas.drawImageRect(image, Skia.XYWHRect(0, 0, image.width(), image.height()), Skia.XYWHRect(0, 0, width, height), Skia.Paint());
+  const pixels = surface.makeImageSnapshot().readPixels(0, 0, { width, height, colorType: ColorType.RGBA_8888, alphaType: AlphaType.Unpremul }) as Uint8Array | null;
+  if (!pixels) throw new Error("The healing preview could not be rendered.");
+
+  const gray = new Uint8Array(width * height);
+  for (let index = 0; index < gray.length; index++) {
+    const offset = index * 4;
+    gray[index] = Math.round(pixels[offset] * 0.299 + pixels[offset + 1] * 0.587 + pixels[offset + 2] * 0.114);
+  }
+
+  const aged = agePixels(gray, width, height, healingProfile(age, pxPerMm * scale));
+  const out = new Uint8Array(width * height * 4);
+  for (let index = 0; index < aged.length; index++) {
+    const offset = index * 4;
+    // Healed black ink reads blue-grey, not neutral: the warm channels lose
+    // more than the cool one as the pigment settles.
+    const value = aged[index];
+    out[offset] = value;
+    out[offset + 1] = value;
+    out[offset + 2] = Math.min(255, Math.round(value + (255 - value) * 0.08));
+    out[offset + 3] = 255;
+  }
+  const result = Skia.Image.MakeImage(
+    { width, height, colorType: ColorType.RGBA_8888, alphaType: AlphaType.Unpremul },
+    Skia.Data.fromBytes(out),
+    width * 4
+  );
+  if (!result) throw new Error("The healing preview could not be encoded.");
+  return `data:image/png;base64,${result.encodeToBase64(ImageFormat.PNG)}`;
 }
 
 export function compareCapture(reference: string, capture: string): ProductionFinding[] {

@@ -8,9 +8,11 @@ import {
   makeStrokeLayer,
   moveLayer,
   projectToSvg,
+  rasterLayerAssets,
   removeLayer,
   restoreSnapshot,
   snapshotProject,
+  strokePathsInCanvasSpace,
   updateLayer,
 } from "./projectMutations";
 import type { EditableDesignProject } from "./designProject";
@@ -104,4 +106,89 @@ test("SVG export preserves stroke-layer transforms", () => {
   const svg = projectToSvg(value);
 
   assert.match(svg, /<path[^>]+transform="translate\(620 480\) rotate\(30\) scale\(1.5 0.75\) translate\(-500 -400\)"/);
+});
+
+function withRaster(): EditableDesignProject {
+  const value = project();
+  return addLayer(value, {
+    id: "raster",
+    kind: "raster",
+    name: "Traced photo",
+    visible: true,
+    locked: false,
+    opacity: 0.8,
+    transform: { ...fullCanvasTransform(1000, 800), x: 40, y: 20, rotation: 15 },
+    asset: "layer-abc.png",
+  });
+}
+
+test("SVG export embeds raster layers when their pixels are supplied", () => {
+  const svg = projectToSvg(withRaster(), { "layer-abc.png": "data:image/png;base64,AAAA" });
+  assert.match(svg, /<image /);
+  assert.match(svg, /href="data:image\/png;base64,AAAA"/);
+  assert.match(svg, /opacity="0\.8"/);
+  assert.match(svg, /transform="translate\(540 420\) rotate\(15\)/);
+});
+
+test("a raster layer with no supplied pixels is skipped, not emitted broken", () => {
+  const svg = projectToSvg(withRaster());
+  assert.doesNotMatch(svg, /<image/);
+  assert.match(svg, /<svg/);
+});
+
+test("hidden layers stay out of the export regardless of kind", () => {
+  let value = withRaster();
+  value = updateLayer(value, "raster", (layer) => ({ ...layer, visible: false }));
+  const svg = projectToSvg(value, { "layer-abc.png": "data:image/png;base64,AAAA" });
+  assert.doesNotMatch(svg, /<image/);
+});
+
+test("rasterLayerAssets lists what a complete export needs", () => {
+  assert.deepEqual(rasterLayerAssets(withRaster()), ["layer-abc.png"]);
+  assert.deepEqual(rasterLayerAssets(project()), []);
+});
+
+test("stroke paths flatten into canvas coordinates", () => {
+  let value = project();
+  const layer = makeStrokeLayer(1000, 800, "Lines");
+  layer.transform = { ...layer.transform, x: 100, y: 50, scaleX: 2, scaleY: 2 };
+  layer.strokes = [
+    { points: [{ x: 500, y: 400 }, { x: 600, y: 400 }], width: 3, color: "#111111", mode: "draw", opacity: 1 },
+  ];
+  value = addLayer(value, layer);
+  const paths = strokePathsInCanvasSpace(value);
+  assert.equal(paths.length, 1);
+  // The layer centre (500,400) maps to the transform origin (x + w/2, y + h/2).
+  assert.deepEqual(paths[0][0], { x: 600, y: 450 });
+  // 100px right of centre, doubled by the layer scale.
+  assert.deepEqual(paths[0][1], { x: 800, y: 450 });
+});
+
+test("erase strokes and hidden layers are left out of canvas paths", () => {
+  let value = project();
+  const layer = makeStrokeLayer(1000, 800, "Lines");
+  layer.strokes = [
+    { points: [{ x: 0, y: 0 }, { x: 10, y: 10 }], width: 3, color: "#111111", mode: "erase", opacity: 1 },
+    { points: [{ x: 0, y: 0 }], width: 3, color: "#111111", mode: "draw", opacity: 1 },
+    { points: [{ x: 0, y: 0 }, { x: 20, y: 20 }], width: 3, color: "#111111", mode: "draw", opacity: 1 },
+  ];
+  value = addLayer(value, layer);
+  assert.equal(strokePathsInCanvasSpace(value).length, 1, "erase and single-point strokes are skipped");
+
+  value = updateLayer(value, layer.id, (item) => ({ ...item, visible: false }));
+  assert.equal(strokePathsInCanvasSpace(value).length, 0);
+});
+
+test("rotating a stroke layer rotates its canvas geometry", () => {
+  let value = project();
+  const layer = makeStrokeLayer(1000, 800, "Lines");
+  layer.transform = { ...layer.transform, rotation: 90 };
+  layer.strokes = [
+    { points: [{ x: 600, y: 400 }, { x: 700, y: 400 }], width: 3, color: "#111111", mode: "draw", opacity: 1 },
+  ];
+  value = addLayer(value, layer);
+  const [path] = strokePathsInCanvasSpace(value);
+  // 100px right of centre becomes 100px below it under a quarter turn.
+  assert.ok(Math.abs(path[0].x - 500) < 1e-6);
+  assert.ok(Math.abs(path[0].y - 500) < 1e-6);
 });

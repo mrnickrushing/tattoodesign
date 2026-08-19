@@ -191,14 +191,22 @@ function buildMask(
   return mask;
 }
 
+export type StencilMask = {
+  /** One byte per pixel: 1 where a line was detected, 0 elsewhere. */
+  mask: Uint8Array;
+  width: number;
+  height: number;
+};
+
 /**
- * Runs the full photo -> stencil pipeline and returns a PNG data URL.
- * Accepts either a bare base64 string or a `data:image/...;base64,...` URL.
+ * Runs the photo -> stencil pipeline and stops at the binary mask, before it
+ * is painted into pixels. `stencilize` renders this; the tracer in
+ * src/lib/vectorize.ts turns the same mask into geometry instead.
  */
-export async function stencilize(
+export async function stencilMask(
   src: string,
   options: StencilOptions = {}
-): Promise<string> {
+): Promise<StencilMask> {
   const opts = { ...DEFAULT_STENCIL_OPTIONS, ...options };
   const base64 = stripDataUrlPrefix(src);
 
@@ -239,6 +247,20 @@ export async function stencilize(
   const magnitude = sobelMagnitude(gray, width, height);
   const rawMask = buildMask(opts.mode, gray, magnitude, width, height, opts.threshold);
   const mask = dilate(rawMask, width, height, opts.mode === "fine" ? Math.max(0, opts.lineWeight - 1) : opts.lineWeight);
+
+  return { mask, width, height };
+}
+
+/**
+ * Runs the full photo -> stencil pipeline and returns a PNG data URL.
+ * Accepts either a bare base64 string or a `data:image/...;base64,...` URL.
+ */
+export async function stencilize(
+  src: string,
+  options: StencilOptions = {}
+): Promise<string> {
+  const opts = { ...DEFAULT_STENCIL_OPTIONS, ...options };
+  const { mask, width, height } = await stencilMask(src, options);
 
   const out = new Uint8Array(width * height * 4);
   const lineColor = opts.invert ? 255 : 0;
