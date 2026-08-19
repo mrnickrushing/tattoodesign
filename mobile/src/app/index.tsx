@@ -1,23 +1,46 @@
-import { View, Text, Pressable, StyleSheet, ScrollView } from "react-native";
+import { View, Text, Pressable, StyleSheet } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { LinearGradient } from "expo-linear-gradient";
-import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { BRANDS } from "@/lib/brands";
-import { THEMES, NEUTRAL_THEME, SPACE, RADIUS, glow, lift } from "@/lib/theme";
+import Animated, {
+  FadeInDown,
+  useAnimatedScrollHandler,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+} from "react-native-reanimated";
+import { BRANDS, type BrandConfig } from "@/lib/brands";
+import { THEMES, NEUTRAL_THEME, RADIUS, SPACE, TYPE, glow, lift, type Theme } from "@/lib/theme";
+import { BrandProvider } from "@/context/BrandContext";
 import { BrandArtwork } from "@/components/BrandArtwork";
+import { Icon } from "@/components/Icon";
+import { PaperSubstrate } from "@/components/PaperSubstrate";
+import type { IconName } from "@/lib/icons";
 
-const doors = [
+const DOOR_STAGGER_MS = 96;
+const DOOR_DURATION_MS = 420;
+
+type Door = {
+  brand: BrandConfig;
+  theme: Theme;
+  number: string;
+  tagline: string;
+  note: string;
+  icon: IconName;
+  gradient: readonly [string, string, string];
+};
+
+const doors: readonly Door[] = [
   {
     brand: BRANDS.ink,
     theme: THEMES.ink,
     number: "01",
     tagline: "Tattoo flash & stencils",
     note: "Bold linework. Real-size sheets.",
-    icon: "flash" as const,
-    gradient: ["#221311", "#120f0e", "#0d0c0b"] as const,
+    icon: "flash",
+    gradient: ["#221311", "#120f0e", "#0d0c0b"],
   },
   {
     brand: BRANDS.sugar,
@@ -25,12 +48,36 @@ const doors = [
     number: "02",
     tagline: "Cookie, cake pop & topper",
     note: "Sweet ideas. Print-ready templates.",
-    icon: "color-palette" as const,
-    gradient: ["#fffdfb", "#fff1f5", "#fbe6e0"] as const,
+    icon: "palette",
+    gradient: ["#fffdfb", "#fff1f5", "#fbe6e0"],
   },
 ];
 
 export default function StudioPicker() {
+  // The picker itself is neutral, so it borrows Ink Lab only to give shared
+  // semantic icons their stable fallback color before a studio is chosen.
+  return (
+    <BrandProvider value={{ brand: BRANDS.ink }}>
+      <StudioPickerContent />
+    </BrandProvider>
+  );
+}
+
+function StudioPickerContent() {
+  const reduceMotion = useReducedMotion();
+  const scrollY = useSharedValue(0);
+  const onScroll = useAnimatedScrollHandler({
+    onScroll: (event) => {
+      scrollY.value = event.contentOffset.y;
+    },
+  });
+  const upperOrbStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: reduceMotion ? 0 : scrollY.value * -0.14 }],
+  }));
+  const lowerOrbStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: reduceMotion ? 0 : scrollY.value * 0.1 }],
+  }));
+
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar style="light" />
@@ -39,151 +86,234 @@ export default function StudioPicker() {
         locations={[0, 0.48, 1]}
         style={StyleSheet.absoluteFill}
       />
-      <View pointerEvents="none" style={styles.ambientOne} />
-      <View pointerEvents="none" style={styles.ambientTwo} />
+      <Animated.View pointerEvents="none" style={[styles.ambientOne, upperOrbStyle]} />
+      <Animated.View pointerEvents="none" style={[styles.ambientTwo, lowerOrbStyle]} />
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <Animated.ScrollView
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        onScroll={onScroll}
+        scrollEventThrottle={SPACE.md}
+      >
         <View style={styles.masthead}>
           <View style={styles.logoMark}>
-            <Ionicons name="cut-outline" size={17} color="#fff" />
+            <Icon name="cut" size={TYPE.body.fontSize + SPACE.xs - 4} color={NEUTRAL_THEME.foreground} />
           </View>
           <View style={styles.logoCopy}>
-            <Text style={[styles.logo, { fontFamily: NEUTRAL_THEME.fontDisplay }]}>INKLINE</Text>
-            <Text style={[styles.logoMeta, { fontFamily: NEUTRAL_THEME.fontBodyMedium }]}>CREATIVE WORKBENCH</Text>
+            <Text style={[TYPE.heading, { color: NEUTRAL_THEME.foreground, fontFamily: NEUTRAL_THEME.fontDisplay }]}>INKLINE</Text>
+            <Text style={[TYPE.micro, { color: NEUTRAL_THEME.muted, fontFamily: NEUTRAL_THEME.fontBodyMedium }]}>CREATIVE WORKBENCH</Text>
           </View>
           <View style={styles.versionPill}>
             <View style={styles.liveDot} />
-            <Text style={[styles.versionText, { fontFamily: NEUTRAL_THEME.fontBodyMedium }]}>2 STUDIOS</Text>
+            <Text style={[TYPE.micro, { color: NEUTRAL_THEME.muted, fontFamily: NEUTRAL_THEME.fontBodyMedium }]}>2 STUDIOS</Text>
           </View>
         </View>
 
         <View style={styles.heroCopy}>
           <View style={styles.eyebrowRow}>
             <View style={styles.rule} />
-            <Text style={[styles.eyebrow, { fontFamily: NEUTRAL_THEME.fontBodyMedium }]}>START AT THE BENCH</Text>
+            <Text style={[TYPE.micro, { color: NEUTRAL_THEME.accent, fontFamily: NEUTRAL_THEME.fontBodyMedium }]}>START AT THE BENCH</Text>
           </View>
-          <Text style={[styles.headline, { fontFamily: NEUTRAL_THEME.fontDisplay }]}>Pick your studio</Text>
-          <Text style={[styles.subhead, { fontFamily: NEUTRAL_THEME.fontBody }]}>Choose a craft. Turn an idea into clean linework, then build the sheet.</Text>
+          <Text style={[TYPE.hero, { color: NEUTRAL_THEME.foreground, fontFamily: NEUTRAL_THEME.fontDisplay }]}>Pick your studio</Text>
+          <Text style={[TYPE.body, styles.subhead, { color: NEUTRAL_THEME.muted, fontFamily: NEUTRAL_THEME.fontBody }]}>
+            Choose a craft. Turn an idea into clean linework, then build the sheet.
+          </Text>
         </View>
 
         <View style={styles.doors}>
-          {doors.map(({ brand, theme, number, tagline, note, icon, gradient }) => (
-            <Pressable
-              key={brand.id}
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                router.push(`/${brand.id}`);
-              }}
-              accessibilityRole="button"
-              accessibilityLabel={`Enter ${brand.name}`}
-              accessibilityHint={tagline}
-              style={({ pressed }) => [
-                styles.doorWrap,
-                brand.id === "ink" ? glow(theme, "sm") : lift("sm"),
-                { borderColor: brand.id === "ink" ? "#4a2223" : "#f0cfd9" },
-                pressed && styles.pressed,
-              ]}
+          {doors.map((door, index) => (
+            <Animated.View
+              key={door.brand.id}
+              entering={reduceMotion ? undefined : FadeInDown.delay(index * DOOR_STAGGER_MS).duration(DOOR_DURATION_MS)}
             >
-              <LinearGradient colors={gradient} style={styles.door}>
-                <View style={styles.doorTop}>
-                  <View style={styles.studioMeta}>
-                    <Text style={[styles.studioNumber, { color: theme.accent, fontFamily: theme.fontDisplay }]}>{number}</Text>
-                    <View>
-                      <Text style={[styles.studioLabel, { color: theme.muted, fontFamily: theme.fontBodyMedium }]}>STUDIO</Text>
-                      <Text style={[styles.studioNote, { color: theme.foreground, fontFamily: theme.fontBody }]}>{note}</Text>
-                    </View>
-                  </View>
-                  <View style={[styles.enterPill, { backgroundColor: theme.accent }]}>
-                    <Text style={[styles.enterText, { color: theme.accentText, fontFamily: theme.fontBodyMedium }]}>ENTER</Text>
-                    <Ionicons name="arrow-forward" size={14} color={theme.accentText} />
-                  </View>
-                </View>
-
-                <View style={styles.artStage}>
-                  <Text
-                    style={[
-                      styles.doorName,
-                      {
-                        color: theme.foreground,
-                        fontFamily: brand.id === "sugar" ? theme.fontScript : theme.fontDisplay,
-                        fontSize: 40,
-                      },
-                    ]}
-                  >
-                    {brand.name}
-                  </Text>
-                  <Text style={[styles.doorTag, { color: theme.accent, fontFamily: theme.fontBodyMedium }]}>{tagline.toUpperCase()}</Text>
-                  <BrandArtwork
-                    brand={brand.id}
-                    style={[styles.artwork, brand.id === "sugar" && styles.sugarArtwork]}
-                  />
-                  <View style={[styles.iconSeal, { backgroundColor: theme.accent }]}>
-                    <Ionicons name={icon} size={17} color={theme.accentText} />
-                  </View>
-                </View>
-
-                <View style={[styles.tools, { borderTopColor: theme.line }]}>
-                  {(
-                    [
-                      ["sparkles-outline", brand.generate.tabLabel],
-                      ["scan-outline", brand.convert.tabLabel],
-                      ["grid-outline", brand.builder.tabLabel],
-                    ] as const
-                  ).map(([toolIcon, label]) => (
-                    <View key={label} style={[styles.tool, { backgroundColor: `${theme.foreground}0a` }]}>
-                      <Ionicons name={toolIcon} size={14} color={theme.accent} />
-                      <Text style={{ color: theme.foreground, fontSize: 11, fontFamily: theme.fontBodyMedium }}>{label}</Text>
-                    </View>
-                  ))}
-                </View>
-              </LinearGradient>
-            </Pressable>
+              <StudioDoor door={door} />
+            </Animated.View>
           ))}
         </View>
 
-        <Text style={[styles.footer, { fontFamily: NEUTRAL_THEME.fontBody }]}>DESIGN · TRACE · SIZE · PRINT</Text>
-      </ScrollView>
+        <Text style={[TYPE.micro, styles.footer, { color: NEUTRAL_THEME.muted, fontFamily: NEUTRAL_THEME.fontBody }]}>
+          DESIGN · TRACE · SIZE · PRINT
+        </Text>
+      </Animated.ScrollView>
     </SafeAreaView>
+  );
+}
+
+function StudioDoor({ door }: { door: Door }) {
+  const { brand, theme, number, tagline, note, icon, gradient } = door;
+  const toolRows: readonly [IconName, string][] = [
+    ["generate", brand.generate.tabLabel],
+    ["convert", brand.convert.tabLabel],
+    ["sheet", brand.builder.tabLabel],
+  ];
+
+  return (
+    <BrandProvider value={{ brand }}>
+      <Pressable
+        onPress={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          router.push(`/${brand.id}`);
+        }}
+        accessibilityRole="button"
+        accessibilityLabel={`Enter ${brand.name}`}
+        accessibilityHint={tagline}
+        style={({ pressed }) => [
+          styles.doorWrap,
+          brand.id === "ink" ? glow(theme, "sm") : lift("sm"),
+          { borderColor: brand.id === "ink" ? "#4a2223" : "#f0cfd9" },
+          pressed && styles.pressed,
+        ]}
+      >
+        <LinearGradient colors={gradient} style={styles.door}>
+          <PaperSubstrate
+            seed={brand.id === "ink" ? 101 : 202}
+            intensity={brand.id === "ink" ? 0.54 : 0.38}
+            style={{ opacity: brand.id === "ink" ? 0.16 : 0.28 }}
+          />
+          <View style={styles.doorTop}>
+            <View style={styles.studioMeta}>
+              <Text style={[TYPE.heading, { color: theme.accent, fontFamily: theme.fontDisplay }]}>{number}</Text>
+              <View>
+                <Text style={[TYPE.micro, { color: theme.muted, fontFamily: theme.fontBodyMedium }]}>STUDIO</Text>
+                <Text style={[TYPE.caption, styles.studioNote, { color: theme.foreground, fontFamily: theme.fontBody }]}>{note}</Text>
+              </View>
+            </View>
+            <View style={[styles.enterPill, { backgroundColor: theme.accent }]}>
+              <Text style={[TYPE.micro, { color: theme.accentText, fontFamily: theme.fontBodyMedium }]}>ENTER</Text>
+              <Icon name="arrowForward" size={TYPE.caption.fontSize} color={theme.accentText} />
+            </View>
+          </View>
+
+          <View style={styles.artStage}>
+            <Text
+              style={[
+                TYPE.hero,
+                styles.doorName,
+                {
+                  color: theme.foreground,
+                  fontFamily: brand.id === "sugar" ? theme.fontScript : theme.fontDisplay,
+                },
+              ]}
+            >
+              {brand.name}
+            </Text>
+            <Text style={[TYPE.micro, styles.doorTag, { color: theme.accent, fontFamily: theme.fontBodyMedium }]}>
+              {tagline.toUpperCase()}
+            </Text>
+            <BrandArtwork
+              brand={brand.id}
+              animated
+              style={[styles.artwork, brand.id === "sugar" && styles.sugarArtwork]}
+            />
+            <View style={[styles.iconSeal, { backgroundColor: theme.accent }]}>
+              <Icon name={icon} size={TYPE.body.fontSize + SPACE.xs - 4} color={theme.accentText} />
+            </View>
+          </View>
+
+          <View style={[styles.tools, { borderTopColor: theme.line }]}>
+            {toolRows.map(([toolIcon, label]) => (
+              <View key={label} style={[styles.tool, { backgroundColor: `${theme.foreground}0a` }]}>
+                <Icon name={toolIcon} size={TYPE.caption.fontSize} color={theme.accent} />
+                <Text style={[TYPE.caption, { color: theme.foreground, fontFamily: theme.fontBodyMedium }]}>{label}</Text>
+              </View>
+            ))}
+          </View>
+        </LinearGradient>
+      </Pressable>
+    </BrandProvider>
   );
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: NEUTRAL_THEME.background },
-  ambientOne: { position: "absolute", width: 260, height: 260, borderRadius: 130, backgroundColor: "rgba(218,27,46,0.10)", top: -150, right: -100 },
-  ambientTwo: { position: "absolute", width: 240, height: 240, borderRadius: 120, backgroundColor: "rgba(209,72,122,0.07)", bottom: 60, left: -170 },
+  ambientOne: {
+    position: "absolute",
+    width: SPACE.xxl * 6,
+    height: SPACE.xxl * 6,
+    borderRadius: RADIUS.pill,
+    backgroundColor: "rgba(218,27,46,0.10)",
+    top: -SPACE.xxl * 3,
+    right: -SPACE.xxl * 2,
+  },
+  ambientTwo: {
+    position: "absolute",
+    width: SPACE.xxl * 5 + SPACE.sm,
+    height: SPACE.xxl * 5 + SPACE.sm,
+    borderRadius: RADIUS.pill,
+    backgroundColor: "rgba(209,72,122,0.07)",
+    bottom: SPACE.xxl + SPACE.md,
+    left: -SPACE.xxl * 4,
+  },
   scroll: { padding: SPACE.lg, paddingTop: SPACE.md, paddingBottom: SPACE.xl },
   masthead: { flexDirection: "row", alignItems: "center", marginBottom: SPACE.xl },
-  logoMark: { width: 38, height: 38, borderRadius: 13, backgroundColor: NEUTRAL_THEME.accent, alignItems: "center", justifyContent: "center", transform: [{ rotate: "-4deg" }] },
-  logoCopy: { marginLeft: 10, flex: 1 },
-  logo: { color: NEUTRAL_THEME.foreground, fontSize: 23, lineHeight: 24, letterSpacing: 1 },
-  logoMeta: { color: NEUTRAL_THEME.muted, fontSize: 7, letterSpacing: 1.8 },
-  versionPill: { flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 1, borderColor: NEUTRAL_THEME.line, borderRadius: RADIUS.pill, paddingHorizontal: 10, paddingVertical: 7, backgroundColor: "rgba(255,255,255,0.03)" },
-  liveDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: "#49c379" },
-  versionText: { color: NEUTRAL_THEME.muted, fontSize: 8, letterSpacing: 1 },
+  logoMark: {
+    width: SPACE.xl + SPACE.xs,
+    height: SPACE.xl + SPACE.xs,
+    borderRadius: RADIUS.md - 1,
+    backgroundColor: NEUTRAL_THEME.accent,
+    alignItems: "center",
+    justifyContent: "center",
+    transform: [{ rotate: "-4deg" }],
+  },
+  logoCopy: { marginLeft: SPACE.sm, flex: 1 },
+  versionPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SPACE.xs,
+    borderWidth: 1,
+    borderColor: NEUTRAL_THEME.line,
+    borderRadius: RADIUS.pill,
+    paddingHorizontal: SPACE.sm,
+    paddingVertical: SPACE.xs + 1,
+    backgroundColor: "rgba(255,255,255,0.03)",
+  },
+  liveDot: { width: SPACE.xs - 1, height: SPACE.xs - 1, borderRadius: RADIUS.pill, backgroundColor: "#49c379" },
   heroCopy: { marginBottom: SPACE.lg },
-  eyebrowRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 },
-  rule: { width: 22, height: 2, borderRadius: 1, backgroundColor: NEUTRAL_THEME.accent },
-  eyebrow: { color: NEUTRAL_THEME.accent, fontSize: 9, letterSpacing: 2 },
-  headline: { color: NEUTRAL_THEME.foreground, fontSize: 48, lineHeight: 49, letterSpacing: 0.6 },
-  subhead: { color: "#aaa19b", fontSize: 14, lineHeight: 20, marginTop: 8, maxWidth: 330 },
+  eyebrowRow: { flexDirection: "row", alignItems: "center", gap: SPACE.sm - 2, marginBottom: SPACE.sm },
+  rule: { width: SPACE.lg - SPACE.xs, height: SPACE.xs - 4, borderRadius: RADIUS.pill, backgroundColor: NEUTRAL_THEME.accent },
+  subhead: { marginTop: SPACE.sm - 2, maxWidth: SPACE.xxl * 7 + SPACE.md },
   doors: { gap: SPACE.md },
   doorWrap: { borderRadius: RADIUS.xl, borderWidth: 1, overflow: "hidden" },
   pressed: { transform: [{ scale: 0.985 }], opacity: 0.94 },
-  door: { padding: SPACE.md, paddingBottom: 14 },
+  door: { padding: SPACE.md, paddingBottom: RADIUS.md },
   doorTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", zIndex: 2 },
-  studioMeta: { flexDirection: "row", alignItems: "center", gap: 8, flex: 1 },
-  studioNumber: { fontSize: 27, lineHeight: 28, opacity: 0.9 },
-  studioLabel: { fontSize: 7, letterSpacing: 1.6 },
-  studioNote: { fontSize: 10, marginTop: 1 },
-  enterPill: { flexDirection: "row", alignItems: "center", gap: 5, borderRadius: RADIUS.pill, paddingHorizontal: 11, paddingVertical: 7 },
-  enterText: { fontSize: 8, letterSpacing: 1.2 },
-  artStage: { minHeight: 126, justifyContent: "center", overflow: "hidden" },
-  artwork: { position: "absolute", width: 180, height: 136, right: -13, top: -2 },
-  sugarArtwork: { width: 155, right: -15 },
-  iconSeal: { position: "absolute", width: 34, height: 34, borderRadius: 17, right: 4, bottom: 5, alignItems: "center", justifyContent: "center", borderWidth: 3, borderColor: "rgba(255,255,255,0.68)" },
-  doorName: { letterSpacing: 0.3, maxWidth: "58%", zIndex: 2 },
-  doorTag: { fontSize: 8, letterSpacing: 1.45, marginTop: 3, maxWidth: "55%", zIndex: 2 },
-  tools: { flexDirection: "row", gap: 7, borderTopWidth: 1, paddingTop: 11 },
-  tool: { flex: 1, minHeight: 33, borderRadius: 11, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingHorizontal: 5 },
-  footer: { color: NEUTRAL_THEME.muted, fontSize: 8, letterSpacing: 2.1, textAlign: "center", marginTop: SPACE.lg },
+  studioMeta: { flexDirection: "row", alignItems: "center", gap: SPACE.sm - 2, flex: 1 },
+  studioNote: { marginTop: SPACE.xs - 5 },
+  enterPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SPACE.xs - 1,
+    borderRadius: RADIUS.pill,
+    paddingHorizontal: SPACE.sm + 1,
+    paddingVertical: SPACE.xs + 1,
+  },
+  artStage: { minHeight: SPACE.xxl * 3, justifyContent: "center", overflow: "hidden" },
+  artwork: { position: "absolute", width: SPACE.xxl * 4, height: SPACE.xxl * 3, right: -SPACE.sm - SPACE.xs + 3, top: -SPACE.xs + 4 },
+  sugarArtwork: { width: SPACE.xxl * 3 + SPACE.xl, right: -SPACE.md },
+  iconSeal: {
+    position: "absolute",
+    width: SPACE.xl + SPACE.xs - SPACE.xs + 2,
+    height: SPACE.xl + SPACE.xs - SPACE.xs + 2,
+    borderRadius: RADIUS.pill,
+    right: SPACE.xs - 2,
+    bottom: SPACE.xs - 1,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: SPACE.xs - 3,
+    borderColor: "rgba(255,255,255,0.68)",
+  },
+  doorName: { maxWidth: "86%", zIndex: 2, marginLeft: -SPACE.xs },
+  doorTag: { marginTop: SPACE.xs - 3, maxWidth: "56%", zIndex: 2 },
+  tools: { flexDirection: "row", gap: SPACE.xs + 1, borderTopWidth: 1, paddingTop: SPACE.sm + 1 },
+  tool: {
+    flex: 1,
+    minHeight: SPACE.xl + 1,
+    borderRadius: RADIUS.md - 3,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: SPACE.xs - 1,
+    paddingHorizontal: SPACE.xs - 1,
+  },
+  footer: { textAlign: "center", marginTop: SPACE.lg },
 });

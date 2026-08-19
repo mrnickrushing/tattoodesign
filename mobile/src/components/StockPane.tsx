@@ -12,7 +12,8 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useBrand } from "@/context/BrandContext";
 import { ImageViewer } from "@/components/ImageViewer";
-import { RADIUS } from "@/lib/theme";
+import { PaperSubstrate } from "@/components/PaperSubstrate";
+import { RADIUS, SPACE, TYPE } from "@/lib/theme";
 
 /**
  * The app's signature surface. Real tattoo flash is printed on warm off-white
@@ -64,9 +65,7 @@ export function StockPane({
       }}
       disabled={!filled && !onPressEmpty}
       accessibilityRole={filled || onPressEmpty ? "button" : "image"}
-      accessibilityLabel={
-        filled ? `${label}, tap to zoom` : `${label}, empty`
-      }
+      accessibilityLabel={filled ? `${label}, tap to zoom` : `${label}, empty`}
       style={({ pressed }) => [
         styles.pane,
         { backgroundColor: theme.stock, borderColor: theme.line },
@@ -74,13 +73,19 @@ export function StockPane({
         style,
       ]}
     >
+      <PaperSubstrate seed={index ?? 0} />
       {/* Registration marks — the tell that this is printed stock. */}
       <CropMarks color={theme.stockMark} />
       {!filled && <DotGrid color={theme.stockGrid} />}
 
       {filled ? (
         <>
-          <Image source={{ uri: uri! }} style={styles.image} contentFit="contain" alt={label} />
+          <Image
+            source={{ uri: uri! }}
+            style={styles.image}
+            contentFit="contain"
+            alt={label}
+          />
           {!!overlayUri && overlayOpacity > 0 && (
             <Image
               source={{ uri: overlayUri }}
@@ -95,7 +100,10 @@ export function StockPane({
         <View style={styles.empty}>
           <Ionicons name={emptyIcon} size={28} color={theme.stockMark} />
           {emptyHint && (
-            <Text style={[styles.hint, { color: theme.stockMark }]} numberOfLines={2}>
+            <Text
+              style={[styles.hint, { color: theme.stockMark }]}
+              numberOfLines={2}
+            >
               {emptyHint}
             </Text>
           )}
@@ -105,23 +113,35 @@ export function StockPane({
       {loading && (
         <View style={[styles.overlay, { backgroundColor: `${theme.stock}e6` }]}>
           <ActivityIndicator color={theme.accent} />
-          <Text style={[styles.loadingText, { color: theme.stockInk }]}>{loadingLabel}</Text>
+          <Text style={[styles.loadingText, { color: theme.stockInk }]}>
+            {loadingLabel}
+          </Text>
         </View>
       )}
 
       {/* Index + label sit on the stock like a printed caption, not a chip. */}
       <View style={styles.caption} pointerEvents="none">
         {index !== undefined && (
-          <Text style={[styles.index, { color: theme.stockInk, fontFamily: theme.fontDisplay }]}>
+          <Text
+            style={[
+              styles.index,
+              { color: theme.stockInk, fontFamily: theme.fontDisplay },
+            ]}
+          >
             {String(index).padStart(2, "0")}
           </Text>
         )}
-        <Text style={[styles.label, { color: theme.stockMark }]}>{label.toUpperCase()}</Text>
+        <Text style={[styles.label, { color: theme.stockMark }]}>
+          {label.toUpperCase()}
+        </Text>
       </View>
 
       {/* Affordance: only shown once there's something worth opening. */}
       {filled && (
-        <View style={[styles.expand, { backgroundColor: `${theme.stockInk}14` }]} pointerEvents="none">
+        <View
+          style={[styles.expand, { backgroundColor: `${theme.stockInk}14` }]}
+          pointerEvents="none"
+        >
           <Ionicons name="expand-outline" size={13} color={theme.stockInk} />
         </View>
       )}
@@ -136,7 +156,7 @@ export function StockPane({
 }
 
 /** Four L-shaped corner marks, the way a print proof is trimmed. */
-function CropMarks({ color }: { color: string }) {
+export function CropMarks({ color }: { color: string }) {
   const corners: ViewStyle[] = [
     { top: 8, left: 8, borderTopWidth: 1, borderLeftWidth: 1 },
     { top: 8, right: 8, borderTopWidth: 1, borderRightWidth: 1 },
@@ -146,14 +166,18 @@ function CropMarks({ color }: { color: string }) {
   return (
     <>
       {corners.map((c, i) => (
-        <View key={i} pointerEvents="none" style={[styles.mark, { borderColor: color }, c]} />
+        <View
+          key={i}
+          pointerEvents="none"
+          style={[styles.mark, { borderColor: color }, c]}
+        />
       ))}
     </>
   );
 }
 
 /** Printed dot grid, only visible while the stock is blank. */
-function DotGrid({ color }: { color: string }) {
+export function DotGrid({ color }: { color: string }) {
   const dots = [];
   for (let r = 0; r < 7; r++) {
     for (let c = 0; c < 7; c++) {
@@ -162,9 +186,13 @@ function DotGrid({ color }: { color: string }) {
           key={`${r}-${c}`}
           style={[
             styles.dot,
-            { backgroundColor: color, top: `${12 + r * 12.5}%`, left: `${12 + c * 12.5}%` },
+            {
+              backgroundColor: color,
+              top: `${12 + r * 12.5}%`,
+              left: `${12 + c * 12.5}%`,
+            },
           ]}
-        />
+        />,
       );
     }
   }
@@ -187,35 +215,44 @@ const styles = StyleSheet.create({
   },
   image: { width: "100%", height: "100%" },
   overlayImage: { ...StyleSheet.absoluteFill },
-  mark: { position: "absolute", width: 12, height: 12 },
-  dot: { position: "absolute", width: 1.5, height: 1.5, borderRadius: 1 },
-  empty: { alignItems: "center", gap: 6, paddingHorizontal: 16 },
-  hint: { fontSize: 11, textAlign: "center", lineHeight: 15 },
+  mark: {
+    position: "absolute",
+    width: SPACE.md - SPACE.xs,
+    height: SPACE.md - SPACE.xs,
+  },
+  dot: {
+    position: "absolute",
+    width: 1.5,
+    height: 1.5,
+    borderRadius: RADIUS.pill,
+  },
+  empty: { alignItems: "center", gap: SPACE.xs, paddingHorizontal: SPACE.md },
+  hint: { ...TYPE.caption, textAlign: "center" },
   overlay: {
     ...StyleSheet.absoluteFill,
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
+    gap: SPACE.sm - SPACE.xs,
   },
-  loadingText: { fontSize: 11, letterSpacing: 0.5 },
+  loadingText: { ...TYPE.caption, letterSpacing: TYPE.caption.letterSpacing },
   caption: {
     position: "absolute",
-    left: 12,
-    bottom: 10,
+    left: SPACE.md - SPACE.xs,
+    bottom: SPACE.sm,
     flexDirection: "row",
     alignItems: "baseline",
-    gap: 6,
+    gap: SPACE.xs,
   },
   expand: {
     position: "absolute",
-    right: 8,
-    bottom: 8,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    right: SPACE.sm - 2,
+    bottom: SPACE.sm - 2,
+    width: SPACE.lg,
+    height: SPACE.lg,
+    borderRadius: RADIUS.pill,
     alignItems: "center",
     justifyContent: "center",
   },
-  index: { fontSize: 20, lineHeight: 22, opacity: 0.35 },
-  label: { fontSize: 9, letterSpacing: 1.5, fontWeight: "600" },
+  index: { ...TYPE.heading, opacity: 0.35 },
+  label: { ...TYPE.micro, fontWeight: "600" },
 });

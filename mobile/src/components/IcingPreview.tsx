@@ -7,11 +7,14 @@ import {
   Pressable,
   ScrollView,
   ActivityIndicator,
+  Platform,
+  type LayoutChangeEvent,
 } from "react-native";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Canvas, LinearGradient, RoundedRect } from "@shopify/react-native-skia";
 import { useBrand } from "@/context/BrandContext";
 import { Button } from "@/components/Button";
 import { Notice } from "@/components/ui";
@@ -22,7 +25,7 @@ import {
   recolor,
   type IcingColors,
 } from "@/lib/icing";
-import { SPACE, RADIUS } from "@/lib/theme";
+import { SPACE, RADIUS, TYPE } from "@/lib/theme";
 
 /**
  * Try icing colors on a design before mixing any.
@@ -125,6 +128,7 @@ export function IcingPreview({
               alt={`${title} in ${colors.flood} icing`}
             />
           )}
+          <IcingFinish color={colors.flood} radius={RADIUS.md} />
           {pending && (
             <View style={styles.pending}>
               <ActivityIndicator color={theme.accent} />
@@ -196,7 +200,9 @@ function Swatches({
                 { borderColor: active ? theme.accent : "transparent", opacity: pressed ? 0.7 : 1 },
               ]}
             >
-              <View style={[styles.swatch, { backgroundColor: c.hex, borderColor: theme.line }]} />
+              <View style={[styles.swatch, { backgroundColor: c.hex, borderColor: theme.line }]}>
+                <IcingFinish color={c.hex} radius={RADIUS.sm} />
+              </View>
               <Text style={{ color: theme.muted, fontSize: 10, fontFamily: theme.fontBody }}>
                 {c.name}
               </Text>
@@ -208,10 +214,111 @@ function Swatches({
   );
 }
 
+type IcingFinishProps = {
+  color: string;
+  radius: number;
+};
+
+/**
+ * Royal icing holds a rounded, wet-looking surface after it has set. Skia is
+ * intentionally native-only here: web would need CanvasKit initialization,
+ * while the existing flat swatch remains a truthful and safe fallback.
+ */
+function IcingFinish({ color, radius }: IcingFinishProps) {
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  const luminance = colorLuminance(color);
+  // Pale buttercreams need a quiet sheen; dark berry and cocoa icing can carry
+  // a brighter reflection without turning chalky.
+  const highlight = 0.16 + (1 - luminance) * 0.28;
+  const bevel = 0.1 + (1 - luminance) * 0.16;
+
+  function onLayout(event: LayoutChangeEvent) {
+    const { width, height } = event.nativeEvent.layout;
+    setSize((current) =>
+      current.width === width && current.height === height ? current : { width, height }
+    );
+  }
+
+  if (Platform.OS === "web") {
+    return null;
+  }
+
+  const { width, height } = size;
+  if (width === 0 || height === 0) {
+    return <View pointerEvents="none" style={StyleSheet.absoluteFill} onLayout={onLayout} />;
+  }
+
+  return (
+    <View pointerEvents="none" style={StyleSheet.absoluteFill} onLayout={onLayout}>
+      <Canvas style={StyleSheet.absoluteFill} pointerEvents="none">
+        {/* The edge catches light first, making a flat flood color feel piped
+            and slightly raised rather than like a printed swatch. */}
+        <RoundedRect
+          x={0.5}
+          y={0.5}
+          width={width - 1}
+          height={height - 1}
+          r={radius}
+          color={`rgba(255, 255, 255, ${bevel.toFixed(2)})`}
+          style="stroke"
+          strokeWidth={1}
+        />
+        <RoundedRect
+          x={width * 0.055}
+          y={height * 0.05}
+          width={width * 0.72}
+          height={height * 0.42}
+          r={Math.max(1, radius - 2)}
+        >
+          <LinearGradient
+            start={{ x: width * 0.08, y: height * 0.05 }}
+            end={{ x: width * 0.64, y: height * 0.47 }}
+            colors={[
+              `rgba(255, 255, 255, ${highlight.toFixed(2)})`,
+              `rgba(255, 255, 255, ${(highlight * 0.42).toFixed(2)})`,
+              "rgba(255, 255, 255, 0)",
+            ]}
+            positions={[0, 0.52, 1]}
+          />
+        </RoundedRect>
+        <RoundedRect
+          x={width * 0.15}
+          y={height * 0.11}
+          width={width * 0.32}
+          height={Math.max(1, height * 0.11)}
+          r={RADIUS.pill}
+        >
+          <LinearGradient
+            start={{ x: width * 0.15, y: height * 0.11 }}
+            end={{ x: width * 0.47, y: height * 0.11 }}
+            colors={[
+              `rgba(255, 255, 255, ${(highlight * 0.85).toFixed(2)})`,
+              "rgba(255, 255, 255, 0)",
+            ]}
+            positions={[0, 1]}
+          />
+        </RoundedRect>
+      </Canvas>
+    </View>
+  );
+}
+
+function colorLuminance(hex: string) {
+  const value = hex.replace("#", "");
+  if (!/^[\da-f]{6}$/i.test(value)) return 0.5;
+
+  const channel = (offset: number) => {
+    const normalized = Number.parseInt(value.slice(offset, offset + 2), 16) / 255;
+    return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+  };
+
+  return 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4);
+}
+
 const styles = StyleSheet.create({
   root: { flex: 1, padding: SPACE.md },
   head: { flexDirection: "row", alignItems: "center", gap: SPACE.sm, marginBottom: SPACE.md },
-  title: { fontSize: 26, letterSpacing: 0.3 },
+  title: { ...TYPE.heading, letterSpacing: 0.3 },
   close: {
     width: 36,
     height: 36,
@@ -240,5 +347,5 @@ const styles = StyleSheet.create({
     borderRadius: RADIUS.md,
     width: 62,
   },
-  swatch: { width: 44, height: 44, borderRadius: RADIUS.sm, borderWidth: 1 },
+  swatch: { width: 44, height: 44, borderRadius: RADIUS.sm, borderWidth: 1, overflow: "hidden" },
 });

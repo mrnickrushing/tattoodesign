@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from "react";
+import { useCallback } from "react";
 import { Stack } from "expo-router";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import * as SplashScreen from "expo-splash-screen";
@@ -27,10 +27,6 @@ export default function RootLayout() {
   const onLayoutRootView = useCallback(() => {
     if (fontsLoaded) SplashScreen.hideAsync().catch(() => {});
   }, [fontsLoaded]);
-
-  useEffect(() => {
-    onLayoutRootView();
-  }, [onLayoutRootView]);
 
   if (!fontsLoaded) return null;
 

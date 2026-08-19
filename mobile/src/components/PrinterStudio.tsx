@@ -1,17 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Image, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
+import { Alert, Image, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import Slider from "@react-native-community/slider";
-import { Ionicons } from "@expo/vector-icons";
 import * as Print from "expo-print";
 import * as Haptics from "expo-haptics";
 import { useBrand } from "@/context/BrandContext";
 import { Button } from "@/components/Button";
+import { Icon } from "@/components/Icon";
+import { PaperSubstrate } from "@/components/PaperSubstrate";
+import { Skeleton } from "@/components/Skeleton";
 import { Card, Chip, Notice, SectionLabel } from "@/components/ui";
 import { BLE_PRINTING_AVAILABLE, printEscPosOverBle, requestBlePermission, scanBlePrinters, type BlePrinterDevice } from "@/lib/blePrinter";
 import { dataUrlToEscPos } from "@/lib/escpos";
 import { calibrationCorrection, PRINTER_PRESETS, profileWarnings, type PrinterProfile } from "@/lib/printerProfiles";
 import { DEFAULT_OVERLAP_IN, describeTiling, planTiles, tileCount, tileRects, tiledSheetHtml } from "@/lib/tiling";
-import { RADIUS, SPACE } from "@/lib/theme";
+import { RADIUS, SPACE, TYPE } from "@/lib/theme";
 
 type Props = {
   visible: boolean;
@@ -133,11 +135,11 @@ export function PrinterStudio({ visible, profile, pageWidthIn, pageHeightIn, onC
       <View style={[styles.root, { backgroundColor: theme.background }]}> 
         <View style={[styles.header, { borderBottomColor: theme.line, backgroundColor: theme.surface }]}> 
           <View>
-            <Text style={{ color: theme.accent, fontFamily: theme.fontBodyMedium, fontSize: 10, letterSpacing: 1.6 }}>OUTPUT LAB</Text>
-            <Text style={{ color: theme.foreground, fontFamily: theme.fontDisplay, fontSize: 29 }}>Printer Studio</Text>
+            <Text style={[TYPE.micro, { color: theme.accent, fontFamily: theme.fontBodyMedium }]}>OUTPUT LAB</Text>
+            <Text style={[TYPE.title, { color: theme.foreground, fontFamily: theme.fontDisplay }]}>Printer Studio</Text>
           </View>
           <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Close printer studio" style={[styles.close, { backgroundColor: theme.surfaceAlt }]}> 
-            <Ionicons name="close" size={22} color={theme.foreground} />
+            <Icon name="close" size={TYPE.heading.fontSize} color={theme.foreground} />
           </Pressable>
         </View>
 
@@ -156,21 +158,22 @@ export function PrinterStudio({ visible, profile, pageWidthIn, pageHeightIn, onC
             </View>
             <View style={[styles.settingRow, { borderTopColor: theme.line }]}> 
               <View>
-                <Text style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium, fontSize: 13 }}>Mirror transfer</Text>
-                <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 10 }}>Flips the full proof before output.</Text>
+                <Text style={[TYPE.caption, { color: theme.foreground, fontFamily: theme.fontBodyMedium }]}>Mirror transfer</Text>
+                <Text style={[TYPE.micro, { color: theme.muted, fontFamily: theme.fontBody }]}>Flips the full proof before output.</Text>
               </View>
               <Switch value={profile.mirrored} onValueChange={(mirrored) => onChange({ ...profile, mirrored })} trackColor={{ true: theme.accent }} />
             </View>
-            <Text style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium, fontSize: 13, marginTop: SPACE.sm }}>Thermal density · {profile.density}</Text>
+            <Text style={[TYPE.caption, { color: theme.foreground, fontFamily: theme.fontBodyMedium, marginTop: SPACE.sm }]}>Thermal density · {profile.density}</Text>
             <Slider minimumValue={1} maximumValue={10} step={1} value={profile.density} onValueChange={(density) => onChange({ ...profile, density })} minimumTrackTintColor={theme.accent} maximumTrackTintColor={theme.line} thumbTintColor={theme.accent} />
           </Card>
 
           <SectionLabel>Thermal print proof</SectionLabel>
           <View style={[styles.proof, { backgroundColor: theme.stock, borderColor: theme.line, aspectRatio: pageWidthIn / pageHeightIn }]}> 
+            <PaperSubstrate seed={Math.round(pageWidthIn * pageHeightIn * profile.dpi)} intensity={0.48} />
             {proof && <Image source={{ uri: proof }} resizeMode="contain" style={[StyleSheet.absoluteFill, profile.mirrored && { transform: [{ scaleX: -1 }] }]} />}
             <View pointerEvents="none" style={[styles.printableGuide, { left: `${(profile.marginIn / pageWidthIn) * 100}%`, right: `${(profile.marginIn / pageWidthIn) * 100}%`, borderColor: theme.accent }]} />
-            <View style={[styles.proofBadge, { backgroundColor: theme.surface }]}><Text style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium, fontSize: 9 }}>{profile.dpi} DPI · D{profile.density}</Text></View>
-            {proofing && <View style={styles.proofLoading}><ActivityIndicator color={theme.accent} /><Text style={{ color: theme.stockInk }}>Building proof</Text></View>}
+            <View style={[styles.proofBadge, { backgroundColor: theme.surface }]}><Text style={[TYPE.micro, { color: theme.foreground, fontFamily: theme.fontBodyMedium }]}>{profile.dpi} DPI · D{profile.density}</Text></View>
+            {proofing && <View accessibilityRole="progressbar" accessibilityLabel="Building proof" style={styles.proofLoading}><Skeleton width="72%" height={SPACE.lg} radius={RADIUS.sm} /><Skeleton width="46%" height={SPACE.md} radius={RADIUS.sm} /><Text style={[TYPE.caption, { color: theme.stockInk, fontFamily: theme.fontBodyMedium }]}>Building proof</Text></View>}
           </View>
           {warnings.map((warning) => <View key={warning} style={{ marginTop: SPACE.xs }}><Notice tone="info" icon="warning-outline">{warning}</Notice></View>)}
 
@@ -178,13 +181,13 @@ export function PrinterStudio({ visible, profile, pageWidthIn, pageHeightIn, onC
             <>
               <SectionLabel>Large format</SectionLabel>
               <Card>
-                <Text style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium, fontSize: 14 }}>
+                <Text style={[TYPE.body, { color: theme.foreground, fontFamily: theme.fontBodyMedium }]}>
                   {describeTiling(tiling)}
                 </Text>
                 <Text style={[styles.detail, { color: theme.muted }]}>
                   This design is {pageWidthIn.toFixed(1)}in wide and the printer holds {profile.printableWidthIn.toFixed(2)}in. Each sheet carries corner and seam marks plus an R#C# label — align the marks, tape the seams.
                 </Text>
-                <Text style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium, fontSize: 13 }}>Seam overlap · {overlapIn.toFixed(2)}in</Text>
+                <Text style={[TYPE.caption, { color: theme.foreground, fontFamily: theme.fontBodyMedium }]}>Seam overlap · {overlapIn.toFixed(2)}in</Text>
                 <Slider minimumValue={0} maximumValue={1} step={0.05} value={overlapIn} onValueChange={setOverlapIn} minimumTrackTintColor={theme.accent} maximumTrackTintColor={theme.line} thumbTintColor={theme.accent} accessibilityLabel="Seam overlap" />
                 <View style={styles.tileGrid}>
                   {tileRects(tiling).map((rect) => (
@@ -197,7 +200,7 @@ export function PrinterStudio({ visible, profile, pageWidthIn, pageHeightIn, onC
                         aspectRatio: rect.wIn / rect.hIn,
                       }]}
                     >
-                      <Text style={{ color: theme.muted, fontFamily: theme.fontBodyMedium, fontSize: 8 }}>R{rect.row + 1}C{rect.col + 1}</Text>
+                      <Text style={[TYPE.micro, { color: theme.muted, fontFamily: theme.fontBodyMedium }]}>R{rect.row + 1}C{rect.col + 1}</Text>
                     </View>
                   ))}
                 </View>
@@ -208,10 +211,10 @@ export function PrinterStudio({ visible, profile, pageWidthIn, pageHeightIn, onC
 
           <SectionLabel>Calibration wizard</SectionLabel>
           <Card>
-            <Text style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium, fontSize: 14 }}>1 · Print the six-inch ruler</Text>
+            <Text style={[TYPE.body, { color: theme.foreground, fontFamily: theme.fontBodyMedium }]}>1 · Print the six-inch ruler</Text>
             <Text style={[styles.detail, { color: theme.muted }]}>Use Actual Size / 100%. Measure the result with a physical ruler.</Text>
             <Button label="Print calibration ruler" icon="resize-outline" onPress={() => void printCalibration()} />
-            <Text style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium, fontSize: 14, marginTop: SPACE.md }}>2 · Enter what printed</Text>
+            <Text style={[TYPE.body, { color: theme.foreground, fontFamily: theme.fontBodyMedium, marginTop: SPACE.md }]}>2 · Enter what printed</Text>
             <View style={styles.measureRow}>
               <TextInput value={measured} onChangeText={setMeasured} keyboardType="decimal-pad" placeholder="5.94" placeholderTextColor={theme.muted} style={[styles.input, { color: theme.foreground, borderColor: theme.line, backgroundColor: theme.surfaceAlt }]} />
               <Text style={{ color: theme.muted }}>inches</Text>
@@ -230,9 +233,9 @@ export function PrinterStudio({ visible, profile, pageWidthIn, pageHeightIn, onC
               <Button label={scanning ? "Scanning nearby…" : "Find BLE printers"} icon="bluetooth-outline" onPress={() => void scan()} disabled={scanning || printing} style={{ marginTop: SPACE.sm }} />
               {devices.map((device) => (
                 <Pressable key={device.id} onPress={() => void printBle(device)} disabled={printing} style={[styles.device, { borderColor: theme.line, backgroundColor: theme.surfaceAlt }]}> 
-                  <Ionicons name="print-outline" size={18} color={theme.accent} />
-                  <View style={{ flex: 1 }}><Text style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium }}>{device.name}</Text><Text style={{ color: theme.muted, fontSize: 10 }}>{device.rssi ? `${device.rssi} dBm · ` : ""}tap to send proof</Text></View>
-                  <Ionicons name="chevron-forward" size={17} color={theme.muted} />
+                  <Icon name="print" size={SPACE.md + SPACE.xs} color={theme.accent} />
+                  <View style={{ flex: 1 }}><Text style={[TYPE.caption, { color: theme.foreground, fontFamily: theme.fontBodyMedium }]}>{device.name}</Text><Text style={[TYPE.micro, { color: theme.muted }]}>{device.rssi ? `${device.rssi} dBm · ` : ""}tap to send proof</Text></View>
+                  <Icon name="chevronForward" size={SPACE.md + SPACE.xs} color={theme.muted} />
                 </Pressable>
               ))}
               {printing && <Text style={{ color: theme.accent, fontFamily: theme.fontBodyMedium, marginTop: SPACE.sm }}>{Math.round(progress * 100)}% sent</Text>}
@@ -246,7 +249,7 @@ export function PrinterStudio({ visible, profile, pageWidthIn, pageHeightIn, onC
 
 function Metric({ label, value }: { label: string; value: string }) {
   const { theme } = useBrand();
-  return <View style={{ flex: 1 }}><Text style={{ color: theme.muted, fontSize: 8, letterSpacing: 1 }}>{label}</Text><Text style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium, fontSize: 13 }}>{value}</Text></View>;
+  return <View style={{ flex: 1 }}><Text style={[TYPE.micro, { color: theme.muted }]}>{label}</Text><Text style={[TYPE.caption, { color: theme.foreground, fontFamily: theme.fontBodyMedium }]}>{value}</Text></View>;
 }
 
 const styles = StyleSheet.create({
@@ -255,15 +258,15 @@ const styles = StyleSheet.create({
   close: { width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center" },
   scroll: { padding: SPACE.md, paddingBottom: 60 },
   profileRow: { gap: 8, paddingBottom: 2 },
-  detail: { fontSize: 11, lineHeight: 16, marginTop: 7, marginBottom: SPACE.sm },
+  detail: { ...TYPE.caption, marginTop: SPACE.xs, marginBottom: SPACE.sm },
   metricRow: { flexDirection: "row", gap: SPACE.sm },
   settingRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", borderTopWidth: 1, marginTop: SPACE.md, paddingTop: SPACE.sm },
   proof: { width: "72%", alignSelf: "center", borderWidth: 1, borderRadius: RADIUS.md, overflow: "hidden", marginBottom: SPACE.xs },
   printableGuide: { position: "absolute", top: "3%", bottom: "3%", borderWidth: 1, borderStyle: "dashed" },
   proofBadge: { position: "absolute", top: 7, right: 7, borderRadius: RADIUS.pill, paddingHorizontal: 8, paddingVertical: 5 },
-  proofLoading: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: "rgba(255,255,255,.88)" },
+  proofLoading: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center", gap: SPACE.xs, backgroundColor: "rgba(255,255,255,.78)" },
   measureRow: { flexDirection: "row", alignItems: "center", gap: SPACE.sm, marginTop: SPACE.xs },
-  input: { width: 80, minHeight: 44, borderWidth: 1, borderRadius: RADIUS.sm, paddingHorizontal: 12, fontSize: 16 },
+  input: { width: SPACE.xxl * 2, minHeight: SPACE.xxl, borderWidth: 1, borderRadius: RADIUS.sm, paddingHorizontal: SPACE.sm, ...TYPE.body },
   tileGrid: { flexDirection: "row", flexWrap: "wrap", marginVertical: SPACE.sm },
   tileCell: { borderWidth: 1, alignItems: "center", justifyContent: "center" },
   device: { minHeight: 58, flexDirection: "row", alignItems: "center", gap: SPACE.sm, borderWidth: 1, borderRadius: RADIUS.md, padding: SPACE.sm, marginTop: SPACE.sm },

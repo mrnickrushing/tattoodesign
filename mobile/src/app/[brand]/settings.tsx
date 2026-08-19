@@ -4,12 +4,13 @@ import { File } from "expo-file-system";
 import * as Updates from "expo-updates";
 import * as Application from "expo-application";
 import * as Haptics from "expo-haptics";
-import { Ionicons } from "@expo/vector-icons";
 import { useBrand } from "@/context/BrandContext";
 import { API_BASE_URL } from "@/lib/api";
 import { Button } from "@/components/Button";
+import { Icon } from "@/components/Icon";
 import { ScreenHeader, Card, SectionLabel, Notice } from "@/components/ui";
-import { SPACE } from "@/lib/theme";
+import type { IconName } from "@/lib/icons";
+import { SPACE, TYPE } from "@/lib/theme";
 import { getGenerationUsage, getSpendLimit, setSpendLimit, totalEstimatedSpend } from "@/lib/generationUsage";
 import { createEncryptedBackup, restoreEncryptedBackup } from "@/lib/encryptedBackup";
 import { shareUri } from "@/lib/files";
@@ -139,22 +140,22 @@ export default function SettingsScreen() {
 
       <SectionLabel>Version</SectionLabel>
       <Card>
-        <Row label="App version" value={dash(Application.nativeApplicationVersion)} icon="pricetag-outline" />
+        <Row label="App version" value={dash(Application.nativeApplicationVersion)} icon="tag" />
         <Divider />
-        <Row label="Build" value={dash(Application.nativeBuildVersion)} icon="hammer-outline" />
+        <Row label="Build" value={dash(Application.nativeBuildVersion)} icon="tool" />
         <Divider />
-        <Row label="Runtime" value={dash(currentlyRunning.runtimeVersion)} icon="layers-outline" />
+        <Row label="Runtime" value={dash(currentlyRunning.runtimeVersion)} icon="layers" />
         <Divider />
-        <Row label="Channel" value={dash(currentlyRunning.channel)} icon="git-branch-outline" />
+        <Row label="Channel" value={dash(currentlyRunning.channel)} icon="branch" />
         <Divider />
-        <Row label="Running" value={runningLabel} icon="play-circle-outline" />
+        <Row label="Running" value={runningLabel} icon="play" />
         {currentlyRunning.createdAt && (
           <>
             <Divider />
             <Row
               label="Published"
               value={currentlyRunning.createdAt.toLocaleString()}
-              icon="time-outline"
+              icon="history"
             />
           </>
         )}
@@ -184,7 +185,7 @@ export default function SettingsScreen() {
                   },
                 ]}
               />
-              <Text style={{ color: theme.foreground, fontFamily: theme.fontBody, fontSize: 14, flex: 1 }}>
+              <Text style={[TYPE.body, { color: theme.foreground, fontFamily: theme.fontBody, flex: 1 }]}>
                 {isUpdatePending
                   ? "Update ready — restart to apply"
                   : isDownloading
@@ -247,8 +248,8 @@ export default function SettingsScreen() {
       <SectionLabel>Encrypted studio backup</SectionLabel>
       <Card>
         <View style={styles.backupHero}>
-          <View style={{ flex: 1 }}><Text style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium, fontSize: 14 }}>Artwork, layers, sheets & projects</Text><Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 11, lineHeight: 16 }}>AES-256-GCM encryption protects the portable archive. Keep its recovery key somewhere separate.</Text></View>
-          <Ionicons name="lock-closed" size={27} color={theme.accent} />
+          <View style={{ flex: 1 }}><Text style={[TYPE.body, { color: theme.foreground, fontFamily: theme.fontBodyMedium }]}>Artwork, layers, sheets & projects</Text><Text style={[TYPE.caption, { color: theme.muted, fontFamily: theme.fontBody }]}>AES-256-GCM encryption protects the portable archive. Keep its recovery key somewhere separate.</Text></View>
+          <Icon name="lock" size={TYPE.heading.fontSize + SPACE.xs} color={theme.accent} />
         </View>
         <TextInput value={recoveryKey} onChangeText={setRecoveryKey} autoCapitalize="none" autoCorrect={false} secureTextEntry placeholder="Recovery key for import" placeholderTextColor={theme.muted} accessibilityLabel="Backup recovery key" style={[styles.recoveryInput, { color: theme.foreground, borderColor: theme.line, backgroundColor: theme.surfaceAlt, fontFamily: theme.fontBody }]} />
         <View style={styles.backupActions}><Button label="Export backup" icon="lock-closed-outline" variant="primary" onPress={exportBackup} loading={backupBusy} style={{ flex: 1 }} /><Button label="Restore" icon="cloud-upload-outline" onPress={importBackup} disabled={backupBusy || !recoveryKey.trim()} style={{ flex: 1 }} /></View>
@@ -262,14 +263,14 @@ export default function SettingsScreen() {
         <Row
           label="Generator API"
           value={API_BASE_URL.replace(/^https?:\/\//, "")}
-          icon="cloud-outline"
+          icon="cloudOffline"
           onPress={() => Linking.openURL(API_BASE_URL)}
         />
         <Divider />
         <Row
           label="Studio"
           value={brand.name}
-          icon={brand.id === "ink" ? "flash-outline" : "cafe-outline"}
+          icon={brand.id === "ink" ? "flash" : "palette"}
         />
       </Card>
 
@@ -279,14 +280,14 @@ export default function SettingsScreen() {
       <Card>
         <View style={styles.spendHero}>
           <View>
-            <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 11 }}>ESTIMATED THIS MONTH</Text>
-            <Text style={{ color: theme.accent, fontFamily: theme.fontDisplay, fontSize: 34 }}>${spend.toFixed(2)}</Text>
+            <Text style={[TYPE.caption, { color: theme.muted, fontFamily: theme.fontBody }]}>ESTIMATED THIS MONTH</Text>
+            <Text style={[TYPE.title, { color: theme.accent, fontFamily: theme.fontDisplay }]}>${spend.toFixed(2)}</Text>
           </View>
-          <Ionicons name="pulse-outline" size={30} color={theme.accent} />
+          <Icon name="generate" size={TYPE.heading.fontSize + SPACE.sm} color={theme.accent} />
         </View>
-        <Text style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium, fontSize: 13, marginTop: SPACE.sm }}>Monthly spending guard</Text>
+        <Text style={[TYPE.caption, { color: theme.foreground, fontFamily: theme.fontBodyMedium, marginTop: SPACE.sm }]}>Monthly spending guard</Text>
         <View style={styles.limitRow}>
-          <Text style={{ color: theme.muted, fontSize: 18 }}>$</Text>
+          <Text style={[TYPE.heading, { color: theme.muted }]}>$</Text>
           <TextInput
             value={limit}
             onChangeText={setLimit}
@@ -297,7 +298,7 @@ export default function SettingsScreen() {
             style={[styles.limitInput, { color: theme.foreground, borderColor: theme.line, backgroundColor: theme.surfaceAlt, fontFamily: theme.fontBodyMedium }]}
           />
         </View>
-        <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 11, lineHeight: 16 }}>Inkline blocks a generation before its estimate would pass this device-only limit. Set 0 for no guard.</Text>
+        <Text style={[TYPE.caption, { color: theme.muted, fontFamily: theme.fontBody }]}>Inkline blocks a generation before its estimate would pass this device-only limit. Set 0 for no guard.</Text>
       </Card>
 
       <Text style={[styles.footer, { color: theme.muted, fontFamily: theme.fontBody }]}>
@@ -315,15 +316,15 @@ function Row({
 }: {
   label: string;
   value: string;
-  icon: keyof typeof Ionicons.glyphMap;
+  icon: IconName;
   onPress?: () => void;
 }) {
   const { theme } = useBrand();
   return (
     <View style={styles.row} accessibilityRole={onPress ? "button" : undefined}>
       <View style={styles.rowLeft}>
-        <Ionicons name={icon} size={15} color={theme.muted} />
-        <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 13 }}>
+        <Icon name={icon} size={SPACE.md} color={theme.muted} />
+        <Text style={[TYPE.caption, { color: theme.muted, fontFamily: theme.fontBody }]}>
           {label}
         </Text>
       </View>
@@ -333,7 +334,7 @@ function Row({
         style={{
           color: onPress ? theme.accent : theme.foreground,
           fontFamily: theme.fontBodyMedium,
-          fontSize: 13,
+          ...TYPE.caption,
           maxWidth: "58%",
           textAlign: "right",
         }}
@@ -374,15 +375,15 @@ const styles = StyleSheet.create({
   divider: { height: StyleSheet.hairlineWidth },
   statusRow: { flexDirection: "row", alignItems: "center", gap: 9 },
   statusDot: { width: 8, height: 8, borderRadius: 4 },
-  meta: { fontSize: 11, marginTop: 6, marginLeft: 17 },
+  meta: { ...TYPE.caption, marginTop: SPACE.xs, marginLeft: SPACE.md + SPACE.xs },
   spendHero: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   limitRow: { flexDirection: "row", alignItems: "center", gap: 8, marginVertical: SPACE.sm },
-  limitInput: { flex: 1, borderWidth: 1, borderRadius: 12, minHeight: 46, paddingHorizontal: 12, fontSize: 17 },
+  limitInput: { flex: 1, borderWidth: 1, borderRadius: SPACE.sm + SPACE.xs / 3, minHeight: SPACE.xxl, paddingHorizontal: SPACE.sm, ...TYPE.body },
   backupHero: { flexDirection: "row", alignItems: "center", gap: SPACE.sm, marginBottom: SPACE.sm },
   recoveryInput: { minHeight: 46, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, marginBottom: SPACE.sm },
   backupActions: { flexDirection: "row", gap: SPACE.sm, marginBottom: SPACE.sm },
   footer: {
-    fontSize: 12,
+    ...TYPE.caption,
     textAlign: "center",
     marginTop: SPACE.lg,
     lineHeight: 17,

@@ -10,7 +10,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 import { Image } from "expo-image";
-import { Ionicons } from "@expo/vector-icons";
+import type { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import * as Print from "expo-print";
 import * as Haptics from "expo-haptics";
@@ -53,8 +53,13 @@ import { PlacementPreview } from "@/components/PlacementPreview";
 import { DesignActions, type DesignAction } from "@/components/DesignActions";
 import { DesignEditor } from "@/components/DesignEditor";
 import { PrinterStudio } from "@/components/PrinterStudio";
+import { EmptyStock } from "@/components/EmptyStock";
+import { GlassSurface } from "@/components/GlassSurface";
+import { Icon } from "@/components/Icon";
+import { PaperSubstrate } from "@/components/PaperSubstrate";
 import { getPrinterProfile, savePrinterProfile, type PrinterProfile } from "@/lib/printerProfiles";
-import { SPACE, RADIUS, lift } from "@/lib/theme";
+import { type IconName } from "@/lib/icons";
+import { SPACE, RADIUS, TYPE, lift } from "@/lib/theme";
 
 type SheetTemplate = { id: string; label: string; widthIn: number; heightIn: number };
 
@@ -861,15 +866,15 @@ export default function BuilderScreen() {
       </View>
 
       {/* Document header: what's open, and the two things you do to it. */}
-      <View style={[styles.sheetBar, { borderColor: theme.line }]}>
+      <GlassSurface style={[styles.sheetBar, { borderColor: theme.line }]}>
         <View style={styles.sheetBarText}>
           <Text
             numberOfLines={1}
-            style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium, fontSize: 14 }}
+            style={[TYPE.body, { color: theme.foreground, fontFamily: theme.fontBodyMedium }]}
           >
             {sheetName ?? "Untitled sheet"}
           </Text>
-          <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 11 }}>
+          <Text style={[TYPE.caption, { color: theme.muted, fontFamily: theme.fontBody }]}>
             {items.length === 0
               ? "Empty"
               : `${items.length} design${items.length === 1 ? "" : "s"}`}
@@ -890,22 +895,23 @@ export default function BuilderScreen() {
         />
         <IconAction icon="add-outline" label="New sheet" onPress={newSheet} />
         <IconAction icon="bookmark-outline" label="Save sheet" onPress={openSavePrompt} />
-      </View>
+      </GlassSurface>
 
-      <View style={[styles.precisionBar, { borderColor: theme.line, backgroundColor: theme.surface }]}>
+      <GlassSurface style={[styles.precisionBar, { borderColor: theme.line }]}>
         <View style={{ flex: 1 }}>
-          <Text style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium, fontSize: 12 }}>Precision mode</Text>
-          <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 9 }}>⅛-inch grid · safe edge · exact output</Text>
+          <Text style={[TYPE.caption, { color: theme.foreground, fontFamily: theme.fontBodyMedium }]}>Precision mode</Text>
+          <Text style={[TYPE.micro, { color: theme.muted, fontFamily: theme.fontBody }]}>⅛-inch grid · safe edge · exact output</Text>
         </View>
         <IconAction icon={snapEnabled ? "magnet" : "magnet-outline"} label="Toggle snapping" onPress={() => setSnapEnabled((value) => !value)} />
         <IconAction icon={guidesVisible ? "grid" : "grid-outline"} label="Toggle guides" onPress={() => setGuidesVisible((value) => !value)} />
-      </View>
+      </GlassSurface>
 
       <View style={styles.sheetWrap}>
         <View
           collapsable={false}
           style={[styles.sheet, { width: sheetWidth, height: sheetHeight }]}
         >
+          <PaperSubstrate seed={template.widthIn * 100 + template.heightIn} intensity={0.52} />
           {guidesVisible && (
             <>
               <View pointerEvents="none" style={[styles.safeGuide, { borderColor: theme.stockMark }]} />
@@ -936,8 +942,8 @@ export default function BuilderScreen() {
         <Card style={{ marginBottom: SPACE.md }}>
           <View style={styles.sizeRow}>
             <View style={styles.sizeLabel}>
-              <Ionicons name="resize-outline" size={15} color={theme.muted} />
-              <Text style={{ color: theme.foreground, fontFamily: theme.fontBody, fontSize: 14 }}>
+              <Icon name="resize" size={TYPE.body.fontSize} color={theme.muted} />
+              <Text style={[TYPE.body, { color: theme.foreground, fontFamily: theme.fontBody }]}>
                 Width
               </Text>
             </View>
@@ -963,13 +969,13 @@ export default function BuilderScreen() {
                   },
                 ]}
               />
-              <Text style={{ color: theme.muted, fontSize: 13, fontFamily: theme.fontBody }}>
+              <Text style={[TYPE.caption, { color: theme.muted, fontFamily: theme.fontBody }]}>
                 in
               </Text>
               <Stepper icon="add" onPress={() => nudgeWidth(0.25)} />
             </View>
           </View>
-          <Text style={{ color: theme.muted, fontSize: 11, marginTop: 6 }}>
+          <Text style={[TYPE.caption, { color: theme.muted, fontFamily: theme.fontBody, marginTop: SPACE.xs }]}>
             Prints at exactly this size · {fmtIn(selected.hIn)}in tall {selected.locked ? "· locked" : ""}
           </Text>
           <View style={styles.precisionControls}>
@@ -1098,22 +1104,18 @@ export default function BuilderScreen() {
                     },
                   ]}
                 >
-                  <Ionicons
-                    name={open ? "bookmark" : "bookmark-outline"}
-                    size={15}
-                    color={open ? theme.accent : theme.muted}
-                  />
+                  <Icon name="save" size={TYPE.body.fontSize} color={open ? theme.accent : theme.muted} />
                   <Text
                     numberOfLines={1}
                     style={{
                       color: theme.foreground,
                       fontFamily: theme.fontBodyMedium,
-                      fontSize: 13,
+                      ...TYPE.caption,
                     }}
                   >
                     {s.name}
                   </Text>
-                  <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 11 }}>
+                  <Text style={[TYPE.caption, { color: theme.muted, fontFamily: theme.fontBody }]}>
                     {s.items.length} design{s.items.length === 1 ? "" : "s"}
                     {size ? ` · ${size.label}` : ""}
                   </Text>
@@ -1129,12 +1131,12 @@ export default function BuilderScreen() {
       </SectionLabel>
 
       {library.length === 0 ? (
-        <View style={[styles.emptyLib, { borderColor: theme.line }]}>
-          <Ionicons name="albums-outline" size={26} color={theme.muted} />
-          <Text style={{ color: theme.muted, fontSize: 13, fontFamily: theme.fontBody, textAlign: "center" }}>
-            Designs you generate or trace land here, ready to place.
-          </Text>
-        </View>
+        <EmptyStock
+          icon="sheet"
+          title="Your sheet starts with a design"
+          detail="Designs you generate or trace land here, ready to place."
+          action={{ label: "Upload design", onPress: pickUpload }}
+        />
       ) : (
         <View style={styles.libraryGrid}>
           {library.map((d) => (
@@ -1153,6 +1155,7 @@ export default function BuilderScreen() {
                 { borderColor: theme.line, backgroundColor: theme.stock, opacity: pressed ? 0.7 : 1 },
               ]}
             >
+              <PaperSubstrate seed={d.title.length} intensity={0.42} />
               <Image
                 source={{ uri: d.uri }}
                 style={styles.image}
@@ -1320,7 +1323,7 @@ function IconAction({
         },
       ]}
     >
-      <Ionicons name={icon} size={17} color={theme.foreground} />
+      <Icon name={iconNameFor(icon)} size={TYPE.body.fontSize + SPACE.xs / 3} color={theme.foreground} />
     </Pressable>
   );
 }
@@ -1348,7 +1351,7 @@ function Stepper({
         },
       ]}
     >
-      <Ionicons name={icon} size={16} color={theme.foreground} />
+      <Icon name={iconNameFor(icon)} size={TYPE.body.fontSize} color={theme.foreground} />
     </Pressable>
   );
 }
@@ -1491,9 +1494,34 @@ function DraggableItem({
   );
 }
 
+function iconNameFor(icon: keyof typeof Ionicons.glyphMap): IconName {
+  const aliases: Partial<Record<keyof typeof Ionicons.glyphMap, IconName>> = {
+    "arrow-undo-outline": "undo",
+    "grid-outline": "sheet",
+    "add-outline": "add",
+    "bookmark-outline": "save",
+    magnet: "tool",
+    "magnet-outline": "tool",
+    grid: "sheet",
+    "arrow-back": "back",
+    "arrow-up": "up",
+    "arrow-down": "down",
+    "arrow-forward": "arrowForward",
+    "play-back": "back",
+    contract: "move",
+    "play-forward": "arrowForward",
+    "caret-up": "up",
+    remove: "mask",
+    "caret-down": "down",
+    "share-outline": "share",
+    "resize-outline": "resize",
+  };
+  return aliases[icon] ?? "tool";
+}
+
 const styles = StyleSheet.create({
   scroll: { padding: SPACE.md, paddingTop: SPACE.lg, paddingBottom: SPACE.xxl },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: SPACE.md },
+  chips: { flexDirection: "row", flexWrap: "wrap", gap: SPACE.xs + SPACE.xs / 3, marginBottom: SPACE.md },
   sheetWrap: { alignItems: "center", marginBottom: SPACE.md },
   sheetBar: {
     flexDirection: "row",
@@ -1504,7 +1532,7 @@ const styles = StyleSheet.create({
     paddingVertical: SPACE.sm,
     marginBottom: SPACE.md,
   },
-  sheetBarText: { flex: 1, gap: 2 },
+  sheetBarText: { flex: 1, gap: SPACE.xs / 3 },
   precisionBar: { flexDirection: "row", alignItems: "center", gap: SPACE.sm, borderWidth: 1, borderRadius: RADIUS.md, padding: SPACE.sm, marginBottom: SPACE.md },
   iconAction: {
     width: 38,
@@ -1524,10 +1552,11 @@ const styles = StyleSheet.create({
     padding: SPACE.sm,
   },
   sheet: {
-    backgroundColor: "#ffffff",
+    backgroundColor: "transparent",
     borderWidth: 1,
     borderColor: "#00000018",
     borderRadius: 2,
+    overflow: "hidden",
     ...lift("md"),
   },
   safeGuide: { position: "absolute", left: 10, right: 10, top: 10, bottom: 10, borderWidth: 1, borderStyle: "dashed" },
@@ -1536,12 +1565,12 @@ const styles = StyleSheet.create({
   actions: { flexDirection: "row", gap: SPACE.sm, marginBottom: SPACE.lg },
   itemActions: { flexDirection: "row", gap: SPACE.sm, marginBottom: SPACE.md },
   sizeRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  sizeLabel: { flexDirection: "row", alignItems: "center", gap: 7 },
+  sizeLabel: { flexDirection: "row", alignItems: "center", gap: SPACE.xs },
   precisionControls: { flexDirection: "row", flexWrap: "wrap", gap: SPACE.sm, marginTop: SPACE.md },
   controlGroup: { flex: 1, minWidth: 140, gap: 6 },
-  miniLabel: { fontSize: 9, letterSpacing: 1 },
-  miniActions: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
-  stepper: { flexDirection: "row", alignItems: "center", gap: 8 },
+  miniLabel: { ...TYPE.micro },
+  miniActions: { flexDirection: "row", flexWrap: "wrap", gap: SPACE.xs },
+  stepper: { flexDirection: "row", alignItems: "center", gap: SPACE.sm },
   sizeInput: {
     borderWidth: 1,
     borderRadius: RADIUS.sm,
@@ -1549,7 +1578,7 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     minWidth: 66,
     textAlign: "center",
-    fontSize: 15,
+    ...TYPE.body,
   },
   stepBtn: {
     width: 34,
@@ -1568,7 +1597,7 @@ const styles = StyleSheet.create({
     paddingVertical: SPACE.lg,
     paddingHorizontal: SPACE.md,
   },
-  libraryGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  libraryGrid: { flexDirection: "row", flexWrap: "wrap", gap: SPACE.xs + SPACE.xs / 3 },
   libraryThumb: {
     width: 76,
     height: 76,

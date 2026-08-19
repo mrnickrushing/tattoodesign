@@ -12,7 +12,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 import { Image } from "expo-image";
-import { Ionicons } from "@expo/vector-icons";
+import type { Ionicons } from "@expo/vector-icons";
 import Slider from "@react-native-community/slider";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
@@ -24,6 +24,9 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useBrand } from "@/context/BrandContext";
 import { Button } from "@/components/Button";
 import { CropTool } from "@/components/CropTool";
+import { GlassSurface } from "@/components/GlassSurface";
+import { Icon } from "@/components/Icon";
+import { PaperSubstrate } from "@/components/PaperSubstrate";
 import { Notice } from "@/components/ui";
 import {
   addRasterAsset,
@@ -72,22 +75,23 @@ import {
   type SymmetryMode,
   type SymmetrySettings,
 } from "@/lib/symmetry";
-import { RADIUS, SPACE, glow, lift } from "@/lib/theme";
+import { ICONS, type IconName } from "@/lib/icons";
+import { RADIUS, SPACE, TYPE, glow, lift } from "@/lib/theme";
 
 type EditorTool = "select" | "draw" | "erase" | "insert" | "refine" | "crop" | "layers" | "production" | "history";
 
 type SaveResult = { id: string; title: string };
 
-const TOOLS: { id: EditorTool; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
-  { id: "select", label: "Arrange", icon: "move-outline" },
-  { id: "draw", label: "Draw", icon: "brush-outline" },
-  { id: "erase", label: "Mask", icon: "remove-circle-outline" },
-  { id: "insert", label: "Add", icon: "add-circle-outline" },
-  { id: "refine", label: "Lines", icon: "git-branch-outline" },
-  { id: "crop", label: "Crop", icon: "crop-outline" },
-  { id: "layers", label: "Layers", icon: "layers-outline" },
-  { id: "production", label: "Pro", icon: "shield-checkmark-outline" },
-  { id: "history", label: "History", icon: "time-outline" },
+const TOOLS: { id: EditorTool; label: string; icon: IconName }[] = [
+  { id: "select", label: "Arrange", icon: "move" },
+  { id: "draw", label: "Draw", icon: "brush" },
+  { id: "erase", label: "Mask", icon: "mask" },
+  { id: "insert", label: "Add", icon: "add" },
+  { id: "refine", label: "Lines", icon: "branch" },
+  { id: "crop", label: "Crop", icon: "crop" },
+  { id: "layers", label: "Layers", icon: "layers" },
+  { id: "production", label: "Pro", icon: "production" },
+  { id: "history", label: "History", icon: "history" },
 ];
 
 // Tracing allocates per thinning pass, so the mask is capped well below the
@@ -518,17 +522,17 @@ export function DesignEditor({
         <SafeAreaView style={[styles.screen, { backgroundColor: theme.background }]}>
           <View style={styles.topbar}>
             <Pressable onPress={confirmClose} accessibilityRole="button" accessibilityLabel="Close editor" style={[styles.iconButton, { backgroundColor: theme.surfaceAlt }]}>
-              <Ionicons name="chevron-down" size={20} color={theme.foreground} />
+              <Icon name="chevronDown" size={TYPE.heading.fontSize} color={theme.foreground} />
             </Pressable>
             <View style={{ flex: 1 }}>
               <Text style={[styles.eyebrow, { color: theme.accent, fontFamily: theme.fontBodyMedium }]}>PRO EDITOR · AUTOSAVED</Text>
               <Text numberOfLines={1} style={[styles.title, { color: theme.foreground, fontFamily: theme.fontDisplay }]}>{project?.title ?? design.title}</Text>
             </View>
             <Pressable onPress={undo} disabled={!past.length || busy} accessibilityRole="button" accessibilityLabel="Undo" style={[styles.iconButton, { backgroundColor: theme.surfaceAlt, opacity: past.length ? 1 : 0.35 }]}>
-              <Ionicons name="arrow-undo" size={19} color={theme.foreground} />
+              <Icon name="undo" size={TYPE.body.fontSize + SPACE.xs / 2} color={theme.foreground} />
             </Pressable>
             <Pressable onPress={redo} disabled={!future.length || busy} accessibilityRole="button" accessibilityLabel="Redo" style={[styles.iconButton, { backgroundColor: theme.surfaceAlt, opacity: future.length ? 1 : 0.35 }]}>
-              <Ionicons name="arrow-redo" size={19} color={theme.foreground} />
+              <Icon name="redo" size={TYPE.body.fontSize + SPACE.xs / 2} color={theme.foreground} />
             </Pressable>
           </View>
 
@@ -539,23 +543,28 @@ export function DesignEditor({
                 <Text style={[styles.liveText, { color: theme.accent, fontFamily: theme.fontBodyMedium }]}>{project?.canvas.width ?? "—"} × {project?.canvas.height ?? "—"} PX</Text>
               </View>
               <Pressable onPress={() => setShowOriginal((value) => !value)} disabled={!originalPreview} style={[styles.compare, { borderColor: theme.line }]}>
-                <Ionicons name="albums-outline" size={14} color={theme.muted} />
-                <Text style={{ color: theme.muted, fontFamily: theme.fontBodyMedium, fontSize: 10 }}>{showOriginal ? "EDITED" : "ORIGINAL"}</Text>
+                <Icon name="layers" size={TYPE.caption.fontSize} color={theme.muted} />
+                <Text style={[TYPE.micro, { color: theme.muted, fontFamily: theme.fontBodyMedium }]}>{showOriginal ? "EDITED" : "ORIGINAL"}</Text>
               </Pressable>
               {!!healed && !showOriginal && (
                 <View style={[styles.livePill, { backgroundColor: `${theme.accent}18` }]}>
-                  <Ionicons name="time-outline" size={12} color={theme.accent} />
+                  <Icon name="history" size={TYPE.caption.fontSize} color={theme.accent} />
                   <Text style={[styles.liveText, { color: theme.accent, fontFamily: theme.fontBodyMedium }]}>SIMULATED</Text>
                 </View>
               )}
               <Pressable onPress={() => setShowGrid((value) => !value)} accessibilityRole="button" accessibilityLabel="Toggle layout grid" style={[styles.compare, { borderColor: showGrid ? theme.accent : theme.line }]}>
-                <Ionicons name="grid-outline" size={14} color={showGrid ? theme.accent : theme.muted} />
-                <Text style={{ color: showGrid ? theme.accent : theme.muted, fontFamily: theme.fontBodyMedium, fontSize: 10 }}>GRID</Text>
+                <Icon name="sheet" size={TYPE.caption.fontSize} color={showGrid ? theme.accent : theme.muted} />
+                <Text style={[TYPE.micro, { color: showGrid ? theme.accent : theme.muted, fontFamily: theme.fontBodyMedium }]}>GRID</Text>
               </Pressable>
             </View>
 
             <GestureDetector gesture={stageGesture}>
-              <View style={[styles.stage, { width: stageW, height: stageH, backgroundColor: project?.canvas.background ?? theme.stock }]}>
+              <View style={[styles.stage, { width: stageW, height: stageH }]}>
+                <PaperSubstrate
+                  seed={project?.title.length ?? design.title.length}
+                  intensity={0.5}
+                  style={{ backgroundColor: project?.canvas.background ?? theme.stock }}
+                />
                 {(showOriginal ? originalPreview : healed ?? preview) && (
                   <Image source={{ uri: (showOriginal ? originalPreview : healed ?? preview)! }} style={StyleSheet.absoluteFill} contentFit="fill" alt={project?.title ?? design.title} />
                 )}
@@ -589,27 +598,30 @@ export function DesignEditor({
                     ))}
                   </Svg>
                 )}
-                {busy && <View style={[styles.loading, { backgroundColor: `${theme.background}aa` }]}><ActivityIndicator color={theme.accent} /><Text style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium, fontSize: 11 }}>RENDERING FULL RESOLUTION</Text></View>}
+                {busy && <View style={[styles.loading, { backgroundColor: `${theme.background}aa` }]}><ActivityIndicator color={theme.accent} /><Text style={[TYPE.caption, { color: theme.foreground, fontFamily: theme.fontBodyMedium }]}>RENDERING FULL RESOLUTION</Text></View>}
               </View>
             </GestureDetector>
           </View>
 
           {error && <Notice>{error}</Notice>}
 
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.toolDock} style={styles.toolScroll}>
-            {TOOLS.map((item) => {
+          <GlassSurface style={styles.toolSurface}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.toolDock} style={styles.toolScroll}>
+              {TOOLS.map((item) => {
               const active = item.id === tool;
               return (
                 <Pressable key={item.id} onPress={() => { setTool(item.id); Haptics.selectionAsync(); }} accessibilityRole="button" accessibilityState={{ selected: active }} style={[styles.tool, { backgroundColor: active ? theme.accent : theme.surfaceAlt, borderColor: active ? theme.accent : theme.line }]}>
-                  <Ionicons name={item.icon} size={18} color={active ? theme.accentText : theme.foreground} />
-                  <Text style={{ color: active ? theme.accentText : theme.muted, fontFamily: theme.fontBodyMedium, fontSize: 9 }}>{item.label.toUpperCase()}</Text>
+                  <Icon name={item.icon} size={SPACE.md + SPACE.xs / 2} color={active ? theme.accentText : theme.foreground} />
+                  <Text style={[TYPE.micro, { color: active ? theme.accentText : theme.muted, fontFamily: theme.fontBodyMedium }]}>{item.label.toUpperCase()}</Text>
                 </Pressable>
               );
-            })}
-          </ScrollView>
+              })}
+            </ScrollView>
+          </GlassSurface>
 
-          <ScrollView style={styles.inspector} contentContainerStyle={{ paddingBottom: SPACE.sm }} keyboardShouldPersistTaps="handled">
-            <Inspector
+          <GlassSurface style={styles.inspectorSurface}>
+            <ScrollView style={styles.inspector} contentContainerStyle={{ padding: SPACE.sm, paddingBottom: SPACE.sm }} keyboardShouldPersistTaps="handled">
+              <Inspector
               tool={tool}
               project={project}
               selected={selected}
@@ -642,8 +654,9 @@ export function DesignEditor({
               onCheckCapture={checkCapture}
               onShareReview={shareReviewPacket}
               onFlatten={flattenVisibleCopy}
-            />
-          </ScrollView>
+              />
+            </ScrollView>
+          </GlassSurface>
 
           <View style={styles.savebar}>
             <Button label="Save copy" icon="duplicate-outline" disabled={!project || !preview || busy} onPress={() => save(false)} style={{ flex: 1 }} />
@@ -784,7 +797,7 @@ function Inspector({
       <PanelTitle icon="git-branch-outline" title="Line laboratory" subtitle="Create an editable processed pass while keeping every earlier layer intact.">
         <SliderRow label="Detail threshold" value={threshold} min={10} max={180} display={`${Math.round(threshold)}`} onChange={onThreshold} />
         <SliderRow label="Line weight" value={lineWeight} min={0} max={4} step={1} display={`${Math.round(lineWeight) + 1}px`} onChange={onLineWeight} />
-        <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 10, lineHeight: 14, marginTop: SPACE.xs }}>
+        <Text style={[TYPE.caption, { color: theme.muted, fontFamily: theme.fontBody, marginTop: SPACE.xs }]}>
           Vector traces the linework into editable paths — scalable, node-editable, and ready for a cutter or plotter. Refine keeps it as pixels.
         </Text>
         <View style={styles.actionRow}>
@@ -805,17 +818,17 @@ function Inspector({
     return (
       <PanelTitle icon="layers-outline" title={`${project.layers.length} editable layer${project.layers.length === 1 ? "" : "s"}`} subtitle="Top layers appear in front. Lock production-critical artwork before arranging.">
         {[...project.layers].reverse().map((layer) => (
-          <Pressable key={layer.id} onPress={() => onProject("Select layer", { ...project, selectedLayerId: layer.id })} style={[styles.layerRow, { backgroundColor: layer.id === project.selectedLayerId ? `${theme.accent}16` : theme.surfaceAlt, borderColor: layer.id === project.selectedLayerId ? theme.accent : theme.line }]}>
-            <Pressable onPress={() => onProject(layer.visible ? "Hide layer" : "Show layer", updateLayer(project, layer.id, (item) => ({ ...item, visible: !item.visible })))} hitSlop={8}>
-              <Ionicons name={layer.visible ? "eye-outline" : "eye-off-outline"} size={17} color={layer.visible ? theme.foreground : theme.muted} />
-            </Pressable>
-            <View style={{ flex: 1 }}>
-              <Text numberOfLines={1} style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium, fontSize: 13 }}>{layer.name}</Text>
-              <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 9 }}>{layer.kind.toUpperCase()} · {Math.round(layer.opacity * 100)}%</Text>
-            </View>
-            <Pressable onPress={() => onProject("Move layer up", moveLayer(project, layer.id, 1))} hitSlop={8}><Ionicons name="chevron-up" size={17} color={theme.muted} /></Pressable>
-            <Pressable onPress={() => onProject("Move layer down", moveLayer(project, layer.id, -1))} hitSlop={8}><Ionicons name="chevron-down" size={17} color={theme.muted} /></Pressable>
-            <Ionicons name={layer.locked ? "lock-closed" : "lock-open-outline"} size={14} color={layer.locked ? theme.accent : theme.muted} />
+            <Pressable key={layer.id} onPress={() => onProject("Select layer", { ...project, selectedLayerId: layer.id })} style={[styles.layerRow, { backgroundColor: layer.id === project.selectedLayerId ? `${theme.accent}16` : theme.surfaceAlt, borderColor: layer.id === project.selectedLayerId ? theme.accent : theme.line }]}>
+              <Pressable onPress={() => onProject(layer.visible ? "Hide layer" : "Show layer", updateLayer(project, layer.id, (item) => ({ ...item, visible: !item.visible })))} hitSlop={8}>
+              <Icon name={layer.visible ? "visibility" : "visibilityOff"} size={TYPE.body.fontSize + SPACE.xs / 3} color={layer.visible ? theme.foreground : theme.muted} />
+              </Pressable>
+              <View style={{ flex: 1 }}>
+              <Text numberOfLines={1} style={[TYPE.caption, { color: theme.foreground, fontFamily: theme.fontBodyMedium }]}>{layer.name}</Text>
+              <Text style={[TYPE.micro, { color: theme.muted, fontFamily: theme.fontBody }]}>{layer.kind.toUpperCase()} · {Math.round(layer.opacity * 100)}%</Text>
+              </View>
+            <Pressable onPress={() => onProject("Move layer up", moveLayer(project, layer.id, 1))} hitSlop={8}><Icon name="chevronUp" size={TYPE.body.fontSize + SPACE.xs / 3} color={theme.muted} /></Pressable>
+            <Pressable onPress={() => onProject("Move layer down", moveLayer(project, layer.id, -1))} hitSlop={8}><Icon name="chevronDown" size={TYPE.body.fontSize + SPACE.xs / 3} color={theme.muted} /></Pressable>
+            <Icon name={layer.locked ? "lock" : "unlock"} size={TYPE.caption.fontSize} color={layer.locked ? theme.accent : theme.muted} />
           </Pressable>
         ))}
         <Button label="Flatten visible into new layer" icon="copy-outline" onPress={onFlatten} />
@@ -829,7 +842,7 @@ function Inspector({
         <SliderRow label="Surface curvature" value={wrapAmount} min={0} max={1} step={0.05} display={`${Math.round(wrapAmount * 100)}%`} onChange={onWrapAmount} />
         <SliderRow label="Edge taper" value={wrapTaper} min={0} max={1} step={0.05} display={`${Math.round(wrapTaper * 100)}%`} onChange={onWrapTaper} />
         <View style={styles.symmetryBlock}>
-          <Text style={{ color: theme.muted, fontFamily: theme.fontBodyMedium, fontSize: 10, letterSpacing: 1 }}>HOW IT WILL HEAL</Text>
+          <Text style={[TYPE.micro, { color: theme.muted, fontFamily: theme.fontBodyMedium }]}>HOW IT WILL HEAL</Text>
           <View style={styles.segmentRow}>
             {HEAL_AGES.map((item) => {
               const active = item.id === healAge;
@@ -841,12 +854,12 @@ function Inspector({
                   accessibilityState={{ selected: active }}
                   style={[styles.symmetryChip, { backgroundColor: active ? theme.accent : theme.surfaceAlt, borderColor: active ? theme.accent : theme.line }]}
                 >
-                  <Text style={{ color: active ? theme.accentText : theme.muted, fontFamily: theme.fontBodyMedium, fontSize: 10 }}>{item.label.toUpperCase()}</Text>
+                  <Text style={[TYPE.micro, { color: active ? theme.accentText : theme.muted, fontFamily: theme.fontBodyMedium }]}>{item.label.toUpperCase()}</Text>
                 </Pressable>
               );
             })}
           </View>
-          <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 10, lineHeight: 14 }}>
+          <Text style={[TYPE.caption, { color: theme.muted, fontFamily: theme.fontBody }]}>
             {HEAL_AGES.find((item) => item.id === healAge)?.caption}. An estimate of ink spread at print size — useful for catching detail that will close up, not a promise.
           </Text>
         </View>
@@ -858,10 +871,10 @@ function Inspector({
         </View>
         {findings.map((finding) => (
           <View key={finding.title} style={[styles.finding, { borderColor: theme.line, backgroundColor: theme.surfaceAlt }]}>
-            <Ionicons name={finding.level === "pass" ? "checkmark-circle" : "warning"} size={17} color={finding.level === "pass" ? "#36b37e" : theme.accent} />
+            <Icon name={finding.level === "pass" ? "checkmark" : "alert"} size={TYPE.body.fontSize + SPACE.xs / 3} color={finding.level === "pass" ? "#36b37e" : theme.accent} />
             <View style={{ flex: 1 }}>
-              <Text style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium, fontSize: 11 }}>{finding.title}</Text>
-              <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 9, lineHeight: 13 }}>{finding.detail}</Text>
+              <Text style={[TYPE.caption, { color: theme.foreground, fontFamily: theme.fontBodyMedium }]}>{finding.title}</Text>
+              <Text style={[TYPE.micro, { color: theme.muted, fontFamily: theme.fontBody }]}>{finding.detail}</Text>
             </View>
           </View>
         ))}
@@ -871,9 +884,9 @@ function Inspector({
 
   return (
     <PanelTitle icon="time-outline" title="Version history" subtitle="Inkline keeps named snapshots inside the editable project.">
-      {project.snapshots.length === 0 ? <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 12 }}>Your first edit will create the first restore point.</Text> : [...project.snapshots].reverse().map((snapshot, reverseIndex) => {
+      {project.snapshots.length === 0 ? <Text style={[TYPE.caption, { color: theme.muted, fontFamily: theme.fontBody }]}>Your first edit will create the first restore point.</Text> : [...project.snapshots].reverse().map((snapshot, reverseIndex) => {
         const index = project.snapshots.length - reverseIndex - 1;
-        return <Pressable key={`${snapshot.createdAt}-${index}`} onPress={() => onRestore(index)} style={[styles.historyRow, { borderColor: theme.line }]}><Ionicons name="git-commit-outline" size={16} color={theme.accent} /><View style={{ flex: 1 }}><Text style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium, fontSize: 12 }}>{snapshot.label}</Text><Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 9 }}>{new Date(snapshot.createdAt).toLocaleString()}</Text></View><Text style={{ color: theme.accent, fontFamily: theme.fontBodyMedium, fontSize: 10 }}>RESTORE</Text></Pressable>;
+        return <Pressable key={`${snapshot.createdAt}-${index}`} onPress={() => onRestore(index)} style={[styles.historyRow, { borderColor: theme.line }]}><Icon name="commit" size={TYPE.body.fontSize} color={theme.accent} /><View style={{ flex: 1 }}><Text style={[TYPE.caption, { color: theme.foreground, fontFamily: theme.fontBodyMedium }]}>{snapshot.label}</Text><Text style={[TYPE.micro, { color: theme.muted, fontFamily: theme.fontBody }]}>{new Date(snapshot.createdAt).toLocaleString()}</Text></View><Text style={[TYPE.micro, { color: theme.accent, fontFamily: theme.fontBodyMedium }]}>RESTORE</Text></Pressable>;
       })}
     </PanelTitle>
   );
@@ -881,18 +894,18 @@ function Inspector({
 
 function PanelTitle({ icon, title, subtitle, children }: { icon: keyof typeof Ionicons.glyphMap; title: string; subtitle: string; children?: React.ReactNode }) {
   const { theme } = useBrand();
-  return <View style={[styles.panel, { backgroundColor: theme.surface, borderColor: theme.line }]}><View style={styles.panelHead}><View style={[styles.panelIcon, { backgroundColor: `${theme.accent}18` }]}><Ionicons name={icon} size={17} color={theme.accent} /></View><View style={{ flex: 1 }}><Text style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium, fontSize: 14 }}>{title}</Text><Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 10, lineHeight: 14 }}>{subtitle}</Text></View></View>{children && <View style={{ marginTop: SPACE.sm }}>{children}</View>}</View>;
+  return <View style={[styles.panel, { backgroundColor: theme.surface, borderColor: theme.line }]}><View style={styles.panelHead}><View style={[styles.panelIcon, { backgroundColor: `${theme.accent}18` }]}><Icon name={iconNameFor(icon)} size={TYPE.body.fontSize + SPACE.xs / 3} color={theme.accent} /></View><View style={{ flex: 1 }}><Text style={[TYPE.body, { color: theme.foreground, fontFamily: theme.fontBodyMedium }]}>{title}</Text><Text style={[TYPE.caption, { color: theme.muted, fontFamily: theme.fontBody }]}>{subtitle}</Text></View></View>{children && <View style={{ marginTop: SPACE.sm }}>{children}</View>}</View>;
 }
 
 function SliderRow({ label, value, min, max, step, display, onChange }: { label: string; value: number; min: number; max: number; step?: number; display: string; onChange: (value: number) => void }) {
   const { theme } = useBrand();
-  return <View style={styles.sliderRow}><View style={styles.sliderTop}><Text style={{ color: theme.foreground, fontFamily: theme.fontBody, fontSize: 12 }}>{label}</Text><Text style={{ color: theme.accent, fontFamily: theme.fontBodyMedium, fontSize: 11, fontVariant: ["tabular-nums"] }}>{display}</Text></View><Slider minimumValue={min} maximumValue={max} step={step} value={value} onValueChange={onChange} onSlidingComplete={() => Haptics.selectionAsync()} minimumTrackTintColor={theme.accent} maximumTrackTintColor={theme.line} thumbTintColor={theme.accent} accessibilityLabel={label} /></View>;
+  return <View style={styles.sliderRow}><View style={styles.sliderTop}><Text style={[TYPE.caption, { color: theme.foreground, fontFamily: theme.fontBody }]}>{label}</Text><Text style={[TYPE.caption, { color: theme.accent, fontFamily: theme.fontBodyMedium, fontVariant: ["tabular-nums"] }]}>{display}</Text></View><Slider minimumValue={min} maximumValue={max} step={step} value={value} onValueChange={onChange} onSlidingComplete={() => Haptics.selectionAsync()} minimumTrackTintColor={theme.accent} maximumTrackTintColor={theme.line} thumbTintColor={theme.accent} accessibilityLabel={label} /></View>;
 }
 
-const SYMMETRY_MODES: { id: SymmetryMode; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
-  { id: "off", label: "Off", icon: "close-outline" },
-  { id: "mirror", label: "Mirror", icon: "swap-horizontal-outline" },
-  { id: "radial", label: "Radial", icon: "sync-outline" },
+const SYMMETRY_MODES: { id: SymmetryMode; label: string; icon: IconName }[] = [
+  { id: "off", label: "Off", icon: "close" },
+  { id: "mirror", label: "Mirror", icon: "swap" },
+  { id: "radial", label: "Radial", icon: "refresh" },
 ];
 
 const SYMMETRY_AXES: { id: SymmetryAxis; label: string }[] = [
@@ -905,7 +918,7 @@ function SymmetryControls({ symmetry, onSymmetry }: { symmetry: SymmetrySettings
   const { theme } = useBrand();
   return (
     <View style={styles.symmetryBlock}>
-      <Text style={{ color: theme.muted, fontFamily: theme.fontBodyMedium, fontSize: 10, letterSpacing: 1 }}>SYMMETRY</Text>
+      <Text style={[TYPE.micro, { color: theme.muted, fontFamily: theme.fontBodyMedium }]}>SYMMETRY</Text>
       <View style={styles.segmentRow}>
         {SYMMETRY_MODES.map((item) => {
           const active = item.id === symmetry.mode;
@@ -917,8 +930,8 @@ function SymmetryControls({ symmetry, onSymmetry }: { symmetry: SymmetrySettings
               accessibilityState={{ selected: active }}
               style={[styles.symmetryChip, { backgroundColor: active ? theme.accent : theme.surfaceAlt, borderColor: active ? theme.accent : theme.line }]}
             >
-              <Ionicons name={item.icon} size={15} color={active ? theme.accentText : theme.foreground} />
-              <Text style={{ color: active ? theme.accentText : theme.muted, fontFamily: theme.fontBodyMedium, fontSize: 10 }}>{item.label.toUpperCase()}</Text>
+              <Icon name={item.icon} size={TYPE.caption.fontSize} color={active ? theme.accentText : theme.foreground} />
+              <Text style={[TYPE.micro, { color: active ? theme.accentText : theme.muted, fontFamily: theme.fontBodyMedium }]}>{item.label.toUpperCase()}</Text>
             </Pressable>
           );
         })}
@@ -935,7 +948,7 @@ function SymmetryControls({ symmetry, onSymmetry }: { symmetry: SymmetrySettings
                 accessibilityState={{ selected: active }}
                 style={[styles.symmetryChip, { backgroundColor: active ? `${theme.accent}22` : theme.surfaceAlt, borderColor: active ? theme.accent : theme.line }]}
               >
-                <Text style={{ color: active ? theme.accent : theme.muted, fontFamily: theme.fontBodyMedium, fontSize: 10 }}>{item.label.toUpperCase()}</Text>
+                <Text style={[TYPE.micro, { color: active ? theme.accent : theme.muted, fontFamily: theme.fontBodyMedium }]}>{item.label.toUpperCase()}</Text>
               </Pressable>
             );
           })}
@@ -958,7 +971,38 @@ function SymmetryControls({ symmetry, onSymmetry }: { symmetry: SymmetrySettings
 
 function MiniAction({ icon, label, onPress, danger = false }: { icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void; danger?: boolean }) {
   const { theme } = useBrand();
-  return <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={label} style={[styles.miniAction, { backgroundColor: theme.surfaceAlt, borderColor: danger ? theme.danger : theme.line }]}><Ionicons name={icon} size={17} color={danger ? theme.danger : theme.foreground} /><Text numberOfLines={1} style={{ color: danger ? theme.danger : theme.muted, fontFamily: theme.fontBodyMedium, fontSize: 9 }}>{label.toUpperCase()}</Text></Pressable>;
+  return <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={label} style={[styles.miniAction, { backgroundColor: theme.surfaceAlt, borderColor: danger ? theme.danger : theme.line }]}><Icon name={iconNameFor(icon)} size={TYPE.body.fontSize + SPACE.xs / 3} color={danger ? theme.danger : theme.foreground} /><Text numberOfLines={1} style={[TYPE.micro, { color: danger ? theme.danger : theme.muted, fontFamily: theme.fontBodyMedium }]}>{label.toUpperCase()}</Text></Pressable>;
+}
+
+function iconNameFor(icon: keyof typeof Ionicons.glyphMap): IconName {
+  const aliases: Partial<Record<keyof typeof Ionicons.glyphMap, IconName>> = {
+    "close-outline": "close",
+    "swap-horizontal-outline": "swap",
+    "duplicate-outline": "copy",
+    "lock-closed-outline": "lock",
+    "lock-open-outline": "unlock",
+    "trash-outline": "delete",
+    "ellipse-outline": "add",
+    "square-outline": "add",
+    "remove-outline": "mask",
+    "text-outline": "text",
+    "color-filter-outline": "filter",
+    "git-network-outline": "branch",
+    "code-slash-outline": "document",
+    "body-outline": "expand",
+    "shield-checkmark-outline": "production",
+    "camera-outline": "camera",
+    "send-outline": "send",
+    "brush-outline": "brush",
+    "remove-circle-outline": "mask",
+    "move-outline": "move",
+    "add-circle-outline": "add",
+    "git-branch-outline": "branch",
+    "crop-outline": "crop",
+    "layers-outline": "layers",
+    "time-outline": "history",
+  };
+  return aliases[icon] ?? (Object.keys(ICONS) as IconName[]).find((name) => ICONS[name].ion === icon) ?? "tool";
 }
 
 const styles = StyleSheet.create({
@@ -966,13 +1010,13 @@ const styles = StyleSheet.create({
   screen: { flex: 1, paddingHorizontal: SPACE.md },
   topbar: { flexDirection: "row", alignItems: "center", gap: SPACE.sm, paddingVertical: SPACE.sm },
   iconButton: { width: 38, height: 38, borderRadius: RADIUS.pill, alignItems: "center", justifyContent: "center" },
-  eyebrow: { fontSize: 8, letterSpacing: 1.5 },
-  title: { fontSize: 24, lineHeight: 26, letterSpacing: 0.2 },
+  eyebrow: { ...TYPE.micro },
+  title: { ...TYPE.heading },
   workspace: { borderWidth: 1, borderRadius: RADIUS.lg, padding: SPACE.sm, overflow: "hidden" },
   workspaceMeta: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: SPACE.xs },
   livePill: { flexDirection: "row", alignItems: "center", gap: 6, borderRadius: RADIUS.pill, paddingHorizontal: 9, paddingVertical: 5 },
   liveDot: { width: 6, height: 6, borderRadius: 3 },
-  liveText: { fontSize: 9, letterSpacing: 0.8 },
+  liveText: { ...TYPE.micro },
   compare: { flexDirection: "row", alignItems: "center", gap: 5, borderWidth: 1, borderRadius: RADIUS.pill, paddingHorizontal: 9, paddingVertical: 5 },
   stage: { alignSelf: "center", overflow: "hidden", borderRadius: RADIUS.sm },
   selection: { position: "absolute", borderWidth: 1.5, borderStyle: "dashed" },
@@ -981,10 +1025,12 @@ const styles = StyleSheet.create({
   handleTL: { left: -5, top: -5 },
   handleBR: { right: -5, bottom: -5 },
   loading: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center", gap: SPACE.xs },
-  toolScroll: { flexGrow: 0, marginTop: SPACE.sm },
+  toolSurface: { flexGrow: 0, marginTop: SPACE.sm, borderRadius: RADIUS.md },
+  toolScroll: { flexGrow: 0 },
   toolDock: { gap: SPACE.xs, paddingRight: SPACE.md },
   tool: { width: 62, height: 54, borderRadius: RADIUS.md, borderWidth: 1, alignItems: "center", justifyContent: "center", gap: 3 },
-  inspector: { flex: 1, marginTop: SPACE.sm },
+  inspectorSurface: { flex: 1, marginTop: SPACE.sm, borderRadius: RADIUS.md },
+  inspector: { flex: 1 },
   panel: { borderWidth: 1, borderRadius: RADIUS.md, padding: SPACE.sm },
   panelHead: { flexDirection: "row", alignItems: "center", gap: SPACE.sm },
   panelIcon: { width: 34, height: 34, borderRadius: RADIUS.sm, alignItems: "center", justifyContent: "center" },
@@ -999,6 +1045,6 @@ const styles = StyleSheet.create({
   textInput: { borderWidth: 1, borderRadius: RADIUS.sm, minHeight: 44, paddingHorizontal: SPACE.sm, marginTop: SPACE.sm },
   layerRow: { flexDirection: "row", alignItems: "center", gap: SPACE.sm, borderWidth: 1, borderRadius: RADIUS.sm, minHeight: 48, paddingHorizontal: SPACE.sm, marginBottom: SPACE.xs },
   historyRow: { flexDirection: "row", alignItems: "center", gap: SPACE.sm, minHeight: 48, borderBottomWidth: StyleSheet.hairlineWidth },
-  finding: { flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderRadius: RADIUS.sm, padding: 9, marginTop: 6 },
+  finding: { flexDirection: "row", alignItems: "center", gap: SPACE.sm, borderWidth: 1, borderRadius: RADIUS.sm, padding: SPACE.sm, marginTop: SPACE.xs },
   savebar: { flexDirection: "row", gap: SPACE.sm, paddingVertical: SPACE.sm },
 });
