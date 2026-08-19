@@ -105,9 +105,51 @@ export const NEUTRAL_THEME: Theme = {
   fontScript: "Caveat_600SemiBold",
 };
 
+/** Sugar needs a late-night workspace, not a cold inversion of its paper. */
+export const SUGAR_DARK: Theme = {
+  background: "#241716",
+  surface: "#33211f",
+  surfaceAlt: "#442c29",
+  foreground: "#fff4ed",
+  paper: "#33211f",
+  accent: "#f0719f",
+  accentText: "#32151f",
+  accentGlow: "rgba(240, 113, 159, 0.34)",
+  danger: "#ff9678",
+  line: "#60413d",
+  muted: "#d0aaa4",
+  // These describe physical parchment in the preview, not the app chrome.
+  stock: "#fffdfa",
+  stockMark: "#e8d3c6",
+  stockGrid: "#f5e6dc",
+  stockInk: "#3b2b28",
+  fontDisplay: "PlayfairDisplay_700Bold",
+  fontBody: "Inter_400Regular",
+  fontBodyMedium: "Inter_600SemiBold",
+  fontScript: "Caveat_600SemiBold",
+};
+
+/** Sugar’s dark appearance keeps the bakery warm after the kitchen lights dim. */
+export function resolveTheme(brand: BrandId, scheme: "light" | "dark" | null | undefined): Theme {
+  return brand === "sugar" && scheme === "dark" ? SUGAR_DARK : THEMES[brand];
+}
+
 /** Shared spacing / radius / motion scale so screens stop inventing values. */
 export const SPACE = { xs: 6, sm: 10, md: 16, lg: 24, xl: 32, xxl: 44 } as const;
 export const RADIUS = { sm: 8, md: 14, lg: 20, xl: 28, pill: 999 } as const;
+
+/** Type has named jobs so hierarchy survives a screen’s local layout choices. */
+export const TYPE = {
+  // Huge display type needs air between its all-caps forms, not extra leading.
+  hero: { fontSize: 76, lineHeight: 79, letterSpacing: 1.4 },
+  display: { fontSize: 48, lineHeight: 50, letterSpacing: 0.5 },
+  title: { fontSize: 34, lineHeight: 38, letterSpacing: 0.1 },
+  heading: { fontSize: 22, lineHeight: 28, letterSpacing: 0 },
+  body: { fontSize: 15, lineHeight: 21, letterSpacing: 0 },
+  caption: { fontSize: 12, lineHeight: 16.2, letterSpacing: 0.25 },
+  // Small all-caps labels need tracking to remain legible beside artwork.
+  micro: { fontSize: 9, lineHeight: 12.2, letterSpacing: 1.1 },
+} as const;
 
 /** Accent-tinted elevation. Black drop-shadows are invisible on near-black,
  *  so depth on the Ink side comes from a colored glow instead. */
