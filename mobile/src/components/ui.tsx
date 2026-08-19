@@ -1,10 +1,34 @@
 import { View, Text, Pressable, StyleSheet, type ViewStyle } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import type { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
 import { useBrand } from "@/context/BrandContext";
 import { BrandArtwork } from "@/components/BrandArtwork";
-import { RADIUS, SPACE, glow, lift } from "@/lib/theme";
+import { Icon } from "@/components/Icon";
+import { PaperSubstrate } from "@/components/PaperSubstrate";
+import { ICONS, type IconName } from "@/lib/icons";
+import { RADIUS, SPACE, TYPE, glow, lift } from "@/lib/theme";
+
+type LegacyIconName = keyof typeof Ionicons.glyphMap;
+type IconProp = IconName | LegacyIconName;
+
+const LEGACY_ICON_MAP: Partial<Record<LegacyIconName, IconName>> = {
+  "alert-circle-outline": "alert",
+  "albums-outline": "projects",
+  "cloud-offline-outline": "cloudOffline",
+  "cloud-upload-outline": "upload",
+  "grid-outline": "sheet",
+  "information-circle-outline": "information",
+  "key-outline": "key",
+  "phone-portrait-outline": "phone",
+  "warning-outline": "alert",
+};
+
+function semanticIcon(name: IconProp): IconName {
+  const legacyIcon = LEGACY_ICON_MAP[name as LegacyIconName];
+  if (legacyIcon) return legacyIcon;
+  return name in ICONS ? (name as IconName) : "information";
+}
 
 /** Screen title block. The rule under the eyebrow echoes the trim line on a
  *  flash sheet, and gives the type somewhere to sit instead of floating. */
@@ -12,12 +36,19 @@ export function ScreenHeader({
   eyebrow,
   title,
   subtitle,
+  size = "title",
+  ground = false,
 }: {
   eyebrow: string;
   title: string;
   subtitle?: string;
+  /** Lets especially editorial screens promote the title without changing today’s default hierarchy. */
+  size?: "title" | "display";
+  /** Adds a quiet physical-paper layer while retaining the established header gradient by default. */
+  ground?: boolean;
 }) {
   const { brand, theme } = useBrand();
+  const titleType = size === "display" ? TYPE.display : TYPE.title;
   const heroColors =
     brand.id === "ink"
       ? (["#211715", theme.surface, "#11100f"] as const)
@@ -34,28 +65,35 @@ export function ScreenHeader({
         brand.id === "ink" ? glow(theme, "sm") : lift("sm"),
       ]}
     >
+      {ground && (
+        <PaperSubstrate
+          seed={brand.id === "ink" ? 11 : 17}
+          intensity={brand.id === "ink" ? 0.18 : 0.3}
+          style={{ opacity: brand.id === "ink" ? 0.2 : 0.34 }}
+        />
+      )}
       <BrandArtwork brand={brand.id} muted style={styles.headerArt} />
       <View style={[styles.headerOrb, { backgroundColor: theme.accentGlow }]} />
       <View style={styles.headerCopy}>
         <View style={styles.eyebrowRow}>
           <View style={[styles.eyebrowRule, { backgroundColor: theme.accent }]} />
-          <Text style={[styles.eyebrow, { color: theme.accent, fontFamily: theme.fontBodyMedium }]}>
+          <Text style={[styles.eyebrow, TYPE.micro, { color: theme.accent, fontFamily: theme.fontBodyMedium }]}>
             {eyebrow.toUpperCase()}
           </Text>
           <View style={[styles.studioChip, { borderColor: theme.line, backgroundColor: `${theme.foreground}08` }]}>
-            <Text style={{ color: theme.muted, fontFamily: theme.fontBodyMedium, fontSize: 8, letterSpacing: 1 }}>
+            <Text style={[TYPE.micro, { color: theme.muted, fontFamily: theme.fontBodyMedium }]}>
               {brand.name.toUpperCase()}
             </Text>
           </View>
         </View>
         <Text
           accessibilityRole="header"
-          style={[styles.title, { color: theme.foreground, fontFamily: theme.fontDisplay }]}
+          style={[styles.title, titleType, { color: theme.foreground, fontFamily: theme.fontDisplay }]}
         >
           {title}
         </Text>
         {subtitle && (
-          <Text style={[styles.subtitle, { color: theme.muted, fontFamily: theme.fontBody }]}>
+          <Text style={[styles.subtitle, TYPE.body, { color: theme.muted, fontFamily: theme.fontBody }]}>
             {subtitle}
           </Text>
         )}
@@ -73,7 +111,8 @@ export function Chip({
   onPress,
 }: {
   label: string;
-  icon?: keyof typeof Ionicons.glyphMap;
+  /** Legacy Ionicons names remain valid; semantic IconName values are additive. */
+  icon?: IconProp;
   active: boolean;
   onPress: () => void;
 }) {
@@ -97,14 +136,13 @@ export function Chip({
       ]}
     >
       {icon && (
-        <Ionicons name={icon} size={14} color={active ? theme.accentText : theme.muted} />
+        <Icon name={semanticIcon(icon)} size={TYPE.caption.fontSize} color={active ? theme.accentText : theme.muted} />
       )}
       <Text
-        style={{
+        style={[TYPE.body, {
           color: active ? theme.accentText : theme.foreground,
           fontFamily: active ? theme.fontBodyMedium : theme.fontBody,
-          fontSize: 13,
-        }}
+        }]}
       >
         {label}
       </Text>
@@ -118,14 +156,14 @@ export function SectionLabel({
   action,
 }: {
   children: string;
-  action?: { label: string; icon?: keyof typeof Ionicons.glyphMap; onPress: () => void };
+  action?: { label: string; icon?: IconProp; onPress: () => void };
 }) {
   const { theme } = useBrand();
   return (
     <View style={styles.sectionRow}>
       <Text
         accessibilityRole="header"
-        style={[styles.section, { color: theme.foreground, fontFamily: theme.fontBodyMedium }]}
+        style={[styles.section, TYPE.body, { color: theme.foreground, fontFamily: theme.fontBodyMedium }]}
       >
         {children}
       </Text>
@@ -140,8 +178,8 @@ export function SectionLabel({
           hitSlop={10}
           style={({ pressed }) => [styles.sectionAction, { opacity: pressed ? 0.6 : 1 }]}
         >
-          {action.icon && <Ionicons name={action.icon} size={14} color={theme.accent} />}
-          <Text style={{ color: theme.accent, fontFamily: theme.fontBodyMedium, fontSize: 13 }}>
+          {action.icon && <Icon name={semanticIcon(action.icon)} size={TYPE.caption.fontSize} color={theme.accent} />}
+          <Text style={[TYPE.body, { color: theme.accent, fontFamily: theme.fontBodyMedium }]}>
             {action.label}
           </Text>
         </Pressable>
@@ -158,7 +196,7 @@ export function Notice({
 }: {
   children: string;
   tone?: "danger" | "info";
-  icon?: keyof typeof Ionicons.glyphMap;
+  icon?: IconProp;
 }) {
   const { theme } = useBrand();
   const color = tone === "danger" ? theme.danger : theme.muted;
@@ -167,8 +205,10 @@ export function Notice({
       accessibilityRole="alert"
       style={[styles.notice, { borderColor: `${color}55`, backgroundColor: `${color}12` }]}
     >
-      <Ionicons name={icon} size={16} color={color} style={{ marginTop: 1 }} />
-      <Text style={[styles.noticeText, { color, fontFamily: theme.fontBody }]}>{children}</Text>
+      <View style={styles.noticeIcon}>
+        <Icon name={semanticIcon(icon)} size={TYPE.body.fontSize} color={color} />
+      </View>
+      <Text style={[styles.noticeText, TYPE.body, { color, fontFamily: theme.fontBody }]}>{children}</Text>
     </View>
   );
 }
@@ -203,21 +243,29 @@ const styles = StyleSheet.create({
   },
   headerCopy: { zIndex: 2, maxWidth: "82%" },
   headerArt: { position: "absolute", width: 160, height: 120, right: -46, bottom: -14, opacity: 0.6 },
-  headerOrb: { position: "absolute", width: 150, height: 150, borderRadius: 75, right: -65, top: -75, opacity: 0.45 },
-  eyebrowRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 },
-  eyebrowRule: { width: 18, height: 2, borderRadius: 1 },
-  eyebrow: { fontSize: 10, letterSpacing: 2 },
-  studioChip: { borderWidth: 1, borderRadius: RADIUS.pill, paddingHorizontal: 8, paddingVertical: 4 },
-  title: { fontSize: 34, lineHeight: 37, letterSpacing: 0.3 },
-  subtitle: { fontSize: 14, lineHeight: 20, marginTop: 8, maxWidth: "86%" },
+  headerOrb: {
+    position: "absolute",
+    width: SPACE.xxl * 3 + SPACE.sm,
+    height: SPACE.xxl * 3 + SPACE.sm,
+    borderRadius: RADIUS.pill,
+    right: -SPACE.xxl - SPACE.lg,
+    top: -SPACE.xxl * 2 + SPACE.sm + SPACE.xs,
+    opacity: 0.45,
+  },
+  eyebrowRow: { flexDirection: "row", alignItems: "center", gap: SPACE.sm, marginBottom: SPACE.sm },
+  eyebrowRule: { width: SPACE.lg - SPACE.xs, height: 2, borderRadius: RADIUS.pill },
+  eyebrow: {},
+  studioChip: { borderWidth: 1, borderRadius: RADIUS.pill, paddingHorizontal: SPACE.sm - SPACE.xs, paddingVertical: SPACE.xs - 2 },
+  title: {},
+  subtitle: { marginTop: SPACE.sm - 2, maxWidth: "86%" },
   chip: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: SPACE.xs,
     borderWidth: 1,
     borderRadius: RADIUS.pill,
-    paddingHorizontal: 14,
-    minHeight: 44,
+    paddingHorizontal: RADIUS.md,
+    minHeight: SPACE.xxl,
   },
   sectionRow: {
     flexDirection: "row",
@@ -225,20 +273,21 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginBottom: SPACE.sm,
   },
-  section: { fontSize: 15 },
-  sectionAction: { flexDirection: "row", alignItems: "center", gap: 5, paddingVertical: 4 },
+  section: {},
+  sectionAction: { flexDirection: "row", alignItems: "center", gap: SPACE.xs - 1, paddingVertical: SPACE.xs - 2 },
   notice: {
     flexDirection: "row",
-    gap: 8,
+    gap: SPACE.sm - 2,
     borderWidth: 1,
     borderRadius: RADIUS.md,
-    padding: 12,
+    padding: SPACE.md - SPACE.xs,
   },
-  noticeText: { flex: 1, fontSize: 13, lineHeight: 18 },
+  noticeIcon: { marginTop: SPACE.xs - 5 },
+  noticeText: { flex: 1 },
   card: {
     borderWidth: 1,
     borderRadius: RADIUS.lg,
     padding: SPACE.md,
   },
-  cardNotch: { position: "absolute", width: 44, height: 3, borderRadius: 2, left: SPACE.md, top: 0 },
+  cardNotch: { position: "absolute", width: SPACE.xxl, height: SPACE.xs - 3, borderRadius: RADIUS.pill, left: SPACE.md, top: 0 },
 });

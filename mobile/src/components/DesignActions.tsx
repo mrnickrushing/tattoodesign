@@ -1,10 +1,13 @@
 import { Modal, View, Text, StyleSheet, Pressable, ScrollView } from "react-native";
 import { Image } from "expo-image";
-import { Ionicons } from "@expo/vector-icons";
+import type { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useBrand } from "@/context/BrandContext";
-import { SPACE, RADIUS } from "@/lib/theme";
+import { Icon } from "@/components/Icon";
+import { PaperSubstrate } from "@/components/PaperSubstrate";
+import { ICONS, type IconName } from "@/lib/icons";
+import { SPACE, RADIUS, TYPE } from "@/lib/theme";
 
 export type DesignAction = {
   key: string;
@@ -46,6 +49,7 @@ export function DesignActions({
 
         <View style={styles.head}>
           <View style={[styles.thumb, { backgroundColor: theme.stock, borderColor: theme.line }]}>
+            <PaperSubstrate seed={title.length} intensity={0.42} />
             <Image source={{ uri }} style={styles.thumbImage} contentFit="contain" alt={title} />
           </View>
           <Text
@@ -77,21 +81,21 @@ export function DesignActions({
                   pressed && { backgroundColor: theme.surfaceAlt },
                 ]}
               >
-                <Ionicons name={action.icon} size={19} color={color} />
+                <Icon name={iconNameFor(action.icon)} size={SPACE.md + SPACE.xs} color={color} />
                 <View style={{ flex: 1 }}>
-                  <Text style={{ color, fontFamily: theme.fontBody, fontSize: 15 }}>
+                  <Text style={[TYPE.body, { color, fontFamily: theme.fontBody }]}>
                     {action.label}
                   </Text>
                   {action.hint && (
                     <Text
-                      style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 11 }}
+                      style={[TYPE.caption, { color: theme.muted, fontFamily: theme.fontBody }]}
                       numberOfLines={1}
                     >
                       {action.hint}
                     </Text>
                   )}
                 </View>
-                <Ionicons name="chevron-forward" size={15} color={theme.muted} />
+                <Icon name="chevronForward" size={SPACE.md} color={theme.muted} />
               </Pressable>
             );
           })}
@@ -99,6 +103,10 @@ export function DesignActions({
       </SafeAreaView>
     </Modal>
   );
+}
+
+function iconNameFor(icon: keyof typeof Ionicons.glyphMap): IconName {
+  return (Object.keys(ICONS) as IconName[]).find((name) => ICONS[name].ion === icon) ?? "document";
 }
 
 const styles = StyleSheet.create({
@@ -111,7 +119,7 @@ const styles = StyleSheet.create({
     paddingTop: SPACE.sm,
     maxHeight: "78%",
   },
-  grip: { alignSelf: "center", width: 38, height: 4, borderRadius: 2, marginBottom: SPACE.md },
+  grip: { alignSelf: "center", width: SPACE.xl + SPACE.xs, height: StyleSheet.hairlineWidth * 3, borderRadius: RADIUS.pill, marginBottom: SPACE.md },
   head: { flexDirection: "row", alignItems: "center", gap: SPACE.sm, marginBottom: SPACE.sm },
   thumb: {
     width: 46,
@@ -121,7 +129,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   thumbImage: { width: "100%", height: "100%" },
-  title: { flex: 1, fontSize: 16 },
+  title: { flex: 1, ...TYPE.body },
   list: { flexGrow: 0 },
   row: {
     flexDirection: "row",
