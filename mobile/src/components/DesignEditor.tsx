@@ -46,6 +46,7 @@ import {
   projectToSvg,
   rasterLayerAssets,
   removeLayer,
+  strokePathsInCanvasSpace,
   restoreSnapshot,
   snapshotProject,
   updateLayer,
@@ -58,6 +59,7 @@ import { DEFAULT_TRACE, polylinesToStrokeLayer, skeletonize, tracePolylines } fr
 import { addCutLine, DEFAULT_CUT_LINE } from "@/lib/cutline";
 import { shareUri } from "@/lib/files";
 import { compareCapture, inspectProduction, wrapForSurface, type ProductionFinding } from "@/lib/productionTools";
+import { MIN_LINE_GAP_MM, checkLineSpacing, pxPerMmFromDpi, spacingFinding } from "@/lib/spacing";
 import {
   DEFAULT_SYMMETRY,
   MAX_SEGMENTS,
@@ -90,6 +92,10 @@ const TOOLS: { id: EditorTool; label: string; icon: keyof typeof Ionicons.glyphM
 // Tracing allocates per thinning pass, so the mask is capped well below the
 // canvas size. The resulting geometry scales back up losslessly.
 const TRACE_MAX_DIMENSION = 1400;
+
+// Thermal stencil printers in printerProfiles.ts run at 203 DPI; preflight
+// measures the artwork as it will actually come off one.
+const PRINT_DPI = 203;
 
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
@@ -426,9 +432,20 @@ export function DesignEditor({
   }
 
   function runProductionCheck() {
-    if (!preview) return;
+    if (!preview || !project) return;
     try {
-      setFindings(inspectProduction(preview, 203, brand.id));
+      // Spacing is judged at the same print density the resolution finding
+      // assumes, so both readings describe one physical piece.
+      const minGapMm = MIN_LINE_GAP_MM[brand.id];
+      const spacing = checkLineSpacing(
+        strokePathsInCanvasSpace(project),
+        pxPerMmFromDpi(PRINT_DPI),
+        minGapMm
+      );
+      setFindings([
+        ...inspectProduction(preview, PRINT_DPI, brand.id),
+        spacingFinding(spacing, brand.id, minGapMm),
+      ]);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't inspect the artwork.");
     }

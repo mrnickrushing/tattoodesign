@@ -3,6 +3,7 @@ import type {
   DesignLayer,
   EditableDesignProject,
   LayerTransform,
+  Point,
   ShapeLayer,
   StrokeLayer,
   TextLayer,
@@ -125,6 +126,38 @@ export function projectToSvg(
     return `${tag} fill="${layer.fill ?? "none"}" stroke="${escape(layer.stroke)}" stroke-width="${layer.strokeWidth}" opacity="${layer.opacity}" transform="${transform}"/>`;
   }).join("");
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${project.canvas.width}" height="${project.canvas.height}" viewBox="0 0 ${project.canvas.width} ${project.canvas.height}">${body}</svg>`;
+}
+
+/**
+ * Every visible drawn stroke, flattened into canvas coordinates.
+ *
+ * Strokes are stored relative to their layer, so the layer transform has to be
+ * applied before the geometry means anything at the canvas level — which is
+ * what spacing analysis and any toolpath export need. Erase strokes are left
+ * out: they remove ink rather than lay it down.
+ */
+export function strokePathsInCanvasSpace(project: EditableDesignProject): Point[][] {
+  const paths: Point[][] = [];
+  for (const layer of project.layers) {
+    if (!layer.visible || layer.kind !== "stroke") continue;
+    const t = layer.transform;
+    const radians = (t.rotation * Math.PI) / 180;
+    const cos = Math.cos(radians);
+    const sin = Math.sin(radians);
+    const originX = t.x + t.width / 2;
+    const originY = t.y + t.height / 2;
+    for (const stroke of layer.strokes) {
+      if (stroke.mode === "erase" || stroke.points.length < 2) continue;
+      paths.push(
+        stroke.points.map((point) => {
+          const sx = (point.x - t.width / 2) * t.scaleX;
+          const sy = (point.y - t.height / 2) * t.scaleY;
+          return { x: originX + sx * cos - sy * sin, y: originY + sx * sin + sy * cos };
+        })
+      );
+    }
+  }
+  return paths;
 }
 
 /** Asset filenames a complete SVG export of this project needs to embed. */
