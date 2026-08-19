@@ -64,6 +64,7 @@ import { shareUri } from "@/lib/files";
 import { compareCapture, inspectProduction, simulateHealing, wrapForSurface, type ProductionFinding } from "@/lib/productionTools";
 import { HEAL_AGES, type HealAge } from "@/lib/healing";
 import { MIN_LINE_GAP_MM, checkLineSpacing, pxPerMmFromDpi, spacingFinding } from "@/lib/spacing";
+import { PREF_KEYS, isFiniteNumber, preferences } from "@/lib/preferences";
 import { LETTERING_STYLES, letteringStyle, type LetteringStyleId } from "@/lib/lettering";
 import { DEFAULT_CLEANUP, applyCleanup, cleanupReport } from "@/lib/cleanup";
 import { renderLettering } from "@/lib/letteringRender";
@@ -165,6 +166,31 @@ export function DesignEditor({
       active = false;
     };
   }, [brand.id, design]);
+
+  useEffect(() => {
+    let active = true;
+    Promise.all([
+      preferences.get(brand.id, PREF_KEYS.brushSize, 16, isFiniteNumber),
+      preferences.get(brand.id, PREF_KEYS.brushColor, "#111111"),
+    ]).then(([size, color]) => {
+      if (!active) return;
+      setBrush(Math.max(2, Math.min(72, size)));
+      setBrushColor(color);
+    });
+    return () => {
+      active = false;
+    };
+  }, [brand.id]);
+
+  function rememberBrush(value: number) {
+    setBrush(value);
+    void preferences.set(brand.id, PREF_KEYS.brushSize, value);
+  }
+
+  function rememberBrushColor(value: string) {
+    setBrushColor(value);
+    void preferences.set(brand.id, PREF_KEYS.brushColor, value);
+  }
 
   const selected = useMemo(
     () => project?.layers.find((layer) => layer.id === project.selectedLayerId) ?? null,
@@ -756,8 +782,8 @@ export function DesignEditor({
               onLetteringStyle={setLetteringStyleId}
               onLetteringCurve={setLetteringCurve}
               onAddLettering={addLettering}
-              onBrush={setBrush}
-              onBrushColor={setBrushColor}
+              onBrush={rememberBrush}
+              onBrushColor={rememberBrushColor}
               onThreshold={setThreshold}
               onLineWeight={setLineWeight}
               onProject={(label, next) => commit(label, next)}

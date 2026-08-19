@@ -22,6 +22,7 @@ import {
   type StencilMode,
   type StencilOptions,
 } from "@/lib/stencil";
+import { PREF_KEYS, preferences } from "@/lib/preferences";
 import { DEFAULT_TRACE, skeletonize, tracePolylines } from "@/lib/vectorize";
 import type { Point } from "@/lib/designProject";
 import {
@@ -108,6 +109,22 @@ export default function ConvertScreen() {
   const [sourceDesign, setSourceDesign] = useState<LibraryDesign | null>(null);
   const [resultDesign, setResultDesign] = useState<LibraryDesign | null>(null);
 
+  // Trace settings persist per brand — dialing in the same threshold every
+  // session was pure friction.
+  useEffect(() => {
+    let active = true;
+    preferences
+      .get<Partial<StencilOptions>>(brand.id, PREF_KEYS.convertOptions, {})
+      .then((stored) => {
+        if (active && stored && typeof stored === "object") {
+          setOpts((current) => ({ ...current, ...stored }));
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [brand.id]);
+
   const runPipeline = useCallback(
     async (src: string, options: StencilOptions, seq: number) => {
       setProcessing(true);
@@ -143,8 +160,9 @@ export default function ConvertScreen() {
       const next = { ...opts, ...patch };
       setOpts(next);
       setSaved(false);
+      void preferences.set(brand.id, PREF_KEYS.convertOptions, next);
     },
-    [opts],
+    [opts, brand.id],
   );
 
   async function pickImage() {

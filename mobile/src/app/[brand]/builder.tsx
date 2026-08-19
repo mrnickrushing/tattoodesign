@@ -54,6 +54,7 @@ import { IcingPreview } from "@/components/IcingPreview";
 import { PlacementPreview } from "@/components/PlacementPreview";
 import { DesignActions, type DesignAction } from "@/components/DesignActions";
 import { allTags, filterDesigns, normalizeTags, type SourceFilter } from "@/lib/libraryFilter";
+import { PREF_KEYS, isFiniteNumber, preferences } from "@/lib/preferences";
 import { DesignEditor } from "@/components/DesignEditor";
 import { PrinterStudio } from "@/components/PrinterStudio";
 import { EmptyStock } from "@/components/EmptyStock";
@@ -136,6 +137,15 @@ export default function BuilderScreen() {
   const [icing, setIcing] = useState<LibraryDesign | null>(null);
   const [menu, setMenu] = useState<LibraryDesign | null>(null);
   const [placing, setPlacing] = useState<LibraryDesign | null>(null);
+  const [placingWidthIn, setPlacingWidthIn] = useState(3);
+
+  // The preview initializes real-world width from props, so the remembered
+  // value has to be resolved before it mounts.
+  async function openPlacement(design: LibraryDesign) {
+    const stored = await preferences.get(brand.id, PREF_KEYS.placementWidthIn, 3, isFiniteNumber);
+    setPlacingWidthIn(Math.max(0.25, Math.min(stored, 24)));
+    setPlacing(design);
+  }
   const [editing, setEditing] = useState<LibraryDesign | null>(null);
   const [promptSeq, setPromptSeq] = useState(0);
   /** Bumped to remount the placed designs when their geometry changes from
@@ -660,7 +670,7 @@ export default function BuilderScreen() {
         label: "Size it up",
         hint: brand.id === "sugar" ? "True size, or on a photo" : "True size, or on the skin",
         icon: "resize-outline",
-        onPress: () => setPlacing(design),
+        onPress: () => void openPlacement(design),
       },
       {
         key: "edit",
@@ -1301,7 +1311,7 @@ export default function BuilderScreen() {
                 {
                   icon: "resize-outline",
                   label: "Size it up",
-                  onPress: () => setPlacing(preview),
+                  onPress: () => void openPlacement(preview),
                 },
                 { icon: "brush-outline", label: "Edit", onPress: () => setEditing(preview) },
               ]
@@ -1382,6 +1392,7 @@ export default function BuilderScreen() {
         <PlacementPreview
           uri={placing.uri}
           title={placing.title}
+          initialWidthIn={placingWidthIn}
           onClose={() => setPlacing(null)}
         />
       )}
