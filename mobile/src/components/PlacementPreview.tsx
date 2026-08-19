@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Modal,
+  Platform,
   View,
   Text,
   Image as RNImage,
@@ -13,6 +14,7 @@ import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import Slider from "@react-native-community/slider";
 import * as ImagePicker from "expo-image-picker";
+import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Haptics from "expo-haptics";
 import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
 import Animated, { useAnimatedStyle, useSharedValue, runOnJS } from "react-native-reanimated";
@@ -25,7 +27,7 @@ import { saveDataUrlToPhotos } from "@/lib/files";
 import { CARD_HEIGHT_IN, CARD_WIDTH_IN, getScreenPpi, setScreenPpi } from "@/lib/measure";
 import { SPACE, RADIUS } from "@/lib/theme";
 
-type Mode = "size" | "photo";
+type Mode = "size" | "photo" | "live";
 
 /**
  * Answers the question a thumbnail can't: how big is this really, and does it
@@ -59,6 +61,10 @@ export function PlacementPreview({
   const [photo, setPhoto] = useState<{ uri: string; width: number; height: number } | null>(null);
   const [opacity, setOpacity] = useState(0.85);
   const [saving, setSaving] = useState(false);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const [freezing, setFreezing] = useState(false);
+  const cameraRef = useRef<CameraView>(null);
+  const liveAvailable = Platform.OS !== "web";
 
   useEffect(() => {
     let active = true;
@@ -147,7 +153,7 @@ export function PlacementPreview({
       width: w,
       height: h,
       transform: [{ rotateZ: `${rotation.value}deg` }],
-      opacity: mode === "photo" ? opacity : 1,
+      opacity: mode === "size" ? 1 : opacity,
     };
   });
 
@@ -171,7 +177,50 @@ export function PlacementPreview({
 
   function switchMode(next: Mode) {
     setMode(next);
-    if (next === "size") widthPt.value = widthIn * ppi;
+    // Live and true-size both claim real measurement, so both re-anchor the
+    // design to the calibrated pixels-per-inch.
+    if (next !== "photo") widthPt.value = widthIn * ppi;
+  }
+
+  async function enterLive() {
+    if (!liveAvailable) {
+      Alert.alert("Not on web", "Live placement needs the phone's camera — use the iOS or Android app.");
+      return;
+    }
+    if (!cameraPermission?.granted) {
+      const result = await requestCameraPermission();
+      if (!result.granted) {
+        Alert.alert("Camera access needed", "Allow camera access to preview the design live on the spot.");
+        return;
+      }
+    }
+    switchMode("live");
+    Haptics.selectionAsync();
+  }
+
+  /**
+   * Freeze-frame: capture what the camera sees and hand it to the existing
+   * photo workflow — the frozen frame becomes an "On a photo" mockup, keeping
+   * the design exactly where it sat, with compare and save already built.
+   */
+  async function freezeFrame() {
+    if (!cameraRef.current) return;
+    setFreezing(true);
+    try {
+      const shot = await cameraRef.current.takePictureAsync({ base64: true, quality: 0.9 });
+      if (!shot?.base64) throw new Error("The camera returned no frame.");
+      setPhoto({
+        uri: `data:image/jpeg;base64,${shot.base64}`,
+        width: shot.width,
+        height: shot.height,
+      });
+      setMode("photo");
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    } catch (e) {
+      Alert.alert("Couldn't freeze the frame", e instanceof Error ? e.message : "Try again.");
+    } finally {
+      setFreezing(false);
+    }
   }
 
   async function pickPhoto(fromCamera: boolean) {
@@ -287,6 +336,12 @@ export function PlacementPreview({
               active={mode === "photo"}
               onPress={() => (photo ? switchMode("photo") : pickPhoto(false))}
             />
+            <Chip
+              label="Live"
+              icon="videocam-outline"
+              active={mode === "live"}
+              onPress={() => void enterLive()}
+            />
           </View>
 
           <GestureDetector gesture={gesture}>
@@ -295,11 +350,14 @@ export function PlacementPreview({
                 styles.stage,
                 {
                   height: stageH,
-                  backgroundColor: mode === "photo" ? "#000000" : theme.stock,
+                  backgroundColor: mode === "size" ? theme.stock : "#000000",
                   borderColor: theme.line,
                 },
               ]}
             >
+              {mode === "live" && (
+                <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="back" />
+              )}
               {mode === "photo" && photo && frame && (
                 <Image
                   source={{ uri: photo.uri }}
@@ -376,6 +434,50 @@ export function PlacementPreview({
                 {brand.id === "sugar"
                   ? "Hold the phone next to the cookie to check the fit."
                   : "Hold the phone against the spot to check the fit."}
+              </Text>
+            </View>
+          ) : mode === "live" ? (
+            <View style={styles.controls}>
+              <View style={styles.opacityRow}>
+                <Ionicons name="contrast-outline" size={15} color={theme.muted} />
+                <Slider
+                  style={{ flex: 1 }}
+                  minimumValue={0.2}
+                  maximumValue={1}
+                  value={opacity}
+                  onValueChange={setOpacity}
+                  minimumTrackTintColor={theme.accent}
+                  maximumTrackTintColor={theme.line}
+                  thumbTintColor={theme.accent}
+                  accessibilityLabel="Design opacity"
+                />
+                <Text style={{ color: theme.muted, fontSize: 12, width: 38, textAlign: "right" }}>
+                  {Math.round(opacity * 100)}%
+                </Text>
+              </View>
+              <View style={styles.sizeRow}>
+                <Stepper icon="remove" label="Smaller" onPress={() => applyWidthIn(widthIn - 0.25)} />
+                <View style={styles.readout}>
+                  <Text style={{ color: theme.foreground, fontFamily: theme.fontDisplay, fontSize: 30 }}>
+                    {widthIn.toFixed(2).replace(/\.?0+$/, "")}
+                    <Text style={{ fontSize: 15, fontFamily: theme.fontBody }}> in wide</Text>
+                  </Text>
+                  <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 11 }}>
+                    on this screen{calibrated ? "" : " · calibrate for exact size"}
+                  </Text>
+                </View>
+                <Stepper icon="add" label="Bigger" onPress={() => applyWidthIn(widthIn + 0.25)} />
+              </View>
+              <Button
+                label="Freeze frame"
+                icon="camera-outline"
+                variant="primary"
+                loading={freezing}
+                onPress={() => void freezeFrame()}
+                style={{ marginTop: SPACE.sm }}
+              />
+              <Text style={[styles.footnote, { color: theme.muted, fontFamily: theme.fontBody }]}>
+                Point the camera at the spot — the design floats at true size. Freeze to compare and save.
               </Text>
             </View>
           ) : (

@@ -2,7 +2,7 @@
   "expo": {
     "name": "Inkline",
     "slug": "inkline",
-    "version": "1.3.0",
+    "version": "1.4.0",
     "orientation": "portrait",
     "icon": "./assets/images/inkline-icon-v2.png",
     "scheme": "inkline",
@@ -63,7 +63,13 @@
           "bluetoothAlwaysPermission": "Inkline uses Bluetooth to find and print to compatible nearby stencil printers."
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Inkline uses the camera to preview designs live on the placement spot at true size."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
