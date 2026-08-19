@@ -8,6 +8,7 @@ import {
   makeStrokeLayer,
   moveLayer,
   projectToSvg,
+  rasterLayerAssets,
   removeLayer,
   restoreSnapshot,
   snapshotProject,
@@ -104,4 +105,44 @@ test("SVG export preserves stroke-layer transforms", () => {
   const svg = projectToSvg(value);
 
   assert.match(svg, /<path[^>]+transform="translate\(620 480\) rotate\(30\) scale\(1.5 0.75\) translate\(-500 -400\)"/);
+});
+
+function withRaster(): EditableDesignProject {
+  const value = project();
+  return addLayer(value, {
+    id: "raster",
+    kind: "raster",
+    name: "Traced photo",
+    visible: true,
+    locked: false,
+    opacity: 0.8,
+    transform: { ...fullCanvasTransform(1000, 800), x: 40, y: 20, rotation: 15 },
+    asset: "layer-abc.png",
+  });
+}
+
+test("SVG export embeds raster layers when their pixels are supplied", () => {
+  const svg = projectToSvg(withRaster(), { "layer-abc.png": "data:image/png;base64,AAAA" });
+  assert.match(svg, /<image /);
+  assert.match(svg, /href="data:image\/png;base64,AAAA"/);
+  assert.match(svg, /opacity="0\.8"/);
+  assert.match(svg, /transform="translate\(540 420\) rotate\(15\)/);
+});
+
+test("a raster layer with no supplied pixels is skipped, not emitted broken", () => {
+  const svg = projectToSvg(withRaster());
+  assert.doesNotMatch(svg, /<image/);
+  assert.match(svg, /<svg/);
+});
+
+test("hidden layers stay out of the export regardless of kind", () => {
+  let value = withRaster();
+  value = updateLayer(value, "raster", (layer) => ({ ...layer, visible: false }));
+  const svg = projectToSvg(value, { "layer-abc.png": "data:image/png;base64,AAAA" });
+  assert.doesNotMatch(svg, /<image/);
+});
+
+test("rasterLayerAssets lists what a complete export needs", () => {
+  assert.deepEqual(rasterLayerAssets(withRaster()), ["layer-abc.png"]);
+  assert.deepEqual(rasterLayerAssets(project()), []);
 });

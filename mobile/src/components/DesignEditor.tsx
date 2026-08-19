@@ -29,6 +29,7 @@ import {
   addRasterAsset,
   cloneProject,
   loadOrCreateProject,
+  projectAssetFile,
   saveProject,
   type DesignLayer,
   type EditableDesignProject,
@@ -43,6 +44,7 @@ import {
   makeTextLayer,
   moveLayer,
   projectToSvg,
+  rasterLayerAssets,
   removeLayer,
   restoreSnapshot,
   snapshotProject,
@@ -51,7 +53,8 @@ import {
 import type { LibraryDesign } from "@/lib/designLibrary";
 import { renderProject } from "@/lib/projectRenderer";
 import type { CropRect } from "@/lib/crop";
-import { DEFAULT_STENCIL_OPTIONS, stencilize } from "@/lib/stencil";
+import { DEFAULT_STENCIL_OPTIONS, stencilMask, stencilize } from "@/lib/stencil";
+import { DEFAULT_TRACE, polylinesToStrokeLayer, skeletonize, tracePolylines } from "@/lib/vectorize";
 import { addCutLine, DEFAULT_CUT_LINE } from "@/lib/cutline";
 import { shareUri } from "@/lib/files";
 import { compareCapture, inspectProduction, wrapForSurface, type ProductionFinding } from "@/lib/productionTools";
@@ -83,6 +86,10 @@ const TOOLS: { id: EditorTool; label: string; icon: keyof typeof Ionicons.glyphM
   { id: "production", label: "Pro", icon: "shield-checkmark-outline" },
   { id: "history", label: "History", icon: "time-outline" },
 ];
+
+// Tracing allocates per thinning pass, so the mask is capped well below the
+// canvas size. The resulting geometry scales back up losslessly.
+const TRACE_MAX_DIMENSION = 1400;
 
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
@@ -326,6 +333,42 @@ export function DesignEditor({
     }
   }
 
+  async function traceToVector() {
+    if (!project || !preview) return;
+    setBusy(true);
+    try {
+      const longest = Math.max(project.canvas.width, project.canvas.height);
+      const { mask, width, height } = await stencilMask(preview, {
+        ...DEFAULT_STENCIL_OPTIONS,
+        threshold,
+        lineWeight,
+        maxDimension: Math.min(longest, TRACE_MAX_DIMENSION),
+      });
+      const paths = tracePolylines(skeletonize(mask, width, height), width, height, DEFAULT_TRACE);
+      if (!paths.length) {
+        setError("No linework found to trace. Lower the detail threshold and try again.");
+        return;
+      }
+      // The mask is traced at a working resolution, so scale the geometry back
+      // onto the canvas before it becomes a layer.
+      const toCanvas = project.canvas.width / width;
+      const scaled = paths.map((points) => points.map((point) => ({ x: point.x * toCanvas, y: point.y * toCanvas })));
+      const layer = polylinesToStrokeLayer(
+        scaled,
+        project.canvas.width,
+        project.canvas.height,
+        Math.max(1, (lineWeight + 1) * toCanvas),
+        brushColor
+      );
+      const hidden = { ...project, layers: project.layers.map((item) => ({ ...item, visible: false })) };
+      await commit(`Trace to vector · ${paths.length} paths`, addLayer(hidden, layer));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't trace the linework.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function save(replace: boolean) {
     if (!project || !preview) return;
     setBusy(true);
@@ -349,7 +392,14 @@ export function DesignEditor({
     try {
       const file = new File(Paths.cache, `${project.title.replace(/[^a-z0-9]+/gi, "-").toLowerCase() || "inkline"}.svg`);
       if (file.exists) file.delete();
-      file.write(projectToSvg(project));
+      // Raster layers carry their pixels on disk; read them so the export is a
+      // complete picture of the project rather than only its vector layers.
+      const assets: Record<string, string> = {};
+      for (const asset of rasterLayerAssets(project)) {
+        const source = projectAssetFile(project.brand, project.id, asset);
+        if (source.exists) assets[asset] = `data:image/png;base64,${await source.base64()}`;
+      }
+      file.write(projectToSvg(project, assets));
       await shareUri(file.uri);
     } catch (e) {
       Alert.alert("Couldn't export SVG", e instanceof Error ? e.message : "Try again.");
@@ -536,6 +586,7 @@ export function DesignEditor({
               onProcess={addProcessedLayer}
               onRestore={(index) => project && commit("Restore snapshot", restoreSnapshot(project, index))}
               onExportSvg={exportSvg}
+              onTrace={traceToVector}
               wrapAmount={wrapAmount}
               wrapTaper={wrapTaper}
               findings={findings}
@@ -583,6 +634,7 @@ function Inspector({
   onProcess,
   onRestore,
   onExportSvg,
+  onTrace,
   wrapAmount,
   wrapTaper,
   findings,
@@ -613,6 +665,7 @@ function Inspector({
   onProcess: (kind: "stencil" | "cutline") => void;
   onRestore: (index: number) => void;
   onExportSvg: () => void;
+  onTrace: () => void;
   wrapAmount: number;
   wrapTaper: number;
   findings: ProductionFinding[];
@@ -682,8 +735,12 @@ function Inspector({
       <PanelTitle icon="git-branch-outline" title="Line laboratory" subtitle="Create an editable processed pass while keeping every earlier layer intact.">
         <SliderRow label="Detail threshold" value={threshold} min={10} max={180} display={`${Math.round(threshold)}`} onChange={onThreshold} />
         <SliderRow label="Line weight" value={lineWeight} min={0} max={4} step={1} display={`${Math.round(lineWeight) + 1}px`} onChange={onLineWeight} />
+        <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 10, lineHeight: 14, marginTop: SPACE.xs }}>
+          Vector traces the linework into editable paths — scalable, node-editable, and ready for a cutter or plotter. Refine keeps it as pixels.
+        </Text>
         <View style={styles.actionRow}>
           <MiniAction icon="color-filter-outline" label="Refine" onPress={() => onProcess("stencil")} />
+          <MiniAction icon="git-network-outline" label="Vector" onPress={onTrace} />
           <MiniAction icon="ellipse-outline" label="Cut line" onPress={() => onProcess("cutline")} />
           <MiniAction icon="code-slash-outline" label="SVG" onPress={onExportSvg} />
         </View>
