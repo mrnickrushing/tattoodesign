@@ -104,6 +104,17 @@ export default function StudioDashboard() {
           <Ionicons name="chevron-forward" size={22} color={theme.foreground} />
         </Pressable>
 
+        <Pressable
+          onPress={() => router.push(`/${brand.id}/projects`)}
+          accessibilityRole="button"
+          accessibilityLabel="Open client projects"
+          style={({ pressed }) => [styles.projectHub, { backgroundColor: theme.surface, borderColor: theme.line }, pressed && { opacity: 0.78 }]}
+        >
+          <View style={[styles.projectHubIcon, { backgroundColor: `${theme.accent}18` }]}><Ionicons name="folder-open-outline" size={20} color={theme.accent} /></View>
+          <View style={{ flex: 1 }}><Text style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium, fontSize: 14 }}>Client projects & approvals</Text><Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 11 }}>Organize designs, placement notes, revisions, and sign-off.</Text></View>
+          <Ionicons name="chevron-forward" size={18} color={theme.muted} />
+        </Pressable>
+
         <View style={styles.section}>
           <SectionLabel>Quick start</SectionLabel>
           <View style={styles.tools}>
@@ -227,6 +238,8 @@ const styles = StyleSheet.create({
   kicker: { fontSize: 9, letterSpacing: 1.6, marginBottom: 4 },
   resumeTitle: { fontSize: 25, lineHeight: 28 },
   resumeMeta: { fontSize: 11, marginTop: 3 },
+  projectHub: { marginTop: SPACE.sm, borderWidth: 1, borderRadius: RADIUS.md, padding: 12, flexDirection: "row", alignItems: "center", gap: SPACE.sm },
+  projectHubIcon: { width: 40, height: 40, borderRadius: 13, alignItems: "center", justifyContent: "center" },
   tools: { flexDirection: "row", gap: SPACE.sm },
   tool: { flex: 1, minHeight: 132, borderWidth: 1, borderRadius: RADIUS.md, padding: 12, justifyContent: "space-between" },
   toolIcon: { width: 38, height: 38, borderRadius: 13, alignItems: "center", justifyContent: "center" },

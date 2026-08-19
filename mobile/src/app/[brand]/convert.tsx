@@ -7,11 +7,12 @@ import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 import { useBrand } from "@/context/BrandContext";
 import { DEFAULT_STENCIL_OPTIONS, stencilize, type StencilMode, type StencilOptions } from "@/lib/stencil";
-import { addToLibrary } from "@/lib/designLibrary";
+import { addToLibrary, replaceInLibrary, type LibraryDesign } from "@/lib/designLibrary";
 import { saveDataUrlToPhotos } from "@/lib/files";
 import { cropImage, isFullCrop, type CropRect } from "@/lib/crop";
 import { StockPane } from "@/components/StockPane";
 import { CropTool } from "@/components/CropTool";
+import { DesignEditor } from "@/components/DesignEditor";
 import { Button } from "@/components/Button";
 import { ScreenHeader, Notice, Card } from "@/components/ui";
 import { SPACE } from "@/lib/theme";
@@ -31,6 +32,10 @@ export default function ConvertScreen() {
   const [opts, setOpts] = useState<StencilOptions>(DEFAULT_STENCIL_OPTIONS);
   const [overlayOpacity, setOverlayOpacity] = useState(0);
   const pipelineSeq = useRef(0);
+  const [editing, setEditing] = useState<LibraryDesign | null>(null);
+  const [editingTarget, setEditingTarget] = useState<"source" | "result" | null>(null);
+  const [sourceDesign, setSourceDesign] = useState<LibraryDesign | null>(null);
+  const [resultDesign, setResultDesign] = useState<LibraryDesign | null>(null);
 
   const runPipeline = useCallback(async (src: string, options: StencilOptions, seq: number) => {
     setProcessing(true);
@@ -80,6 +85,8 @@ export default function ConvertScreen() {
     setSourceSize({ width: asset.width, height: asset.height });
     setCropped(null);
     setSaved(false);
+    setSourceDesign(null);
+    setResultDesign(null);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   }
 
@@ -134,6 +141,21 @@ export default function ConvertScreen() {
     });
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setSaved(true);
+  }
+
+  async function openEditor(target: "source" | "result") {
+    const dataUrl = target === "source" ? workingSource : resultUrl;
+    if (!dataUrl) return;
+    const existing = target === "source" ? sourceDesign : resultDesign;
+    const design = existing ?? await addToLibrary(brand.id, {
+      dataUrl,
+      title: target === "source" ? "Conversion source" : "Converted design",
+      source: "converted",
+    });
+    if (target === "source") setSourceDesign(design);
+    else setResultDesign(design);
+    setEditingTarget(target);
+    setEditing(design);
   }
 
   return (
@@ -339,7 +361,21 @@ export default function ConvertScreen() {
           disabled={!resultUrl}
           style={{ flex: 1 }}
         />
+        <Button
+          label="Edit line art"
+          icon="brush-outline"
+          onPress={() => openEditor("result")}
+          disabled={!resultUrl}
+          style={{ flex: 0.8 }}
+        />
       </View>
+      <Button
+        label="Edit source photograph"
+        icon="color-wand-outline"
+        onPress={() => openEditor("source")}
+        disabled={!sourceUrl}
+        style={{ marginTop: SPACE.sm }}
+      />
 
       {cropping && sourceUrl && sourceSize && (
         <CropTool
@@ -349,6 +385,33 @@ export default function ConvertScreen() {
           initialRect={cropped?.rect}
           onApply={applyCrop}
           onClose={() => setCropping(false)}
+        />
+      )}
+
+      {editing && editingTarget && (
+        <DesignEditor
+          design={editing}
+          onSave={async (dataUrl, replace) => {
+            if (replace) {
+              const updated = await replaceInLibrary(brand.id, editing.id, dataUrl);
+              if (!updated) throw new Error("That converted project is no longer available.");
+              if (editingTarget === "source") {
+                setSourceUrl(dataUrl);
+                setCropped(null);
+                setSourceDesign(updated);
+              } else {
+                setResultUrl(dataUrl);
+                setResultDesign(updated);
+              }
+              return { id: updated.id, title: updated.title };
+            }
+            const added = await addToLibrary(brand.id, { dataUrl, title: `${editing.title} (edited)`, source: "converted" });
+            return { id: added.id, title: added.title };
+          }}
+          onClose={() => {
+            setEditing(null);
+            setEditingTarget(null);
+          }}
         />
       )}
     </ScrollView>

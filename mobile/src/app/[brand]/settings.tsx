@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { View, Text, TextInput, StyleSheet, ScrollView, Alert, Linking } from "react-native";
+import { File } from "expo-file-system";
 import * as Updates from "expo-updates";
 import * as Application from "expo-application";
 import * as Haptics from "expo-haptics";
@@ -10,6 +11,8 @@ import { Button } from "@/components/Button";
 import { ScreenHeader, Card, SectionLabel, Notice } from "@/components/ui";
 import { SPACE } from "@/lib/theme";
 import { getGenerationUsage, getSpendLimit, setSpendLimit, totalEstimatedSpend } from "@/lib/generationUsage";
+import { createEncryptedBackup, restoreEncryptedBackup } from "@/lib/encryptedBackup";
+import { shareUri } from "@/lib/files";
 
 export default function SettingsScreen() {
   const { brand, theme } = useBrand();
@@ -28,6 +31,8 @@ export default function SettingsScreen() {
   const [checkedOnce, setCheckedOnce] = useState(false);
   const [limit, setLimit] = useState("10");
   const [spend, setSpend] = useState(0);
+  const [recoveryKey, setRecoveryKey] = useState("");
+  const [backupBusy, setBackupBusy] = useState(false);
 
   useEffect(() => {
     Promise.all([getSpendLimit(), getGenerationUsage()]).then(([savedLimit, usage]) => {
@@ -89,6 +94,29 @@ export default function SettingsScreen() {
         },
       ]
     );
+  }
+
+  async function exportBackup() {
+    setBackupBusy(true);
+    try {
+      const backup = await createEncryptedBackup();
+      setRecoveryKey(backup.recoveryKey);
+      await shareUri(backup.file.uri);
+      Alert.alert("Encrypted backup ready", `Protected ${backup.itemCount} records and ${backup.fileCount} artwork files. Save the recovery key separately—it is required on another device.`);
+    } catch (e) { Alert.alert("Backup failed", e instanceof Error ? e.message : "Try again."); }
+    finally { setBackupBusy(false); }
+  }
+
+  async function importBackup() {
+    if (!recoveryKey.trim()) return Alert.alert("Recovery key needed", "Paste the recovery key that was shown when the backup was created.");
+    setBackupBusy(true);
+    try {
+      const picked = await File.pickFileAsync({ mimeTypes: ["application/octet-stream", "application/json", "*/*"] });
+      if (picked.canceled) return;
+      const result = await restoreEncryptedBackup(picked.result, recoveryKey);
+      Alert.alert("Backup restored", `Recovered ${result.itemCount} records and ${result.fileCount} artwork files. Restart the app to reload every workspace.`);
+    } catch (e) { Alert.alert("Restore failed", e instanceof Error ? e.message : "Check the file and recovery key."); }
+    finally { setBackupBusy(false); }
   }
 
   // In Expo Go / a dev client, updates are disabled — say so plainly rather
@@ -216,6 +244,19 @@ export default function SettingsScreen() {
 
       <View style={{ height: SPACE.lg }} />
 
+      <SectionLabel>Encrypted studio backup</SectionLabel>
+      <Card>
+        <View style={styles.backupHero}>
+          <View style={{ flex: 1 }}><Text style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium, fontSize: 14 }}>Artwork, layers, sheets & projects</Text><Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 11, lineHeight: 16 }}>AES-256-GCM encryption protects the portable archive. Keep its recovery key somewhere separate.</Text></View>
+          <Ionicons name="lock-closed" size={27} color={theme.accent} />
+        </View>
+        <TextInput value={recoveryKey} onChangeText={setRecoveryKey} autoCapitalize="none" autoCorrect={false} secureTextEntry placeholder="Recovery key for import" placeholderTextColor={theme.muted} accessibilityLabel="Backup recovery key" style={[styles.recoveryInput, { color: theme.foreground, borderColor: theme.line, backgroundColor: theme.surfaceAlt, fontFamily: theme.fontBody }]} />
+        <View style={styles.backupActions}><Button label="Export backup" icon="lock-closed-outline" variant="primary" onPress={exportBackup} loading={backupBusy} style={{ flex: 1 }} /><Button label="Restore" icon="cloud-upload-outline" onPress={importBackup} disabled={backupBusy || !recoveryKey.trim()} style={{ flex: 1 }} /></View>
+        {!!recoveryKey && <Notice tone="info" icon="key-outline">A recovery key is loaded. Store it separately from the backup file before transferring devices.</Notice>}
+      </Card>
+
+      <View style={{ height: SPACE.lg }} />
+
       <SectionLabel>Backend</SectionLabel>
       <Card>
         <Row
@@ -337,6 +378,9 @@ const styles = StyleSheet.create({
   spendHero: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   limitRow: { flexDirection: "row", alignItems: "center", gap: 8, marginVertical: SPACE.sm },
   limitInput: { flex: 1, borderWidth: 1, borderRadius: 12, minHeight: 46, paddingHorizontal: 12, fontSize: 17 },
+  backupHero: { flexDirection: "row", alignItems: "center", gap: SPACE.sm, marginBottom: SPACE.sm },
+  recoveryInput: { minHeight: 46, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, marginBottom: SPACE.sm },
+  backupActions: { flexDirection: "row", gap: SPACE.sm, marginBottom: SPACE.sm },
   footer: {
     fontSize: 12,
     textAlign: "center",

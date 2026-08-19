@@ -2,7 +2,7 @@
   "expo": {
     "name": "Inkline",
     "slug": "inkline",
-    "version": "1.2.0",
+    "version": "1.3.0",
     "orientation": "portrait",
     "icon": "./assets/images/inkline-icon-v2.png",
     "scheme": "inkline",
@@ -51,7 +51,9 @@
         {
           "photosPermission": "Inkline uses your photos to convert them into stencil line art.",
           "savePhotosPermission": "Inkline saves your generated designs and flash sheets to Photos.",
-          "granularPermissions": ["photo"]
+          "granularPermissions": [
+            "photo"
+          ]
         }
       ],
       [
@@ -60,7 +62,8 @@
           "neverForLocation": true,
           "bluetoothAlwaysPermission": "Inkline uses Bluetooth to find and print to compatible nearby stencil printers."
         }
-      ]
+      ],
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true,
