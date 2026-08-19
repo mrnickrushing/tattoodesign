@@ -1217,23 +1217,26 @@ export default function BuilderScreen() {
 
       {editing && (
         <DesignEditor
-          uri={editing.uri}
-          title={editing.title}
+          design={editing}
           onSave={async (dataUrl, replace) => {
             if (replace) {
-              await replaceInLibrary(brand.id, editing.id, dataUrl);
+              const updated = await replaceInLibrary(brand.id, editing.id, dataUrl);
+              if (!updated) throw new Error("That design is no longer in the library.");
+              const lib = await getLibrary(brand.id);
+              setLibrary(lib);
+              setItems((prev) => resolveItems(prev, lib));
+              return { id: updated.id, title: updated.title };
             } else {
-              await addToLibrary(brand.id, {
+              const added = await addToLibrary(brand.id, {
                 dataUrl,
                 title: `${editing.title} (edited)`,
                 source: "converted",
               });
+              const lib = await getLibrary(brand.id);
+              setLibrary(lib);
+              setItems((prev) => resolveItems(prev, lib));
+              return { id: added.id, title: added.title };
             }
-            const lib = await getLibrary(brand.id);
-            setLibrary(lib);
-            // A replaced design keeps its id, so anything already on the
-            // sheet picks up the edit rather than pointing at the old file.
-            setItems((prev) => resolveItems(prev, lib));
           }}
           onClose={() => setEditing(null)}
         />

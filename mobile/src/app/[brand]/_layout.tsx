@@ -84,6 +84,7 @@ export default function BrandLayout() {
             <Tabs.Screen name="convert" options={{ title: brand.convert.tabLabel }} />
             <Tabs.Screen name="builder" options={{ title: brand.builder.tabLabel }} />
             <Tabs.Screen name="settings" options={{ title: "Settings" }} />
+            <Tabs.Screen name="projects" options={{ href: null }} />
           </Tabs>
         </ErrorBoundary>
       </View>

@@ -28,7 +28,7 @@ import {
 import { pickImageFile } from "@/lib/imageImport";
 import { getGenerationUsage, getSpendLimit, recordGeneration, totalEstimatedSpend } from "@/lib/generationUsage";
 import { stencilize } from "@/lib/stencil";
-import { addToLibrary } from "@/lib/designLibrary";
+import { addToLibrary, replaceInLibrary, type LibraryDesign } from "@/lib/designLibrary";
 import { saveDataUrlToPhotos } from "@/lib/files";
 import {
   clearPrompts,
@@ -38,6 +38,7 @@ import {
   type PromptEntry,
 } from "@/lib/promptHistory";
 import { StockPane } from "@/components/StockPane";
+import { DesignEditor } from "@/components/DesignEditor";
 import { Button } from "@/components/Button";
 import { ScreenHeader, Chip, Notice, Card, SectionLabel } from "@/components/ui";
 import { RADIUS, SPACE } from "@/lib/theme";
@@ -77,6 +78,13 @@ export default function GenerateScreen() {
   const [stencilUrl, setStencilUrl] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [history, setHistory] = useState<PromptEntry[]>([]);
+  const [editing, setEditing] = useState<LibraryDesign | null>(null);
+  const [editingTarget, setEditingTarget] = useState<"raw" | "stencil" | null>(null);
+  const [rawDesign, setRawDesign] = useState<LibraryDesign | null>(null);
+  const [stencilDesign, setStencilDesign] = useState<LibraryDesign | null>(null);
+  const [variationCount, setVariationCount] = useState<1 | 2 | 4>(1);
+  const [variations, setVariations] = useState<{ raw: string; stencil: string }[]>([]);
+  const [selectedVariation, setSelectedVariation] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -143,38 +151,38 @@ export default function GenerateScreen() {
     setLoading(true);
     setError(null);
     setSaved(false);
+    setRawDesign(null);
+    setStencilDesign(null);
     const estimate = providerStatus.find((entry) => entry.id === provider)?.estimates[quality] ?? 0;
-    if (spendLimit > 0 && monthlySpend + estimate > spendLimit) {
+    const estimatedBatch = estimate * variationCount;
+    if (spendLimit > 0 && monthlySpend + estimatedBatch > spendLimit) {
       setError(`This generation would pass the $${spendLimit.toFixed(2)} monthly guard. Raise it in Settings first.`);
       setLoading(false);
       return;
     }
-    const result = await generateDesign(brand.id, prompt, style, provider, {
-      quality,
-      reference: reference ? { data: reference.data, mimeType: reference.mimeType, strength: referenceStrength } : undefined,
-    });
-    if (!result.ok) {
-      if (result.disabled) setDisabledReason(result.error);
-      else setError(result.error);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      setLoading(false);
-      return;
-    }
-    setRawUrl(result.dataUrl);
-    const usage = await recordGeneration({ provider, quality, estimatedCost: estimate });
-    setMonthlySpend(totalEstimatedSpend(usage));
-    // Only prompts that actually produced something are worth keeping.
-    setHistory(await rememberPrompt(brand.id, prompt, style));
     try {
-      const stencil = await stencilize(result.dataUrl, {
-        threshold: 70,
-        lineWeight: 1,
-        denoise: 1,
-      });
-      setStencilUrl(stencil);
+      const batch: { raw: string; stencil: string }[] = [];
+      let usage = await getGenerationUsage();
+      for (let index = 0; index < variationCount; index++) {
+        const variationPrompt = variationCount === 1 ? prompt : `${prompt}\nVariation ${index + 1} of ${variationCount}: keep the brief, but explore a clearly distinct professional composition.`;
+        const result = await generateDesign(brand.id, variationPrompt, style, provider, {
+          quality,
+          reference: reference ? { data: reference.data, mimeType: reference.mimeType, strength: referenceStrength } : undefined,
+        });
+        if (!result.ok) throw new Error(result.error);
+        const stencil = await stencilize(result.dataUrl, { threshold: 70, lineWeight: 1, denoise: 1 });
+        batch.push({ raw: result.dataUrl, stencil });
+        usage = await recordGeneration({ provider, quality, estimatedCost: estimate });
+      }
+      setVariations(batch);
+      setSelectedVariation(0);
+      setRawUrl(batch[0].raw);
+      setStencilUrl(batch[0].stencil);
+      setMonthlySpend(totalEstimatedSpend(usage));
+      setHistory(await rememberPrompt(brand.id, prompt, style));
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } catch {
-      setError("Generated, but couldn't clean it up into a stencil.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "The variation board couldn't be completed.");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     } finally {
       setLoading(false);
@@ -220,7 +228,29 @@ export default function GenerateScreen() {
     setSaved(true);
   }
 
+  async function openEditor(target: "raw" | "stencil") {
+    const dataUrl = target === "raw" ? rawUrl : stencilUrl;
+    if (!dataUrl) return;
+    const existing = target === "raw" ? rawDesign : stencilDesign;
+    const design = existing ?? await addToLibrary(brand.id, {
+      dataUrl,
+      title: `${prompt.slice(0, 36) || "Generated design"}${target === "raw" ? " · original" : " · stencil"}`,
+      source: "generated",
+    });
+    if (target === "raw") setRawDesign(design);
+    else setStencilDesign(design);
+    setEditingTarget(target);
+    setEditing(design);
+  }
+
   const canGenerate = !!prompt.trim() && !loading && !disabledReason;
+
+  function chooseVariation(index: number) {
+    const choice = variations[index];
+    if (!choice) return;
+    setSelectedVariation(index); setRawUrl(choice.raw); setStencilUrl(choice.stencil);
+    setRawDesign(null); setStencilDesign(null); setSaved(false); Haptics.selectionAsync();
+  }
 
   return (
     <KeyboardAvoidingView
@@ -264,6 +294,20 @@ export default function GenerateScreen() {
             emptyHint="Cleaned linework"
           />
         </View>
+
+        {variations.length > 1 && (
+          <View style={{ marginTop: SPACE.md }}>
+            <SectionLabel>Variation board</SectionLabel>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.variationRow}>
+              {variations.map((variation, index) => (
+                <Pressable key={index} onPress={() => chooseVariation(index)} accessibilityRole="radio" accessibilityState={{ selected: selectedVariation === index }} style={[styles.variationCard, { backgroundColor: theme.stock, borderColor: selectedVariation === index ? theme.accent : theme.line }]}>
+                  <Image source={{ uri: variation.raw }} style={styles.variationImage} contentFit="contain" />
+                  <View style={[styles.variationLabel, { backgroundColor: selectedVariation === index ? theme.accent : theme.surface }]}><Text style={{ color: selectedVariation === index ? theme.accentText : theme.foreground, fontFamily: theme.fontBodyMedium, fontSize: 10 }}>CONCEPT {index + 1}</Text>{selectedVariation === index && <Ionicons name="checkmark-circle" size={14} color={theme.accentText} />}</View>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        )}
 
         <Card style={{ marginTop: SPACE.lg }}>
           <Text style={[styles.field, { color: theme.muted, fontFamily: theme.fontBodyMedium }]}>
@@ -363,6 +407,12 @@ export default function GenerateScreen() {
             </View>
           </View>
 
+          <Text style={[styles.field, { color: theme.muted, fontFamily: theme.fontBodyMedium, marginTop: SPACE.md }]}>CONCEPT BOARD</Text>
+          <View style={styles.compactChips} accessibilityRole="radiogroup">
+            {([1, 2, 4] as const).map(count => <Chip key={count} label={count === 1 ? "Single" : `${count} concepts`} active={variationCount === count} onPress={() => setVariationCount(count)} />)}
+          </View>
+          <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 10, marginTop: 5 }}>Creates {variationCount} complete options · estimated batch ${(variationCount * (providerStatus.find((entry) => entry.id === provider)?.estimates[quality] ?? 0)).toFixed(2)}</Text>
+
           <Text style={[styles.field, { color: theme.muted, fontFamily: theme.fontBodyMedium, marginTop: SPACE.md }]}>REFERENCE IMAGE · OPTIONAL</Text>
           {reference ? (
             <View style={[styles.referenceCard, { borderColor: theme.accent, backgroundColor: `${theme.accent}10` }]}>
@@ -439,7 +489,21 @@ export default function GenerateScreen() {
             disabled={!stencilUrl}
             style={{ flex: 1 }}
           />
+          <Button
+            label="Edit stencil"
+            icon="brush-outline"
+            onPress={() => openEditor("stencil")}
+            disabled={!stencilUrl}
+            style={{ flex: 0.8 }}
+          />
         </View>
+        <Button
+          label="Edit original artwork"
+          icon="color-wand-outline"
+          onPress={() => openEditor("raw")}
+          disabled={!rawUrl}
+          style={{ marginTop: SPACE.sm }}
+        />
 
         {history.length > 0 && (
           <View style={{ marginTop: SPACE.xl }}>
@@ -491,6 +555,36 @@ export default function GenerateScreen() {
             </View>
           </View>
         )}
+
+        {editing && editingTarget && (
+          <DesignEditor
+            design={editing}
+            onSave={async (dataUrl, replace) => {
+              if (replace) {
+                const updated = await replaceInLibrary(brand.id, editing.id, dataUrl);
+                if (!updated) throw new Error("That generated project is no longer available.");
+                if (editingTarget === "raw") {
+                  setRawUrl(dataUrl);
+                  setRawDesign(updated);
+                } else {
+                  setStencilUrl(dataUrl);
+                  setStencilDesign(updated);
+                }
+                return { id: updated.id, title: updated.title };
+              }
+              const added = await addToLibrary(brand.id, {
+                dataUrl,
+                title: `${editing.title} (edited)`,
+                source: "generated",
+              });
+              return { id: added.id, title: added.title };
+            }}
+            onClose={() => {
+              setEditing(null);
+              setEditingTarget(null);
+            }}
+          />
+        )}
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -499,6 +593,10 @@ export default function GenerateScreen() {
 const styles = StyleSheet.create({
   scroll: { padding: SPACE.md, paddingTop: SPACE.lg, paddingBottom: SPACE.xxl },
   panes: { flexDirection: "row", gap: SPACE.sm },
+  variationRow: { gap: SPACE.sm, paddingRight: SPACE.md },
+  variationCard: { width: 132, height: 154, borderWidth: 2, borderRadius: RADIUS.md, overflow: "hidden" },
+  variationImage: { width: "100%", flex: 1 },
+  variationLabel: { minHeight: 30, paddingHorizontal: 8, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   field: { fontSize: 10, letterSpacing: 1.5, marginBottom: 8 },
   input: {
     borderWidth: 1,
