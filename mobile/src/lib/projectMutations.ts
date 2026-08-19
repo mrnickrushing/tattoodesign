@@ -100,7 +100,7 @@ export function projectToSvg(project: EditableDesignProject): string {
     const transform = `translate(${t.x + t.width / 2} ${t.y + t.height / 2}) rotate(${t.rotation}) scale(${t.scaleX} ${t.scaleY}) translate(${-t.width / 2} ${-t.height / 2})`;
     if (layer.kind === "stroke") return layer.strokes.map((stroke) => {
       const d = stroke.points.map((point, index) => `${index ? "L" : "M"}${point.x} ${point.y}`).join(" ");
-      return `<path d="${d}" fill="none" stroke="${escape(stroke.mode === "erase" ? project.canvas.background : stroke.color)}" stroke-width="${stroke.width}" stroke-linecap="round" stroke-linejoin="round" opacity="${stroke.opacity * layer.opacity}"/>`;
+      return `<path d="${d}" fill="none" stroke="${escape(stroke.mode === "erase" ? project.canvas.background : stroke.color)}" stroke-width="${stroke.width}" stroke-linecap="round" stroke-linejoin="round" opacity="${stroke.opacity * layer.opacity}" transform="${transform}"/>`;
     }).join("");
     if (layer.kind === "text") return `<text x="${t.width / 2}" y="${t.height / 2}" text-anchor="middle" dominant-baseline="middle" fill="${escape(layer.color)}" font-size="${layer.fontSize}" opacity="${layer.opacity}" transform="${transform}">${escape(layer.text)}</text>`;
     if (layer.shape === "ellipse") return `<ellipse cx="${t.width / 2}" cy="${t.height / 2}" rx="${t.width / 2}" ry="${t.height / 2}" fill="${layer.fill ?? "none"}" stroke="${escape(layer.stroke)}" stroke-width="${layer.strokeWidth}" opacity="${layer.opacity}" transform="${transform}"/>`;

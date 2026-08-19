@@ -80,3 +80,28 @@ test("SVG export escapes text and emits vector layers", () => {
   assert.match(svg, /<text/);
   assert.match(svg, /<svg/);
 });
+
+test("SVG export preserves stroke-layer transforms", () => {
+  const value = project();
+  const stroke = value.layers[0];
+  if (stroke.kind !== "stroke") throw new Error("Test project must start with a stroke layer.");
+  stroke.transform = {
+    ...stroke.transform,
+    x: 120,
+    y: 80,
+    rotation: 30,
+    scaleX: 1.5,
+    scaleY: 0.75,
+  };
+  stroke.strokes = [{
+    points: [{ x: 100, y: 120 }, { x: 200, y: 220 }],
+    width: 4,
+    color: "#111111",
+    mode: "draw",
+    opacity: 1,
+  }];
+
+  const svg = projectToSvg(value);
+
+  assert.match(svg, /<path[^>]+transform="translate\(620 480\) rotate\(30\) scale\(1.5 0.75\) translate\(-500 -400\)"/);
+});
