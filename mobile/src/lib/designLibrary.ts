@@ -26,6 +26,9 @@ export type LibraryDesign = {
   createdAt: number;
   width?: number;
   height?: number;
+  /** Lowercase labels for search — client names, motifs, collections. */
+  tags?: string[];
+  favorite?: boolean;
 };
 
 /** Shape written by the original base64-in-AsyncStorage version. */
@@ -179,6 +182,30 @@ export async function replaceInLibrary(
   // Only once the new one is safely written and recorded.
   deleteFile(brand, existing.file ?? `${existing.id}.png`);
   return updated;
+}
+
+export async function setDesignTags(
+  brand: BrandId,
+  id: string,
+  tags: string[]
+): Promise<void> {
+  const designs = await getLibrary(brand);
+  await save(
+    brand,
+    designs.map((d) => (d.id === id ? { ...d, tags } : d))
+  );
+}
+
+export async function setDesignFavorite(
+  brand: BrandId,
+  id: string,
+  favorite: boolean
+): Promise<void> {
+  const designs = await getLibrary(brand);
+  await save(
+    brand,
+    designs.map((d) => (d.id === id ? { ...d, favorite } : d))
+  );
 }
 
 export async function renameInLibrary(
