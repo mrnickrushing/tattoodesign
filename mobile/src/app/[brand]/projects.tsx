@@ -25,7 +25,16 @@ import {
   type ClientProject,
   type ReviewStatus,
 } from "@/lib/clientProjects";
-import { getLibrary, type LibraryDesign } from "@/lib/designLibrary";
+import { getLibrary, setDesignTags, type LibraryDesign } from "@/lib/designLibrary";
+import { normalizeTags } from "@/lib/libraryFilter";
+import {
+  describeAppointment,
+  formatAppointmentDate,
+  parseAppointmentDate,
+  parseSizeIn,
+  sortByAppointment,
+} from "@/lib/appointments";
+import * as ImagePicker from "expo-image-picker";
 import { RADIUS, SPACE, TYPE } from "@/lib/theme";
 
 const STATUS: { id: ReviewStatus; label: string }[] = [
@@ -45,6 +54,9 @@ export default function ProjectsScreen() {
   const [placement, setPlacement] = useState("");
   const [notes, setNotes] = useState("");
   const [designIds, setDesignIds] = useState<string[]>([]);
+  const [appointment, setAppointment] = useState("");
+  const [size, setSize] = useState("");
+  const [referenceUris, setReferenceUris] = useState<string[]>([]);
 
   const refresh = useCallback(
     () =>
@@ -70,6 +82,9 @@ export default function ProjectsScreen() {
     setPlacement(project?.placement ?? "");
     setNotes(project?.notes ?? "");
     setDesignIds(project?.designIds ?? []);
+    setAppointment(project?.appointmentAt ? formatAppointmentDate(project.appointmentAt) : "");
+    setSize(project?.sizeIn ? `${project.sizeIn.width} x ${project.sizeIn.height}` : "");
+    setReferenceUris(project?.referenceUris ?? []);
   }
 
   async function save() {
@@ -80,6 +95,16 @@ export default function ProjectsScreen() {
       );
       return;
     }
+    const appointmentAt = appointment.trim() ? parseAppointmentDate(appointment) : undefined;
+    if (appointment.trim() && appointmentAt === null) {
+      Alert.alert("Couldn't read that date", 'Try "2026-09-04", "9/4", or "Sep 4".');
+      return;
+    }
+    const sizeIn = size.trim() ? parseSizeIn(size) : undefined;
+    if (size.trim() && sizeIn === null) {
+      Alert.alert("Couldn't read that size", 'Try "3 x 5" — width by height, in inches.');
+      return;
+    }
     await saveClientProject(brand.id, {
       ...(editing?.id ? editing : {}),
       name,
@@ -87,10 +112,45 @@ export default function ProjectsScreen() {
       placement,
       notes,
       designIds,
+      appointmentAt: appointmentAt ?? undefined,
+      sizeIn: sizeIn ?? undefined,
+      referenceUris,
     });
     setEditing(null);
     await refresh();
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+    // Wave A tags make "everything for this client" one tap. Offer, don't force.
+    const clientTag = normalizeTags(client)[0];
+    if (clientTag && designIds.length) {
+      const untagged = designs.filter(
+        (design) => designIds.includes(design.id) && !(design.tags ?? []).includes(clientTag)
+      );
+      if (untagged.length) {
+        Alert.alert(
+          `Tag ${untagged.length} design${untagged.length === 1 ? "" : "s"} "${clientTag}"?`,
+          "Tagged designs show up under the client's chip in the library.",
+          [
+            { text: "Not now", style: "cancel" },
+            {
+              text: "Tag them",
+              onPress: async () => {
+                for (const design of untagged) {
+                  await setDesignTags(brand.id, design.id, [...(design.tags ?? []), clientTag]);
+                }
+                await refresh();
+              },
+            },
+          ]
+        );
+      }
+    }
+  }
+
+  async function addReference() {
+    const picked = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.8 });
+    if (picked.canceled || !picked.assets.length) return;
+    setReferenceUris((uris) => [...uris, ...picked.assets.map((asset) => asset.uri)]);
   }
 
   async function changeStatus(project: ClientProject, status: ReviewStatus) {
@@ -161,12 +221,61 @@ export default function ProjectsScreen() {
             placeholder="Outer forearm · 7 in"
           />
           <Field
+            label="APPOINTMENT"
+            value={appointment}
+            onChange={setAppointment}
+            placeholder='Sep 4, or "9/4"'
+          />
+          <Field
+            label="SIZE (IN)"
+            value={size}
+            onChange={setSize}
+            placeholder="3 x 5"
+          />
+          <Field
             label="NOTES"
             value={notes}
             onChange={setNotes}
             placeholder="Creative direction, revision notes, appointment details…"
             multiline
           />
+
+          <Text
+            style={[
+              styles.fieldLabel,
+              { color: theme.muted, fontFamily: theme.fontBodyMedium },
+            ]}
+          >
+            REFERENCE PHOTOS
+          </Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.designRow}
+          >
+            {referenceUris.map((uri) => (
+              <Pressable
+                key={uri}
+                onLongPress={() =>
+                  setReferenceUris((uris) => uris.filter((item) => item !== uri))
+                }
+                accessibilityRole="imagebutton"
+                accessibilityLabel="Reference photo"
+                accessibilityHint="Long press to remove"
+                style={[styles.design, { backgroundColor: theme.stock, borderColor: theme.line }]}
+              >
+                <Image source={{ uri }} style={styles.designImage} contentFit="cover" />
+              </Pressable>
+            ))}
+            <Pressable
+              onPress={addReference}
+              accessibilityRole="button"
+              accessibilityLabel="Add reference photo"
+              style={[styles.design, styles.addReference, { borderColor: theme.line }]}
+            >
+              <Icon name="add" size={22} color={theme.muted} />
+            </Pressable>
+          </ScrollView>
 
           {!!designs.length && (
             <>
@@ -255,7 +364,7 @@ export default function ProjectsScreen() {
       </View>
       <View style={styles.projectList}>
         {projects.length ? (
-          projects.map((project) => (
+          sortByAppointment(projects).map((project) => (
             <Pressable
               key={project.id}
               onPress={() => begin(project)}
@@ -299,10 +408,24 @@ export default function ProjectsScreen() {
                     { color: theme.muted, fontFamily: theme.fontBody },
                   ]}
                 >
-                  {[project.client, project.placement]
+                  {[
+                    project.client,
+                    project.placement,
+                    project.sizeIn ? `${project.sizeIn.width}×${project.sizeIn.height} in` : "",
+                  ]
                     .filter(Boolean)
                     .join(" · ") || "Add client and placement details"}
                 </Text>
+                {!!project.appointmentAt && (
+                  <Text
+                    style={[
+                      styles.projectDetail,
+                      { color: theme.accent, fontFamily: theme.fontBodyMedium },
+                    ]}
+                  >
+                    {describeAppointment(project.appointmentAt)} · {formatAppointmentDate(project.appointmentAt)}
+                  </Text>
+                )}
                 <Text
                   style={[
                     styles.projectCount,
@@ -473,6 +596,7 @@ const styles = StyleSheet.create({
     borderRadius: RADIUS.sm,
     overflow: "hidden",
   },
+  addReference: { borderStyle: "dashed", alignItems: "center", justifyContent: "center" },
   designImage: { width: "100%", height: "100%" },
   designCheck: {
     position: "absolute",
