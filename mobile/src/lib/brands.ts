@@ -8,7 +8,17 @@ export type BrandId = "ink" | "sugar";
 
 export const BRAND_IDS: BrandId[] = ["ink", "sugar"];
 
-export type GenerateStyle = { id: string; label: string; promptDescription: string };
+export type GenerateStyle = {
+  id: string;
+  label: string;
+  promptDescription: string;
+  /**
+   * Overrides the server's default pure-linework ink rule for this style.
+   * Leave unset for stencil-style line art; set it for styles whose whole
+   * point is tone (black & grey realism, dotwork stippling).
+   */
+  inkConstraint?: string;
+};
 
 export type HomeCard = {
   tag: string;
@@ -107,6 +117,48 @@ export const BRANDS: Record<BrandId, BrandConfig> = {
           id: "irezumi",
           label: "Irezumi",
           promptDescription: "Japanese irezumi tattoo style, flowing linework",
+        },
+        {
+          id: "bg-realism",
+          label: "Black & grey",
+          promptDescription:
+            "black and grey realism tattoo style, photorealistic depth built from smooth single-needle shading",
+          inkConstraint:
+            "Black and grey ink only, smooth realistic shading and soft gradients, no color.",
+        },
+        {
+          id: "neotraditional",
+          label: "Neo-traditional",
+          promptDescription:
+            "neo-traditional tattoo style, bold outlines with varied line weight and ornate decorative flourishes",
+        },
+        {
+          id: "chicano",
+          label: "Chicano",
+          promptDescription:
+            "Chicano tattoo style, fine-line black and grey with smooth soft shading, script and portrait sensibility",
+          inkConstraint:
+            "Black and grey ink only, fine lines with smooth soft shading, no color.",
+        },
+        {
+          id: "dotwork",
+          label: "Dotwork",
+          promptDescription:
+            "dotwork tattoo style, every tone built from dense stippled dots",
+          inkConstraint:
+            "Pure black ink only, all tone and texture built from stippled dots, no smooth gradients, no gray washes, no color.",
+        },
+        {
+          id: "geometric",
+          label: "Geometric",
+          promptDescription:
+            "geometric tattoo style, precise symmetrical linework, sacred geometry and mandala patterning",
+        },
+        {
+          id: "tribal",
+          label: "Tribal",
+          promptDescription:
+            "tribal tattoo style, bold sweeping solid black shapes with strong silhouette",
         },
       ],
     },
