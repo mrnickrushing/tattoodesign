@@ -19,7 +19,7 @@ import * as ImagePicker from "expo-image-picker";
 import { File, Paths } from "expo-file-system";
 import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
 import { runOnJS } from "react-native-reanimated";
-import Svg, { Line as SvgLine, Path as SvgPath } from "react-native-svg";
+import Svg, { Circle as SvgCircle, Line as SvgLine, Path as SvgPath } from "react-native-svg";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useBrand } from "@/context/BrandContext";
 import { Button } from "@/components/Button";
@@ -67,6 +67,15 @@ import { MIN_LINE_GAP_MM, checkLineSpacing, pxPerMmFromDpi, spacingFinding } fro
 import { PREF_KEYS, isFiniteNumber, preferences } from "@/lib/preferences";
 import { LETTERING_STYLES, letteringStyle, type LetteringStyleId } from "@/lib/lettering";
 import { DEFAULT_CLEANUP, applyCleanup, cleanupReport } from "@/lib/cleanup";
+import {
+  deleteNode,
+  insertMidpoint,
+  layerToCanvas,
+  moveNode,
+  nearestNode,
+  nearestSegment,
+  type NodeRef,
+} from "@/lib/nodeEdit";
 import { renderLettering } from "@/lib/letteringRender";
 import {
   DEFAULT_SYMMETRY,
@@ -82,7 +91,7 @@ import {
 import { ICONS, type IconName } from "@/lib/icons";
 import { RADIUS, SPACE, TYPE, glow, lift } from "@/lib/theme";
 
-type EditorTool = "select" | "draw" | "erase" | "insert" | "refine" | "crop" | "layers" | "production" | "history";
+type EditorTool = "select" | "draw" | "erase" | "nodes" | "insert" | "refine" | "crop" | "layers" | "production" | "history";
 
 type SaveResult = { id: string; title: string };
 
@@ -90,6 +99,7 @@ const TOOLS: { id: EditorTool; label: string; icon: IconName }[] = [
   { id: "select", label: "Arrange", icon: "move" },
   { id: "draw", label: "Draw", icon: "brush" },
   { id: "erase", label: "Mask", icon: "mask" },
+  { id: "nodes", label: "Nodes", icon: "nodes" },
   { id: "insert", label: "Add", icon: "add" },
   { id: "refine", label: "Lines", icon: "branch" },
   { id: "crop", label: "Crop", icon: "crop" },
@@ -137,6 +147,11 @@ export function DesignEditor({
   const [letteringText, setLetteringText] = useState("");
   const [letteringStyleId, setLetteringStyleId] = useState<LetteringStyleId>("script");
   const [letteringCurve, setLetteringCurve] = useState(0);
+  const [nodeMode, setNodeMode] = useState<"move" | "delete" | "insert">("move");
+  const [nodeDraft, setNodeDraft] = useState<StrokeLayer | null>(null);
+  // State, not a ref: the gesture rebuilds each render, so the onEnd closure
+  // reads the latest value — the same pattern finishStroke relies on.
+  const [dragNode, setDragNode] = useState<NodeRef | null>(null);
   const [cropping, setCropping] = useState(false);
   const [lineWeight, setLineWeight] = useState(1);
   const [threshold, setThreshold] = useState(60);
@@ -336,7 +351,55 @@ export function DesignEditor({
     Gesture.Rotation().onEnd((event) => runOnJS(finishRotate)(event.rotation))
   );
 
-  const stageGesture = tool === "draw" || tool === "erase" ? drawGesture : arrangeGesture;
+  // Nodes mode: fingers land in stage points; hit-testing runs in canvas px.
+  function nodeTouchStart(x: number, y: number) {
+    if (!project || selected?.kind !== "stroke" || selected.locked) return;
+    const canvasPoint = { x: x / scale, y: y / scale };
+    const radius = 26 / scale;
+    if (nodeMode === "move") {
+      const hit = nearestNode(selected, canvasPoint, radius);
+      setDragNode(hit);
+      if (hit) setNodeDraft(moveNode(selected, hit, canvasPoint));
+      return;
+    }
+    if (nodeMode === "delete") {
+      const hit = nearestNode(selected, canvasPoint, radius);
+      if (!hit) return;
+      void commit("Delete node", updateLayer(project, selected.id, (layer) => deleteNode(layer as StrokeLayer, hit)));
+      Haptics.selectionAsync();
+      return;
+    }
+    const segment = nearestSegment(selected, canvasPoint, radius);
+    if (!segment) return;
+    void commit("Insert node", updateLayer(project, selected.id, (layer) => insertMidpoint(layer as StrokeLayer, segment)));
+    Haptics.selectionAsync();
+  }
+
+  function nodeTouchMove(x: number, y: number) {
+    if (nodeMode !== "move" || !dragNode || selected?.kind !== "stroke") return;
+    setNodeDraft(moveNode(selected, dragNode, { x: x / scale, y: y / scale }));
+  }
+
+  function nodeTouchEnd() {
+    const node = dragNode;
+    setDragNode(null);
+    if (!project || !node || !nodeDraft || selected?.kind !== "stroke") {
+      setNodeDraft(null);
+      return;
+    }
+    const draft = nodeDraft;
+    setNodeDraft(null);
+    void commit("Move node", updateLayer(project, selected.id, () => draft));
+  }
+
+  const nodeGesture = Gesture.Pan()
+    .minDistance(0)
+    .onStart((event) => runOnJS(nodeTouchStart)(event.x, event.y))
+    .onUpdate((event) => runOnJS(nodeTouchMove)(event.x, event.y))
+    .onEnd(() => runOnJS(nodeTouchEnd)());
+
+  const stageGesture =
+    tool === "draw" || tool === "erase" ? drawGesture : tool === "nodes" ? nodeGesture : arrangeGesture;
 
   async function applyCrop(rect: CropRect) {
     setCropping(false);
@@ -655,6 +718,22 @@ export function DesignEditor({
     );
   }, [project, currentStroke, symmetry, scale]);
 
+  // Node handles: the layer being dragged (draft) or the selected stroke
+  // layer. Dense traces stay legible by capping how many handles render.
+  const nodeLayer = tool === "nodes" && selected?.kind === "stroke" ? nodeDraft ?? selected : null;
+  const nodeHandles = useMemo(() => {
+    if (!nodeLayer) return [];
+    const handles: { x: number; y: number }[] = [];
+    for (const stroke of nodeLayer.strokes) {
+      if (stroke.mode === "erase") continue;
+      for (const point of stroke.points) {
+        handles.push(layerToCanvas(nodeLayer, point));
+        if (handles.length > 400) return handles;
+      }
+    }
+    return handles;
+  }, [nodeLayer]);
+
   const guides = useMemo(() => {
     if (!project || (tool !== "draw" && tool !== "erase")) return [];
     return symmetryGuides(symmetry, project.canvas);
@@ -732,10 +811,13 @@ export function DesignEditor({
                     <View style={[styles.handle, styles.handleBR, { backgroundColor: theme.accent }]} />
                   </View>
                 )}
-                {(!!guides.length || !!overlayPaths.length) && (
+                {(!!guides.length || !!overlayPaths.length || !!nodeHandles.length) && (
                   <Svg pointerEvents="none" style={StyleSheet.absoluteFill} width={stageW} height={stageH}>
                     {guides.map((guide, index) => (
                       <SvgLine key={`guide-${index}`} x1={guide.x1 * scale} y1={guide.y1 * scale} x2={guide.x2 * scale} y2={guide.y2 * scale} stroke={theme.accent} strokeWidth={StyleSheet.hairlineWidth * 2} strokeDasharray="6 6" opacity={0.5} />
+                    ))}
+                    {nodeHandles.map((handle, index) => (
+                      <SvgCircle key={`node-${index}`} cx={handle.x * scale} cy={handle.y * scale} r={4.5} fill={theme.surface} stroke={theme.accent} strokeWidth={1.5} />
                     ))}
                     {overlayPaths.map((path, index) => (
                       <SvgPath key={`stroke-${index}`} d={path} fill="none" stroke={tool === "erase" ? project?.canvas.background ?? "white" : brushColor} strokeWidth={brush} strokeLinecap="round" strokeLinejoin="round" opacity={index ? 0.75 : 1} />
@@ -794,6 +876,8 @@ export function DesignEditor({
               onExportSvg={exportSvg}
               onTrace={traceToVector}
               onCleanup={cleanUpStrokes}
+              nodeMode={nodeMode}
+              onNodeMode={setNodeMode}
               wrapAmount={wrapAmount}
               wrapTaper={wrapTaper}
               findings={findings}
@@ -853,6 +937,8 @@ function Inspector({
   onExportSvg,
   onTrace,
   onCleanup,
+  nodeMode,
+  onNodeMode,
   wrapAmount,
   wrapTaper,
   findings,
@@ -894,6 +980,8 @@ function Inspector({
   onExportSvg: () => void;
   onTrace: () => void;
   onCleanup: () => void;
+  nodeMode: "move" | "delete" | "insert";
+  onNodeMode: (mode: "move" | "delete" | "insert") => void;
   wrapAmount: number;
   wrapTaper: number;
   findings: ProductionFinding[];
@@ -940,6 +1028,48 @@ function Inspector({
             </View>
           </>
         ) : null}
+      </PanelTitle>
+    );
+  }
+
+  if (tool === "nodes") {
+    const editable = selected?.kind === "stroke" && !selected.locked;
+    return (
+      <PanelTitle icon="git-commit-outline" title="Node editor" subtitle={editable ? "Every trace, lettering pass, and stroke is points you can touch." : "Select an unlocked stroke layer to edit its points."}>
+        {editable && (
+          <>
+            <View style={styles.segmentRow}>
+              {(
+                [
+                  { id: "move" as const, label: "Move", icon: "move" as const },
+                  { id: "delete" as const, label: "Delete", icon: "delete" as const },
+                  { id: "insert" as const, label: "Insert", icon: "add" as const },
+                ]
+              ).map((item) => {
+                const active = nodeMode === item.id;
+                return (
+                  <Pressable
+                    key={item.id}
+                    onPress={() => { onNodeMode(item.id); Haptics.selectionAsync(); }}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                    style={[styles.symmetryChip, { backgroundColor: active ? theme.accent : theme.surfaceAlt, borderColor: active ? theme.accent : theme.line }]}
+                  >
+                    <Icon name={item.icon} size={15} color={active ? theme.accentText : theme.foreground} />
+                    <Text style={{ color: active ? theme.accentText : theme.muted, fontFamily: theme.fontBodyMedium, fontSize: 10 }}>{item.label.toUpperCase()}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 10, lineHeight: 14, marginTop: SPACE.xs }}>
+              {nodeMode === "move"
+                ? "Drag a handle to reshape the line. One drag is one undo."
+                : nodeMode === "delete"
+                  ? "Tap a handle to remove it. A line down to two points deletes whole."
+                  : "Tap between two handles to add a point on the segment."}
+            </Text>
+          </>
+        )}
       </PanelTitle>
     );
   }

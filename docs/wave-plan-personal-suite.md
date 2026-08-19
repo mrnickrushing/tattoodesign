@@ -5,6 +5,14 @@ no store work, ever. Five waves, strictly sequential: implement → PR → CI
 green → `gh pr merge --squash --delete-branch` → OTA
 (`eas update --branch production --environment production`) → next branch.
 
+## Status — milestone complete
+
+All five waves merged sequentially and shipped by OTA to runtime 1.4.0
+(2026-08-19): Remix (#32), Approval proof PDF (#33), Brand presets (#34),
+Batch conversion (#35), Node editor (#36). Suite: 206 tests. Owner gates:
+proof PDF judged on a real print, node handle feel judged on glass, remix
+verb wording is a starting set.
+
 ## Standing constraints
 
 - Runtime is `1.4.0` (build 13). **No version bumps** — all five waves are

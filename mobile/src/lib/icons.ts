@@ -69,7 +69,8 @@ export type IconName =
   | "send"
   | "water"
   | "favorite"
-  | "favoriteFilled";
+  | "favoriteFilled"
+  | "nodes";
 
 export type IconDefinition = {
   /** SF Symbol availability is version-gated and validated on device. */
@@ -148,6 +149,7 @@ export const ICONS: Record<IconName, IconDefinition> = {
   water: { sf: "drop", ion: "water-outline" },
   favorite: { sf: "star", ion: "star-outline" },
   favoriteFilled: { sf: "star.fill", ion: "star" },
+  nodes: { sf: "point.topleft.down.curvedto.point.bottomright.up", ion: "git-commit-outline" },
 };
 
 /** Returns a usable fallback even if an untyped caller reaches this boundary. */
