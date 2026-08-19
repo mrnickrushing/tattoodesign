@@ -35,6 +35,10 @@ import {
   sortByAppointment,
 } from "@/lib/appointments";
 import * as ImagePicker from "expo-image-picker";
+import * as Print from "expo-print";
+import { File } from "expo-file-system";
+import { proofHtml, type ProofDesign } from "@/lib/proofSheet";
+import { shareUri } from "@/lib/files";
 import { RADIUS, SPACE, TYPE } from "@/lib/theme";
 
 const STATUS: { id: ReviewStatus; label: string }[] = [
@@ -167,6 +171,45 @@ export default function ProjectsScreen() {
     setDesignIds((ids) =>
       selected ? ids.filter((id) => id !== design.id) : [...ids, design.id],
     );
+  }
+
+  const [proofing, setProofing] = useState<string | null>(null);
+
+  async function sendProof(project: ClientProject) {
+    setProofing(project.id);
+    try {
+      const attached = designs.filter((design) => project.designIds.includes(design.id));
+      const proofDesigns: ProofDesign[] = [];
+      for (const design of attached) {
+        try {
+          const data = await new File(design.uri).base64();
+          proofDesigns.push({
+            title: design.title,
+            dataUrl: `data:image/png;base64,${data}`,
+            width: design.width ?? 1,
+            height: design.height ?? 1,
+          });
+        } catch {
+          // A missing file shouldn't sink the whole proof; the sheet reads
+          // fine with the designs that loaded.
+        }
+      }
+      const { uri } = await Print.printToFileAsync({
+        html: proofHtml(project, proofDesigns, brand.name),
+      });
+      await shareUri(uri);
+      if (project.status === "draft") {
+        Alert.alert("Mark as sent?", "Move this project to In review now the proof is out?", [
+          { text: "Keep as draft", style: "cancel" },
+          { text: "Mark sent", onPress: () => void changeStatus(project, "sent") },
+        ]);
+      }
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (e) {
+      Alert.alert("Couldn't build the proof", e instanceof Error ? e.message : "Try again.");
+    } finally {
+      setProofing(null);
+    }
   }
 
   function confirmDelete(project: ClientProject) {
@@ -470,6 +513,14 @@ export default function ProjectsScreen() {
                     );
                   })}
                 </View>
+                <Button
+                  label={proofing === project.id ? "Building proof…" : "Send proof"}
+                  icon="document-text-outline"
+                  loading={proofing === project.id}
+                  disabled={proofing !== null}
+                  onPress={() => void sendProof(project)}
+                  style={{ marginTop: SPACE.sm }}
+                />
               </View>
               <Icon
                 name="chevronForward"
