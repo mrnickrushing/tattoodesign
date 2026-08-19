@@ -5,6 +5,21 @@ CI green → **merge to main** → OTA publish → only then branch the next wav
 No stacked PRs — the last stack's merges landed in parent branches instead of
 main and needed a recovery PR (#23).
 
+## Status — milestone complete
+
+All five waves merged sequentially and shipped (2026-08-19):
+
+| Wave | PR | Delivery |
+|---|---|---|
+| A · Library search, tags, favorites | #27 | OTA to 1.3.0 (build 12) |
+| B · Lettering studio | #28 | OTA to 1.3.0 (build 12) |
+| C · Smart cleanup | #29 | OTA to 1.3.0 (build 12) |
+| D · Client projects extended | #30 | OTA to 1.3.0 (build 12) |
+| E · Live AR placement | #31 | **1.4.0, build 13** + OTA baseline on the new runtime |
+
+Suite: 156 tests. Owner gates still open: device pass on the live camera
+preview scale, lettering font taste check on the phone.
+
 ## Standing constraints
 
 - Waves A–D: **no version bump** — runtime stays `1.3.0`, each merge ships by
