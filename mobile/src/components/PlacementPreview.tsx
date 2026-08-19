@@ -26,6 +26,9 @@ import { composePlacement } from "@/lib/placement";
 import { saveDataUrlToPhotos } from "@/lib/files";
 import { CARD_HEIGHT_IN, CARD_WIDTH_IN, getScreenPpi, setScreenPpi } from "@/lib/measure";
 import { PREF_KEYS, preferences } from "@/lib/preferences";
+import { File } from "expo-file-system";
+import { HEAL_AGES, type HealAge } from "@/lib/healing";
+import { simulateHealing } from "@/lib/productionTools";
 import { SPACE, RADIUS } from "@/lib/theme";
 
 type Mode = "size" | "photo" | "live";
@@ -64,6 +67,9 @@ export function PlacementPreview({
   const [saving, setSaving] = useState(false);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [freezing, setFreezing] = useState(false);
+  const [healAge, setHealAge] = useState<HealAge>("fresh");
+  const [healedUris, setHealedUris] = useState<Partial<Record<HealAge, string>>>({});
+  const [healing, setHealing] = useState(false);
   const cameraRef = useRef<CameraView>(null);
   const liveAvailable = Platform.OS !== "web";
 
@@ -256,6 +262,31 @@ export function PlacementPreview({
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   }
 
+  /**
+   * Ages the design overlay for the live view. Migration is millimetres at
+   * the calibrated screen density, so what floats on the arm is the honest
+   * projection at true size. Renders cache per age; fresh clears back to the
+   * raw design.
+   */
+  async function chooseHealAge(age: HealAge) {
+    setHealAge(age);
+    Haptics.selectionAsync();
+    if (age === "fresh" || healedUris[age]) return;
+    setHealing(true);
+    try {
+      const base64 = await new File(uri).base64();
+      const aged = simulateHealing(`data:image/png;base64,${base64}`, age, ppi / 25.4);
+      setHealedUris((current) => ({ ...current, [age]: aged }));
+    } catch (e) {
+      setHealAge("fresh");
+      Alert.alert("Couldn't simulate healing", e instanceof Error ? e.message : "Try again.");
+    } finally {
+      setHealing(false);
+    }
+  }
+
+  const overlayUri = mode === "live" && healAge !== "fresh" ? (healedUris[healAge] ?? uri) : uri;
+
   /** The photo is letterboxed into the stage, so the design's position has to
    *  be expressed against the photo itself before it can be flattened. */
   function photoFrame() {
@@ -378,12 +409,18 @@ export function PlacementPreview({
               )}
               <Animated.View style={designStyle} pointerEvents="none">
                 <Image
-                  source={{ uri }}
+                  source={{ uri: overlayUri }}
                   style={StyleSheet.absoluteFill}
                   contentFit="contain"
                   alt={title}
                 />
               </Animated.View>
+              {mode === "live" && healAge !== "fresh" && overlayUri !== uri && (
+                <View style={[styles.simulatedBadge, { backgroundColor: `${theme.surface}e8` }]} pointerEvents="none">
+                  <Ionicons name="time-outline" size={11} color={theme.accent} />
+                  <Text style={{ color: theme.accent, fontFamily: theme.fontBodyMedium, fontSize: 9, letterSpacing: 1 }}>SIMULATED</Text>
+                </View>
+              )}
             </View>
           </GestureDetector>
 
@@ -471,6 +508,17 @@ export function PlacementPreview({
                   </Text>
                 </View>
                 <Stepper icon="add" label="Bigger" onPress={() => applyWidthIn(widthIn + 0.25)} />
+              </View>
+              <View style={styles.healRow}>
+                {HEAL_AGES.map((item) => (
+                  <Chip
+                    key={item.id}
+                    label={item.label}
+                    active={healAge === item.id}
+                    onPress={() => void chooseHealAge(item.id)}
+                  />
+                ))}
+                {healing && <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 10 }}>aging…</Text>}
               </View>
               <Button
                 label="Freeze frame"
@@ -639,6 +687,8 @@ function Calibrate({
 }
 
 const styles = StyleSheet.create({
+  healRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: SPACE.sm },
+  simulatedBadge: { position: "absolute", top: 8, left: 8, flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999 },
   root: { flex: 1 },
   screen: { flex: 1, padding: SPACE.md },
   head: { flexDirection: "row", alignItems: "center", gap: SPACE.sm, marginBottom: SPACE.md },
