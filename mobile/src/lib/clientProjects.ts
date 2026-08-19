@@ -13,6 +13,12 @@ export type ClientProject = {
   designIds: string[];
   status: ReviewStatus;
   approvalNote?: string;
+  /** Local-noon timestamp of the appointment, from appointments.ts parsing. */
+  appointmentAt?: number;
+  /** Agreed physical size in inches. */
+  sizeIn?: { width: number; height: number };
+  /** file:// URIs of reference photos attached to this project. */
+  referenceUris?: string[];
   createdAt: number;
   updatedAt: number;
 };
@@ -40,6 +46,9 @@ export async function saveClientProject(brand: BrandId, input: Partial<ClientPro
     designIds: input.designIds ?? existing?.designIds ?? [],
     status: input.status ?? existing?.status ?? "draft",
     approvalNote: input.approvalNote ?? existing?.approvalNote,
+    appointmentAt: "appointmentAt" in input ? input.appointmentAt : existing?.appointmentAt,
+    sizeIn: "sizeIn" in input ? input.sizeIn : existing?.sizeIn,
+    referenceUris: input.referenceUris ?? existing?.referenceUris,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };
