@@ -25,6 +25,7 @@ import { Chip, Notice } from "@/components/ui";
 import { composePlacement } from "@/lib/placement";
 import { saveDataUrlToPhotos } from "@/lib/files";
 import { CARD_HEIGHT_IN, CARD_WIDTH_IN, getScreenPpi, setScreenPpi } from "@/lib/measure";
+import { PREF_KEYS, preferences } from "@/lib/preferences";
 import { SPACE, RADIUS } from "@/lib/theme";
 
 type Mode = "size" | "photo" | "live";
@@ -103,13 +104,16 @@ export function PlacementPreview({
 
   /** Pinching in true-size mode changes the real size, so it's written back. */
   function commitWidth(points: number) {
-    setWidthIn(Math.max(0.25, points / ppi));
+    const next = Math.max(0.25, points / ppi);
+    setWidthIn(next);
+    void preferences.set(brand.id, PREF_KEYS.placementWidthIn, next);
   }
 
   function applyWidthIn(next: number) {
     const clamped = Math.max(0.25, Math.min(next, 24));
     setWidthIn(clamped);
     widthPt.value = clamped * ppi;
+    void preferences.set(brand.id, PREF_KEYS.placementWidthIn, clamped);
   }
 
   const pan = Gesture.Pan()

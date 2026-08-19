@@ -12,6 +12,7 @@ import { ScreenHeader, Card, SectionLabel, Notice } from "@/components/ui";
 import type { IconName } from "@/lib/icons";
 import { SPACE, TYPE } from "@/lib/theme";
 import { getGenerationUsage, getSpendLimit, setSpendLimit, totalEstimatedSpend } from "@/lib/generationUsage";
+import { preferences } from "@/lib/preferences";
 import { createEncryptedBackup, restoreEncryptedBackup } from "@/lib/encryptedBackup";
 import { shareUri } from "@/lib/files";
 
@@ -34,13 +35,34 @@ export default function SettingsScreen() {
   const [spend, setSpend] = useState(0);
   const [recoveryKey, setRecoveryKey] = useState("");
   const [backupBusy, setBackupBusy] = useState(false);
+  const [prefCount, setPrefCount] = useState(0);
 
   useEffect(() => {
     Promise.all([getSpendLimit(), getGenerationUsage()]).then(([savedLimit, usage]) => {
       setLimit(savedLimit.toFixed(2));
       setSpend(totalEstimatedSpend(usage));
     });
-  }, []);
+    preferences.all(brand.id).then((values) => setPrefCount(Object.keys(values).length));
+  }, [brand.id]);
+
+  function resetSessionDefaults() {
+    Alert.alert(
+      "Reset session defaults?",
+      "Trace settings, brush, and placement width go back to factory values for this studio.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Reset",
+          style: "destructive",
+          onPress: async () => {
+            await preferences.clear(brand.id);
+            setPrefCount(0);
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          },
+        },
+      ]
+    );
+  }
 
   async function saveLimit() {
     const value = Number(limit);
@@ -244,6 +266,18 @@ export default function SettingsScreen() {
       </Card>
 
       <View style={{ height: SPACE.lg }} />
+
+      <SectionLabel>Session defaults</SectionLabel>
+      <Card>
+        <Text style={{ color: theme.foreground, fontFamily: theme.fontBody, fontSize: 13, lineHeight: 18 }}>
+          {prefCount
+            ? `${prefCount} remembered setting${prefCount === 1 ? "" : "s"} for ${brand.name} — trace options, brush, placement width.`
+            : `Nothing remembered yet — trace options, brush, and placement width save automatically as you work.`}
+        </Text>
+        {prefCount > 0 && (
+          <Button label="Reset to factory defaults" icon="refresh-outline" onPress={resetSessionDefaults} style={{ marginTop: SPACE.sm }} />
+        )}
+      </Card>
 
       <SectionLabel>Encrypted studio backup</SectionLabel>
       <Card>
