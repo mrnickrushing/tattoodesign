@@ -4,6 +4,28 @@ Working notes for a five-wave milestone on Inkline mobile. Each wave is a
 self-contained PR: branch `agent/<name>` off `main`, implement, `npm test` +
 `tsc --noEmit` clean, PR, CI green, merge, publish OTA, then start the next.
 
+## Status
+
+All five waves are implemented and green. Each shipped as its own PR, stacked
+in order because the merge step needed an approval this session did not have:
+
+| Wave | PR | Branch | State |
+|---|---|---|---|
+| 1 · Symmetry and radial drawing | #18 | `agent/symmetry-radial-drawing` | CI green, awaiting merge |
+| 2 · Centerline vectorization | #19 | `agent/centerline-vectorization` | CI green, awaiting merge |
+| 3 · Blowout spacing check | #20 | `agent/blowout-spacing-check` | CI green, awaiting merge |
+| 4 · Healed-tattoo simulator | #21 | `agent/healed-simulation` | CI green, awaiting merge |
+| 5 · Large-format tiling | #22 | `agent/large-format-tiling` | CI green, awaiting merge |
+
+Merge in order, bottom-up from #18; each PR retargets to `main` as its parent
+lands. Publish once after the last merge:
+
+```
+eas update --branch production --message "Symmetry, vector tracing, spacing, healing, tiling"
+```
+
+Suite went from 8 tests to 88 across the milestone.
+
 ## Standing constraints
 
 - **Do not bump `version` in `mobile/app.json` or `mobile/package.json`.**
