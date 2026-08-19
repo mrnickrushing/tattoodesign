@@ -65,6 +65,7 @@ import { compareCapture, inspectProduction, simulateHealing, wrapForSurface, typ
 import { HEAL_AGES, type HealAge } from "@/lib/healing";
 import { MIN_LINE_GAP_MM, checkLineSpacing, pxPerMmFromDpi, spacingFinding } from "@/lib/spacing";
 import { LETTERING_STYLES, letteringStyle, type LetteringStyleId } from "@/lib/lettering";
+import { DEFAULT_CLEANUP, applyCleanup, cleanupReport } from "@/lib/cleanup";
 import { renderLettering } from "@/lib/letteringRender";
 import {
   DEFAULT_SYMMETRY,
@@ -389,6 +390,63 @@ export function DesignEditor({
     }
   }
 
+  async function cleanUpStrokes() {
+    if (!project) return;
+    // Clean the selected stroke layer, or the topmost visible one — the layer
+    // a fresh trace just landed on.
+    const layer =
+      selected?.kind === "stroke" && !selected.locked
+        ? selected
+        : [...project.layers].reverse().find(
+            (item): item is StrokeLayer => item.kind === "stroke" && item.visible && !item.locked
+          );
+    if (!layer || !layer.strokes.length) {
+      setError("Nothing to clean — trace or draw some linework first.");
+      return;
+    }
+    const drawn = layer.strokes.filter((stroke) => stroke.mode === "draw");
+    const erases = layer.strokes.filter((stroke) => stroke.mode === "erase");
+    const report = cleanupReport(
+      drawn.map((stroke) => stroke.points),
+      pxPerMmFromDpi(PRINT_DPI),
+      MIN_LINE_GAP_MM[brand.id]
+    );
+    if (!report.specks && !report.bridgeableGaps) {
+      Alert.alert(
+        "Already clean",
+        report.spacing.violations
+          ? `No specks or breaks. ${report.spacing.violations} tight spot${report.spacing.violations === 1 ? "" : "s"} below ${MIN_LINE_GAP_MM[brand.id]}mm remain — those need manual reworking or a larger print size.`
+          : "No stray specks, no broken lines, and spacing holds at print size."
+      );
+      return;
+    }
+    // Repaired geometry inherits each layer's dominant stroke look — the
+    // repair merges paths, so per-path attribution can't survive anyway.
+    const look = drawn[0];
+    const result = applyCleanup(drawn.map((stroke) => stroke.points), DEFAULT_CLEANUP);
+    const next = updateLayer(project, layer.id, (item) => ({
+      ...(item as StrokeLayer),
+      strokes: [
+        ...result.paths.map((points) => ({
+          points,
+          width: look.width,
+          color: look.color,
+          mode: "draw" as const,
+          opacity: look.opacity,
+        })),
+        ...erases,
+      ],
+    }));
+    await commit(
+      `Clean up · ${result.specksRemoved} speck${result.specksRemoved === 1 ? "" : "s"}, ${result.gapsBridged} bridge${result.gapsBridged === 1 ? "" : "s"}`,
+      next
+    );
+    Alert.alert(
+      "Cleaned up",
+      `Removed ${result.specksRemoved} stray speck${result.specksRemoved === 1 ? "" : "s"} and bridged ${result.gapsBridged} broken line${result.gapsBridged === 1 ? "" : "s"}. One undo reverses all of it.`
+    );
+  }
+
   async function addLettering() {
     if (!project || !letteringText.trim()) return;
     setBusy(true);
@@ -709,6 +767,7 @@ export function DesignEditor({
               onRestore={(index) => project && commit("Restore snapshot", restoreSnapshot(project, index))}
               onExportSvg={exportSvg}
               onTrace={traceToVector}
+              onCleanup={cleanUpStrokes}
               wrapAmount={wrapAmount}
               wrapTaper={wrapTaper}
               findings={findings}
@@ -767,6 +826,7 @@ function Inspector({
   onRestore,
   onExportSvg,
   onTrace,
+  onCleanup,
   wrapAmount,
   wrapTaper,
   findings,
@@ -807,6 +867,7 @@ function Inspector({
   onRestore: (index: number) => void;
   onExportSvg: () => void;
   onTrace: () => void;
+  onCleanup: () => void;
   wrapAmount: number;
   wrapTaper: number;
   findings: ProductionFinding[];
@@ -924,6 +985,7 @@ function Inspector({
         <View style={styles.actionRow}>
           <MiniAction icon="color-filter-outline" label="Refine" onPress={() => onProcess("stencil")} />
           <MiniAction icon="git-network-outline" label="Vector" onPress={onTrace} />
+          <MiniAction icon="sparkles-outline" label="Clean up" onPress={onCleanup} />
           <MiniAction icon="ellipse-outline" label="Cut line" onPress={() => onProcess("cutline")} />
           <MiniAction icon="code-slash-outline" label="SVG" onPress={onExportSvg} />
         </View>
