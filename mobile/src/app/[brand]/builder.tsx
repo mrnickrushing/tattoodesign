@@ -28,6 +28,8 @@ import {
   removeFromLibrary,
   renameInLibrary,
   replaceInLibrary,
+  setDesignFavorite,
+  setDesignTags,
   type LibraryDesign,
 } from "@/lib/designLibrary";
 import {
@@ -51,6 +53,7 @@ import { NamePrompt } from "@/components/NamePrompt";
 import { IcingPreview } from "@/components/IcingPreview";
 import { PlacementPreview } from "@/components/PlacementPreview";
 import { DesignActions, type DesignAction } from "@/components/DesignActions";
+import { allTags, filterDesigns, normalizeTags, type SourceFilter } from "@/lib/libraryFilter";
 import { DesignEditor } from "@/components/DesignEditor";
 import { PrinterStudio } from "@/components/PrinterStudio";
 import { EmptyStock } from "@/components/EmptyStock";
@@ -93,7 +96,8 @@ const MAX_PX_PER_IN = 50;
 type NamePromptState =
   | { kind: "save"; initial: string }
   | { kind: "rename-sheet"; id: string; initial: string }
-  | { kind: "rename-design"; id: string; initial: string };
+  | { kind: "rename-design"; id: string; initial: string }
+  | { kind: "tag-design"; id: string; initial: string };
 
 /** Re-points saved items at the current design files, and drops any whose
  *  design has since been deleted so a loaded sheet never shows a dead frame. */
@@ -125,6 +129,10 @@ export default function BuilderScreen() {
   const [sheetId, setSheetId] = useState<string | null>(null);
   const [sheetName, setSheetName] = useState<string | null>(null);
   const [prompt, setPrompt] = useState<NamePromptState | null>(null);
+  const [librarySearch, setLibrarySearch] = useState("");
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
+  const [activeTag, setActiveTag] = useState<string | null>(null);
   const [icing, setIcing] = useState<LibraryDesign | null>(null);
   const [menu, setMenu] = useState<LibraryDesign | null>(null);
   const [placing, setPlacing] = useState<LibraryDesign | null>(null);
@@ -607,11 +615,33 @@ export default function BuilderScreen() {
       if (sheetId === prompt.id) setSheetName(value);
       return;
     }
+    if (prompt.kind === "tag-design") {
+      await setDesignTags(brand.id, prompt.id, normalizeTags(value));
+      // The active tag chip may have just been removed from its last design.
+      const lib = await getLibrary(brand.id);
+      setLibrary(lib);
+      if (activeTag && !allTags(lib).includes(activeTag)) setActiveTag(null);
+      return;
+    }
     await renameInLibrary(brand.id, prompt.id, value);
     const lib = await getLibrary(brand.id);
     setLibrary(lib);
     setItems((prev) => resolveItems(prev, lib));
   }
+
+  async function toggleFavorite(design: LibraryDesign) {
+    await setDesignFavorite(brand.id, design.id, !design.favorite);
+    setLibrary(await getLibrary(brand.id));
+    Haptics.selectionAsync();
+  }
+
+  const libraryTags = allTags(library);
+  const visibleLibrary = filterDesigns(library, {
+    query: librarySearch,
+    source: sourceFilter,
+    favoritesOnly,
+    tag: activeTag ?? undefined,
+  });
 
   async function deleteDesign(design: LibraryDesign) {
     await removeFromLibrary(brand.id, design.id);
@@ -657,6 +687,21 @@ export default function BuilderScreen() {
             },
           ]
         : []),
+      {
+        key: "favorite",
+        label: design.favorite ? "Unfavorite" : "Favorite",
+        hint: design.favorite ? undefined : "Pin it to the front of the library",
+        icon: design.favorite ? "star" : "star-outline",
+        onPress: () => toggleFavorite(design),
+      },
+      {
+        key: "tags",
+        label: "Tags",
+        hint: design.tags?.length ? design.tags.join(", ") : "Client, motif, collection",
+        icon: "pricetags-outline",
+        onPress: () =>
+          openPrompt({ kind: "tag-design", id: design.id, initial: (design.tags ?? []).join(", ") }),
+      },
       {
         key: "rename",
         label: "Rename",
@@ -1130,6 +1175,67 @@ export default function BuilderScreen() {
         Your designs
       </SectionLabel>
 
+      {library.length > 0 && (
+        <View style={styles.libraryTools}>
+          <TextInput
+            value={librarySearch}
+            onChangeText={setLibrarySearch}
+            placeholder="Search titles and tags"
+            placeholderTextColor={theme.muted}
+            autoCorrect={false}
+            autoCapitalize="none"
+            accessibilityLabel="Search designs"
+            style={[styles.librarySearch, { color: theme.foreground, borderColor: theme.line, backgroundColor: theme.surfaceAlt }]}
+          />
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.libraryChips}>
+            {(
+              [
+                { id: "all" as const, label: "All" },
+                { id: "generated" as const, label: "Generated" },
+                { id: "converted" as const, label: "Converted" },
+                { id: "uploaded" as const, label: "Uploaded" },
+              ]
+            ).map((chip) => {
+              const active = sourceFilter === chip.id;
+              return (
+                <Pressable
+                  key={chip.id}
+                  onPress={() => { setSourceFilter(chip.id); Haptics.selectionAsync(); }}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  style={[styles.libraryChip, { backgroundColor: active ? theme.accent : theme.surfaceAlt, borderColor: active ? theme.accent : theme.line }]}
+                >
+                  <Text style={{ color: active ? theme.accentText : theme.muted, fontFamily: theme.fontBodyMedium, fontSize: 11 }}>{chip.label}</Text>
+                </Pressable>
+              );
+            })}
+            <Pressable
+              onPress={() => { setFavoritesOnly((v) => !v); Haptics.selectionAsync(); }}
+              accessibilityRole="button"
+              accessibilityLabel="Show favorites only"
+              accessibilityState={{ selected: favoritesOnly }}
+              style={[styles.libraryChip, { backgroundColor: favoritesOnly ? theme.accent : theme.surfaceAlt, borderColor: favoritesOnly ? theme.accent : theme.line }]}
+            >
+              <Icon name={favoritesOnly ? "favoriteFilled" : "favorite"} size={13} color={favoritesOnly ? theme.accentText : theme.muted} />
+            </Pressable>
+            {libraryTags.map((tag) => {
+              const active = activeTag === tag;
+              return (
+                <Pressable
+                  key={`tag-${tag}`}
+                  onPress={() => { setActiveTag(active ? null : tag); Haptics.selectionAsync(); }}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  style={[styles.libraryChip, { backgroundColor: active ? `${theme.accent}22` : theme.surfaceAlt, borderColor: active ? theme.accent : theme.line }]}
+                >
+                  <Text style={{ color: active ? theme.accent : theme.muted, fontFamily: theme.fontBodyMedium, fontSize: 11 }}>#{tag}</Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </View>
+      )}
+
       {library.length === 0 ? (
         <EmptyStock
           icon="sheet"
@@ -1137,9 +1243,13 @@ export default function BuilderScreen() {
           detail="Designs you generate or trace land here, ready to place."
           action={{ label: "Upload design", onPress: pickUpload }}
         />
+      ) : visibleLibrary.length === 0 ? (
+        <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 12, paddingVertical: SPACE.sm }}>
+          Nothing matches these filters.
+        </Text>
       ) : (
         <View style={styles.libraryGrid}>
-          {library.map((d) => (
+          {visibleLibrary.map((d) => (
             <Pressable
               key={d.id}
               onPress={() => addItem(d)}
@@ -1162,6 +1272,11 @@ export default function BuilderScreen() {
                 contentFit="contain"
                 alt={d.title}
               />
+              {d.favorite && (
+                <View style={[styles.favoriteBadge, { backgroundColor: theme.surface }]}>
+                  <Icon name="favoriteFilled" size={10} color={theme.accent} />
+                </View>
+              )}
             </Pressable>
           ))}
         </View>
@@ -1195,9 +1310,17 @@ export default function BuilderScreen() {
               : "Name this sheet"
             : prompt?.kind === "rename-sheet"
               ? "Rename sheet"
-              : "Rename design"
+              : prompt?.kind === "tag-design"
+                ? "Tags, comma-separated"
+                : "Rename design"
         }
-        placeholder={prompt?.kind === "rename-design" ? "Design name" : "Sheet name"}
+        placeholder={
+          prompt?.kind === "tag-design"
+            ? "jake, sleeve, rose"
+            : prompt?.kind === "rename-design"
+              ? "Design name"
+              : "Sheet name"
+        }
         initialValue={prompt?.initial ?? ""}
         confirmLabel={prompt?.kind === "save" && sheetId ? "Update" : "Save"}
         secondary={
@@ -1599,6 +1722,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACE.md,
   },
   libraryGrid: { flexDirection: "row", flexWrap: "wrap", gap: SPACE.xs + SPACE.xs / 3 },
+  libraryTools: { gap: SPACE.xs, marginBottom: SPACE.sm },
+  librarySearch: { minHeight: 44, borderWidth: 1, borderRadius: RADIUS.sm, paddingHorizontal: 12, fontSize: 14 },
+  libraryChips: { flexDirection: "row", gap: SPACE.xs, alignItems: "center" },
+  libraryChip: { minHeight: 32, paddingHorizontal: 12, borderRadius: RADIUS.pill, borderWidth: 1, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 4 },
+  favoriteBadge: { position: "absolute", top: 4, right: 4, width: 18, height: 18, borderRadius: 9, alignItems: "center", justifyContent: "center" },
   libraryThumb: {
     width: 76,
     height: 76,

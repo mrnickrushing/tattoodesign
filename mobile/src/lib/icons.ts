@@ -67,7 +67,9 @@ export type IconName =
   | "camera"
   | "phone"
   | "send"
-  | "water";
+  | "water"
+  | "favorite"
+  | "favoriteFilled";
 
 export type IconDefinition = {
   /** SF Symbol availability is version-gated and validated on device. */
@@ -144,6 +146,8 @@ export const ICONS: Record<IconName, IconDefinition> = {
   phone: { sf: "iphone", ion: "phone-portrait-outline" },
   send: { sf: "paperplane", ion: "send-outline" },
   water: { sf: "drop", ion: "water-outline" },
+  favorite: { sf: "star", ion: "star-outline" },
+  favoriteFilled: { sf: "star.fill", ion: "star" },
 };
 
 /** Returns a usable fallback even if an untyped caller reaches this boundary. */
