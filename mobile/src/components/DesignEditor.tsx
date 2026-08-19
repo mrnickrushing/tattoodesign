@@ -19,7 +19,7 @@ import * as ImagePicker from "expo-image-picker";
 import { File, Paths } from "expo-file-system";
 import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
 import { runOnJS } from "react-native-reanimated";
-import Svg, { Path as SvgPath } from "react-native-svg";
+import Svg, { Line as SvgLine, Path as SvgPath } from "react-native-svg";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useBrand } from "@/context/BrandContext";
 import { Button } from "@/components/Button";
@@ -55,6 +55,17 @@ import { DEFAULT_STENCIL_OPTIONS, stencilize } from "@/lib/stencil";
 import { addCutLine, DEFAULT_CUT_LINE } from "@/lib/cutline";
 import { shareUri } from "@/lib/files";
 import { compareCapture, inspectProduction, wrapForSurface, type ProductionFinding } from "@/lib/productionTools";
+import {
+  DEFAULT_SYMMETRY,
+  MAX_SEGMENTS,
+  MIN_SEGMENTS,
+  clampSegments,
+  replicateStroke,
+  symmetryGuides,
+  type SymmetryAxis,
+  type SymmetryMode,
+  type SymmetrySettings,
+} from "@/lib/symmetry";
 import { RADIUS, SPACE, glow, lift } from "@/lib/theme";
 
 type EditorTool = "select" | "draw" | "erase" | "insert" | "refine" | "crop" | "layers" | "production" | "history";
@@ -100,6 +111,7 @@ export function DesignEditor({
   const [brush, setBrush] = useState(16);
   const [brushColor, setBrushColor] = useState("#111111");
   const [currentStroke, setCurrentStroke] = useState<Point[]>([]);
+  const [symmetry, setSymmetry] = useState<SymmetrySettings>(DEFAULT_SYMMETRY);
   const [cropping, setCropping] = useState(false);
   const [lineWeight, setLineWeight] = useState(1);
   const [threshold, setThreshold] = useState(60);
@@ -200,21 +212,24 @@ export function DesignEditor({
       next = addLayer(next, strokeLayer);
     }
     const id = strokeLayer.id;
+    // Symmetry commits the whole set as one undo step — one gesture, one entry.
+    const paths = replicateStroke(currentStroke, symmetry, project.canvas);
     next = updateLayer(next, id, (layer) => ({
       ...(layer as StrokeLayer),
       strokes: [
         ...(layer as StrokeLayer).strokes,
-        {
-          points: currentStroke,
+        ...paths.map((points) => ({
+          points,
           width: brush / scale,
           color: brushColor,
-          mode: tool === "erase" ? "erase" : "draw",
+          mode: tool === "erase" ? ("erase" as const) : ("draw" as const),
           opacity: 1,
-        },
+        })),
       ],
     }));
     setCurrentStroke([]);
-    await commit(tool === "erase" ? "Mask stroke" : "Brush stroke", next);
+    const base = tool === "erase" ? "Mask stroke" : "Brush stroke";
+    await commit(paths.length > 1 ? `${base} ×${paths.length}` : base, next);
   }
 
   async function transformSelected(patch: Partial<DesignLayer["transform"]>, label: string) {
@@ -396,9 +411,19 @@ export function DesignEditor({
     ]);
   }
 
-  const overlayPath = currentStroke.length
-    ? currentStroke.map((point, index) => `${index ? "L" : "M"}${point.x * scale} ${point.y * scale}`).join(" ")
-    : "";
+  // Preview every path the commit will produce, so the fold is visible while
+  // the finger is still down rather than only after lifting.
+  const overlayPaths = useMemo(() => {
+    if (!project || !currentStroke.length) return [];
+    return replicateStroke(currentStroke, symmetry, project.canvas).map((points) =>
+      points.map((point, index) => `${index ? "L" : "M"}${point.x * scale} ${point.y * scale}`).join(" ")
+    );
+  }, [project, currentStroke, symmetry, scale]);
+
+  const guides = useMemo(() => {
+    if (!project || (tool !== "draw" && tool !== "erase")) return [];
+    return symmetryGuides(symmetry, project.canvas);
+  }, [project, symmetry, tool]);
 
   return (
     <Modal visible animationType="slide" presentationStyle="fullScreen" onRequestClose={confirmClose}>
@@ -461,9 +486,14 @@ export function DesignEditor({
                     <View style={[styles.handle, styles.handleBR, { backgroundColor: theme.accent }]} />
                   </View>
                 )}
-                {!!overlayPath && (
+                {(!!guides.length || !!overlayPaths.length) && (
                   <Svg pointerEvents="none" style={StyleSheet.absoluteFill} width={stageW} height={stageH}>
-                    <SvgPath d={overlayPath} fill="none" stroke={tool === "erase" ? project?.canvas.background ?? "white" : brushColor} strokeWidth={brush} strokeLinecap="round" strokeLinejoin="round" />
+                    {guides.map((guide, index) => (
+                      <SvgLine key={`guide-${index}`} x1={guide.x1 * scale} y1={guide.y1 * scale} x2={guide.x2 * scale} y2={guide.y2 * scale} stroke={theme.accent} strokeWidth={StyleSheet.hairlineWidth * 2} strokeDasharray="6 6" opacity={0.5} />
+                    ))}
+                    {overlayPaths.map((path, index) => (
+                      <SvgPath key={`stroke-${index}`} d={path} fill="none" stroke={tool === "erase" ? project?.canvas.background ?? "white" : brushColor} strokeWidth={brush} strokeLinecap="round" strokeLinejoin="round" opacity={index ? 0.75 : 1} />
+                    ))}
                   </Svg>
                 )}
                 {busy && <View style={[styles.loading, { backgroundColor: `${theme.background}aa` }]}><ActivityIndicator color={theme.accent} /><Text style={{ color: theme.foreground, fontFamily: theme.fontBodyMedium, fontSize: 11 }}>RENDERING FULL RESOLUTION</Text></View>}
@@ -494,6 +524,8 @@ export function DesignEditor({
               brushColor={brushColor}
               threshold={threshold}
               lineWeight={lineWeight}
+              symmetry={symmetry}
+              onSymmetry={setSymmetry}
               onBrush={setBrush}
               onBrushColor={setBrushColor}
               onThreshold={setThreshold}
@@ -539,6 +571,8 @@ function Inspector({
   brushColor,
   threshold,
   lineWeight,
+  symmetry,
+  onSymmetry,
   onBrush,
   onBrushColor,
   onThreshold,
@@ -567,6 +601,8 @@ function Inspector({
   brushColor: string;
   threshold: number;
   lineWeight: number;
+  symmetry: SymmetrySettings;
+  onSymmetry: (value: SymmetrySettings) => void;
   onBrush: (value: number) => void;
   onBrushColor: (value: string) => void;
   onThreshold: (value: number) => void;
@@ -600,6 +636,7 @@ function Inspector({
             <Pressable key={color} onPress={() => onBrushColor(color)} accessibilityLabel={`Brush color ${color}`} style={[styles.swatch, { backgroundColor: color, borderColor: color === brushColor ? theme.accent : theme.line }]} />
           ))}
         </View>
+        <SymmetryControls symmetry={symmetry} onSymmetry={onSymmetry} />
       </PanelTitle>
     );
   }
@@ -724,6 +761,73 @@ function SliderRow({ label, value, min, max, step, display, onChange }: { label:
   return <View style={styles.sliderRow}><View style={styles.sliderTop}><Text style={{ color: theme.foreground, fontFamily: theme.fontBody, fontSize: 12 }}>{label}</Text><Text style={{ color: theme.accent, fontFamily: theme.fontBodyMedium, fontSize: 11, fontVariant: ["tabular-nums"] }}>{display}</Text></View><Slider minimumValue={min} maximumValue={max} step={step} value={value} onValueChange={onChange} onSlidingComplete={() => Haptics.selectionAsync()} minimumTrackTintColor={theme.accent} maximumTrackTintColor={theme.line} thumbTintColor={theme.accent} accessibilityLabel={label} /></View>;
 }
 
+const SYMMETRY_MODES: { id: SymmetryMode; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+  { id: "off", label: "Off", icon: "close-outline" },
+  { id: "mirror", label: "Mirror", icon: "swap-horizontal-outline" },
+  { id: "radial", label: "Radial", icon: "sync-outline" },
+];
+
+const SYMMETRY_AXES: { id: SymmetryAxis; label: string }[] = [
+  { id: "vertical", label: "Vertical" },
+  { id: "horizontal", label: "Horizontal" },
+  { id: "both", label: "Quad" },
+];
+
+function SymmetryControls({ symmetry, onSymmetry }: { symmetry: SymmetrySettings; onSymmetry: (value: SymmetrySettings) => void }) {
+  const { theme } = useBrand();
+  return (
+    <View style={styles.symmetryBlock}>
+      <Text style={{ color: theme.muted, fontFamily: theme.fontBodyMedium, fontSize: 10, letterSpacing: 1 }}>SYMMETRY</Text>
+      <View style={styles.segmentRow}>
+        {SYMMETRY_MODES.map((item) => {
+          const active = item.id === symmetry.mode;
+          return (
+            <Pressable
+              key={item.id}
+              onPress={() => { onSymmetry({ ...symmetry, mode: item.id }); Haptics.selectionAsync(); }}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+              style={[styles.symmetryChip, { backgroundColor: active ? theme.accent : theme.surfaceAlt, borderColor: active ? theme.accent : theme.line }]}
+            >
+              <Ionicons name={item.icon} size={15} color={active ? theme.accentText : theme.foreground} />
+              <Text style={{ color: active ? theme.accentText : theme.muted, fontFamily: theme.fontBodyMedium, fontSize: 10 }}>{item.label.toUpperCase()}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      {symmetry.mode === "mirror" && (
+        <View style={styles.segmentRow}>
+          {SYMMETRY_AXES.map((item) => {
+            const active = item.id === symmetry.axis;
+            return (
+              <Pressable
+                key={item.id}
+                onPress={() => { onSymmetry({ ...symmetry, axis: item.id }); Haptics.selectionAsync(); }}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                style={[styles.symmetryChip, { backgroundColor: active ? `${theme.accent}22` : theme.surfaceAlt, borderColor: active ? theme.accent : theme.line }]}
+              >
+                <Text style={{ color: active ? theme.accent : theme.muted, fontFamily: theme.fontBodyMedium, fontSize: 10 }}>{item.label.toUpperCase()}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      )}
+      {symmetry.mode === "radial" && (
+        <SliderRow
+          label="Segments"
+          value={symmetry.segments}
+          min={MIN_SEGMENTS}
+          max={MAX_SEGMENTS}
+          step={1}
+          display={`${clampSegments(symmetry.segments)}×`}
+          onChange={(value) => onSymmetry({ ...symmetry, segments: clampSegments(value) })}
+        />
+      )}
+    </View>
+  );
+}
+
 function MiniAction({ icon, label, onPress, danger = false }: { icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void; danger?: boolean }) {
   const { theme } = useBrand();
   return <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={label} style={[styles.miniAction, { backgroundColor: theme.surfaceAlt, borderColor: danger ? theme.danger : theme.line }]}><Ionicons name={icon} size={17} color={danger ? theme.danger : theme.foreground} /><Text numberOfLines={1} style={{ color: danger ? theme.danger : theme.muted, fontFamily: theme.fontBodyMedium, fontSize: 9 }}>{label.toUpperCase()}</Text></Pressable>;
@@ -759,6 +863,8 @@ const styles = StyleSheet.create({
   sliderRow: { marginTop: SPACE.xs },
   sliderTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   segmentRow: { flexDirection: "row", gap: SPACE.sm, marginTop: SPACE.sm },
+  symmetryBlock: { marginTop: SPACE.md, gap: SPACE.xs },
+  symmetryChip: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, paddingVertical: SPACE.xs, borderRadius: RADIUS.sm, borderWidth: 1 },
   swatch: { width: 32, height: 32, borderRadius: 16, borderWidth: 3 },
   actionRow: { flexDirection: "row", gap: SPACE.xs, marginTop: SPACE.xs },
   miniAction: { flex: 1, minHeight: 52, borderWidth: 1, borderRadius: RADIUS.sm, alignItems: "center", justifyContent: "center", gap: 4, paddingHorizontal: 3 },
