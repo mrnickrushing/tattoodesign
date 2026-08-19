@@ -64,6 +64,8 @@ import { shareUri } from "@/lib/files";
 import { compareCapture, inspectProduction, simulateHealing, wrapForSurface, type ProductionFinding } from "@/lib/productionTools";
 import { HEAL_AGES, type HealAge } from "@/lib/healing";
 import { MIN_LINE_GAP_MM, checkLineSpacing, pxPerMmFromDpi, spacingFinding } from "@/lib/spacing";
+import { LETTERING_STYLES, letteringStyle, type LetteringStyleId } from "@/lib/lettering";
+import { renderLettering } from "@/lib/letteringRender";
 import {
   DEFAULT_SYMMETRY,
   MAX_SEGMENTS,
@@ -130,6 +132,9 @@ export function DesignEditor({
   const [brushColor, setBrushColor] = useState("#111111");
   const [currentStroke, setCurrentStroke] = useState<Point[]>([]);
   const [symmetry, setSymmetry] = useState<SymmetrySettings>(DEFAULT_SYMMETRY);
+  const [letteringText, setLetteringText] = useState("");
+  const [letteringStyleId, setLetteringStyleId] = useState<LetteringStyleId>("script");
+  const [letteringCurve, setLetteringCurve] = useState(0);
   const [cropping, setCropping] = useState(false);
   const [lineWeight, setLineWeight] = useState(1);
   const [threshold, setThreshold] = useState(60);
@@ -384,6 +389,61 @@ export function DesignEditor({
     }
   }
 
+  async function addLettering() {
+    if (!project || !letteringText.trim()) return;
+    setBusy(true);
+    try {
+      const style = letteringStyle(letteringStyleId);
+      const rendered = await renderLettering(letteringText, letteringStyleId, {
+        curve: letteringCurve,
+      });
+      const { mask, width, height } = await stencilMask(rendered.dataUrl, {
+        ...DEFAULT_STENCIL_OPTIONS,
+        mode: "photocopy",
+        maxDimension: TRACE_MAX_DIMENSION,
+      });
+      const paths = tracePolylines(skeletonize(mask, width, height), width, height, {
+        ...DEFAULT_TRACE,
+        simplifyTolerance: style.simplifyTolerance,
+      });
+      if (!paths.length) {
+        setError("The lettering traced to nothing — try a larger size or simpler text.");
+        return;
+      }
+      // Scale to a comfortable share of the canvas and centre it.
+      const target = project.canvas.width * 0.8;
+      const toCanvas = target / width;
+      const offsetX = (project.canvas.width - width * toCanvas) / 2;
+      const offsetY = (project.canvas.height - height * toCanvas) / 2;
+      const scaled = paths.map((points) =>
+        points.map((point) => ({ x: point.x * toCanvas + offsetX, y: point.y * toCanvas + offsetY }))
+      );
+      const layer = polylinesToStrokeLayer(
+        scaled,
+        project.canvas.width,
+        project.canvas.height,
+        Math.max(1.5, 2 * toCanvas),
+        brushColor,
+        `Lettering · ${letteringText.trim().slice(0, 18)}`
+      );
+      await commit(`Add lettering "${letteringText.trim().slice(0, 14)}"`, addLayer(project, layer));
+
+      // Script bleeds where letters nearly touch — check it immediately at
+      // print density and surface the reading with the other findings.
+      const minGapMm = MIN_LINE_GAP_MM[brand.id];
+      const report = checkLineSpacing(scaled, pxPerMmFromDpi(PRINT_DPI), minGapMm);
+      setFindings((current) => [
+        ...current.filter((finding) => finding.title !== "Line spacing"),
+        spacingFinding(report, brand.id, minGapMm),
+      ]);
+      setLetteringText("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't trace the lettering.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function save(replace: boolean) {
     if (!project || !preview) return;
     setBusy(true);
@@ -631,6 +691,13 @@ export function DesignEditor({
               lineWeight={lineWeight}
               symmetry={symmetry}
               onSymmetry={setSymmetry}
+              letteringText={letteringText}
+              letteringStyleId={letteringStyleId}
+              letteringCurve={letteringCurve}
+              onLetteringText={setLetteringText}
+              onLetteringStyle={setLetteringStyleId}
+              onLetteringCurve={setLetteringCurve}
+              onAddLettering={addLettering}
               onBrush={setBrush}
               onBrushColor={setBrushColor}
               onThreshold={setThreshold}
@@ -682,6 +749,13 @@ function Inspector({
   lineWeight,
   symmetry,
   onSymmetry,
+  letteringText,
+  letteringStyleId,
+  letteringCurve,
+  onLetteringText,
+  onLetteringStyle,
+  onLetteringCurve,
+  onAddLettering,
   onBrush,
   onBrushColor,
   onThreshold,
@@ -715,6 +789,13 @@ function Inspector({
   lineWeight: number;
   symmetry: SymmetrySettings;
   onSymmetry: (value: SymmetrySettings) => void;
+  letteringText: string;
+  letteringStyleId: LetteringStyleId;
+  letteringCurve: number;
+  onLetteringText: (value: string) => void;
+  onLetteringStyle: (value: LetteringStyleId) => void;
+  onLetteringCurve: (value: number) => void;
+  onAddLettering: () => void;
   onBrush: (value: number) => void;
   onBrushColor: (value: string) => void;
   onThreshold: (value: number) => void;
@@ -788,6 +869,46 @@ function Inspector({
         {selected?.kind === "text" && (
           <TextInput value={selected.text} onChangeText={(text) => onProject("Edit text", updateLayer(project, selected.id, (layer) => ({ ...(layer as Extract<DesignLayer, { kind: "text" }>), text })))} placeholder="Text" placeholderTextColor={theme.muted} style={[styles.textInput, { color: theme.foreground, backgroundColor: theme.surfaceAlt, borderColor: theme.line }]} />
         )}
+        <View style={styles.symmetryBlock}>
+          <Text style={{ color: theme.muted, fontFamily: theme.fontBodyMedium, fontSize: 10, letterSpacing: 1 }}>LETTERING</Text>
+          <TextInput
+            value={letteringText}
+            onChangeText={onLetteringText}
+            placeholder="Name, date, or a line of script"
+            placeholderTextColor={theme.muted}
+            accessibilityLabel="Lettering text"
+            style={[styles.textInput, { color: theme.foreground, backgroundColor: theme.surfaceAlt, borderColor: theme.line }]}
+          />
+          <View style={styles.segmentRow}>
+            {LETTERING_STYLES.map((item) => {
+              const active = item.id === letteringStyleId;
+              return (
+                <Pressable
+                  key={item.id}
+                  onPress={() => { onLetteringStyle(item.id); Haptics.selectionAsync(); }}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  style={[styles.symmetryChip, { backgroundColor: active ? theme.accent : theme.surfaceAlt, borderColor: active ? theme.accent : theme.line }]}
+                >
+                  <Text style={{ color: active ? theme.accentText : theme.muted, fontFamily: theme.fontBodyMedium, fontSize: 10 }}>{item.label.toUpperCase()}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <SliderRow
+            label="Baseline curve"
+            value={letteringCurve}
+            min={-1}
+            max={1}
+            step={0.05}
+            display={letteringCurve === 0 ? "Straight" : `${letteringCurve > 0 ? "Arch" : "Valley"} ${Math.round(Math.abs(letteringCurve) * 100)}%`}
+            onChange={onLetteringCurve}
+          />
+          <Button label="Trace lettering to strokes" icon="text-outline" variant="primary" onPress={onAddLettering} disabled={!letteringText.trim()} />
+          <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 10, lineHeight: 14 }}>
+            Renders in the chosen face, then traces to editable vector strokes — scalable, node-editable, checked for line spacing at print size.
+          </Text>
+        </View>
       </PanelTitle>
     );
   }
