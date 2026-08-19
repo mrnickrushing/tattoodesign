@@ -129,12 +129,21 @@ export async function POST(req: NextRequest) {
         faithful: "Follow the reference's silhouette, placement, and defining details as closely as possible.",
       }[reference.strength]
     : "";
+  // Line styles get the hard stencil rule; tonal styles (black & grey realism,
+  // dotwork) declare their own ink constraint because "no shading, no gray"
+  // would forbid the entire point of the style.
+  const inkConstraint =
+    style.inkConstraint ??
+    "Pure black ink linework only, no shading, no color, no gradients, no gray.";
+  const outlineDirection = style.inkConstraint
+    ? `Crisp, production-ready rendering ${brand.generate.outputFraming}.`
+    : `Clean unbroken outlines ${brand.generate.outputFraming}.`;
   const fullPrompt = [
     `${brand.generate.subjectFraming}: ${prompt}.`,
     style.promptDescription + ".",
-    "Pure black ink linework only, no shading, no color, no gradients, no gray.",
+    inkConstraint,
     "Isolated on a solid pure white background, centered composition.",
-    `Clean unbroken outlines ${brand.generate.outputFraming}.`,
+    outlineDirection,
     referenceDirection,
   ].filter(Boolean).join(" ");
 
