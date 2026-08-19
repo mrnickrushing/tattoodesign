@@ -23,6 +23,7 @@ import {
   type StencilOptions,
 } from "@/lib/stencil";
 import { PREF_KEYS, preferences } from "@/lib/preferences";
+import { BatchConvert } from "@/components/BatchConvert";
 import { DEFAULT_TRACE, skeletonize, tracePolylines } from "@/lib/vectorize";
 import type { Point } from "@/lib/designProject";
 import {
@@ -107,6 +108,7 @@ export default function ConvertScreen() {
     "source" | "result" | null
   >(null);
   const [sourceDesign, setSourceDesign] = useState<LibraryDesign | null>(null);
+  const [batching, setBatching] = useState(false);
   const [resultDesign, setResultDesign] = useState<LibraryDesign | null>(null);
 
   // Trace settings persist per brand — dialing in the same threshold every
@@ -164,6 +166,16 @@ export default function ConvertScreen() {
     },
     [opts, brand.id],
   );
+
+  function finishBatch(added: number) {
+    setBatching(false);
+    if (added > 0) {
+      Alert.alert(
+        "Batch added",
+        `${added} traced design${added === 1 ? "" : "s"} landed in the library under today's batch tag.`
+      );
+    }
+  }
 
   async function pickImage() {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -312,6 +324,12 @@ export default function ConvertScreen() {
           label="Open Files"
           icon="folder-open-outline"
           onPress={pickFromFiles}
+          style={{ flex: 1 }}
+        />
+        <Button
+          label="Batch"
+          icon="albums-outline"
+          onPress={() => setBatching(true)}
           style={{ flex: 1 }}
         />
         <Button
@@ -619,6 +637,13 @@ export default function ConvertScreen() {
             setEditing(null);
             setEditingTarget(null);
           }}
+        />
+      )}
+          {batching && (
+        <BatchConvert
+          options={opts}
+          onDone={finishBatch}
+          onClose={() => setBatching(false)}
         />
       )}
     </ScrollView>
