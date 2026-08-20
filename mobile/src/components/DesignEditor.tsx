@@ -72,6 +72,16 @@ import {
   type PenSettings,
 } from "@/lib/penInput";
 import { renderStroke } from "@/lib/ribbon";
+import {
+  DEFAULT_BANDS,
+  MAX_BANDS,
+  MIN_BANDS,
+  defaultPlan,
+  type BandStrategy,
+  type SeparationPlan,
+} from "@/lib/tone";
+import { DEFAULT_SHADING, SHADING_STYLES, type ShadingOptions, type ShadingStyle } from "@/lib/shading";
+import { shadingLayers, toneStudy, type ToneStudy } from "@/lib/toneSeparate";
 import { LETTERING_STYLES, letteringStyle, type LetteringStyleId } from "@/lib/lettering";
 import { DEFAULT_CLEANUP, applyCleanup, cleanupReport } from "@/lib/cleanup";
 import {
@@ -98,7 +108,7 @@ import {
 import { ICONS, type IconName } from "@/lib/icons";
 import { RADIUS, SPACE, TYPE, glow, lift, type Theme } from "@/lib/theme";
 
-type EditorTool = "select" | "draw" | "erase" | "nodes" | "insert" | "refine" | "crop" | "layers" | "production" | "history";
+type EditorTool = "select" | "draw" | "erase" | "nodes" | "insert" | "refine" | "tone" | "crop" | "layers" | "production" | "history";
 
 type SaveResult = { id: string; title: string };
 
@@ -116,6 +126,7 @@ const TOOLS: { id: EditorTool; label: string; icon: IconName }[] = [
   { id: "nodes", label: "Nodes", icon: "nodes" },
   { id: "insert", label: "Add", icon: "add" },
   { id: "refine", label: "Lines", icon: "branch" },
+  { id: "tone", label: "Tone", icon: "tone" },
   { id: "crop", label: "Crop", icon: "crop" },
   { id: "layers", label: "Layers", icon: "layers" },
   { id: "production", label: "Pro", icon: "production" },
@@ -130,6 +141,47 @@ const TRACE_MAX_DIMENSION = 1400;
 // Faint enough that black linework reads clearly on top, strong enough to
 // still see what you are tracing.
 const UNDERLAY_OPACITY = 0.3;
+
+/** Names for the values, darkest first — what an artist would call them. */
+const BAND_LABELS = ["Core black", "Shadow", "Mid tone", "Light", "Highlight", "Paper"];
+
+/** Resize a plan without losing the choices already made for surviving bands. */
+function resizePlan(plan: SeparationPlan, bands: number): SeparationPlan {
+  const fresh = defaultPlan(bands);
+  return {
+    ...fresh,
+    strategy: plan.strategy,
+    passes: fresh.passes.map((pass, index) => plan.passes[index] ?? pass),
+  };
+}
+
+/** Switch one band to a style, or to bare paper. */
+function setPass(plan: SeparationPlan, band: number, style: ShadingStyle | null): SeparationPlan {
+  const fallback = defaultPlan(plan.bands).passes[band]?.shading;
+  return {
+    ...plan,
+    passes: plan.passes.map((pass, index) =>
+      index !== band
+        ? pass
+        : {
+            shading: style
+              ? // Keep whatever density and angle were already dialled in, so
+                // trying a technique does not throw away the tuning.
+                { ...(pass.shading ?? fallback ?? DEFAULT_SHADING), style }
+              : null,
+          }
+    ),
+  };
+}
+
+function patchPass(plan: SeparationPlan, band: number, patch: Partial<ShadingOptions>): SeparationPlan {
+  return {
+    ...plan,
+    passes: plan.passes.map((pass, index) =>
+      index !== band || !pass.shading ? pass : { shading: { ...pass.shading, ...patch } }
+    ),
+  };
+}
 
 /** A raster layer currently serving as a tracing reference. */
 function isUnderlay(layer: DesignLayer): boolean {
@@ -208,6 +260,8 @@ export function DesignEditor({
   const [findings, setFindings] = useState<ProductionFinding[]>([]);
   const [healAge, setHealAge] = useState<HealAge>("fresh");
   const [healed, setHealed] = useState<string | null>(null);
+  const [plan, setPlan] = useState<SeparationPlan>(() => defaultPlan(DEFAULT_BANDS));
+  const [study, setStudy] = useState<ToneStudy | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -289,6 +343,9 @@ export function DesignEditor({
       const flattened = await renderProject(bumped);
       setProject(bumped);
       setPreview(flattened);
+      // A study of the previous artwork would quietly keep being shown over
+      // the new one. Better to make it obviously absent than subtly wrong.
+      setStudy(null);
       setHealed(null);
       setHealAge("fresh");
       setDirty(true);
@@ -534,6 +591,52 @@ export function DesignEditor({
       await commit(kind === "stencil" ? "Refine linework" : "Add cut line", result.project);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't process the linework.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * The value study. Judged before any marks are made — if this does not read
+   * as the subject, no amount of shading technique will save the stencil made
+   * from it.
+   */
+  async function runToneStudy(next: SeparationPlan) {
+    setPlan(next);
+    if (!preview) return;
+    setBusy(true);
+    try {
+      setStudy(toneStudy(preview, next.bands, next.strategy));
+      setError(null);
+    } catch (e) {
+      setStudy(null);
+      setError(e instanceof Error ? e.message : "The value study couldn't be built.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * Turns the study into layers: one per band the plan inks, darkest on top.
+   *
+   * The source stays visible and untouched. Shading you cannot compare against
+   * the thing it came from is shading you cannot judge, and the layer panel is
+   * where it gets turned off once it has been judged.
+   */
+  async function applySeparation() {
+    if (!project || !preview) return;
+    setBusy(true);
+    try {
+      const { layers, marks } = shadingLayers(preview, plan, project.canvas.width, project.canvas.height);
+      if (!layers.length) {
+        setError("No band in this plan produces marks. Give a darker band a style and try again.");
+        return;
+      }
+      let next = project;
+      for (const layer of layers) next = addLayer(next, layer);
+      await commit(`Tone separation · ${layers.length} layer${layers.length === 1 ? "" : "s"}, ${marks} marks`, next);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "The separation couldn't be applied.");
     } finally {
       setBusy(false);
     }
@@ -884,6 +987,12 @@ export function DesignEditor({
                 <Icon name="layers" size={TYPE.caption.fontSize} color={theme.muted} />
                 <Text style={[TYPE.micro, { color: theme.muted, fontFamily: theme.fontBodyMedium }]}>{showOriginal ? "EDITED" : "ORIGINAL"}</Text>
               </Pressable>
+              {tool === "tone" && !!study && !showOriginal && (
+                <View style={[styles.livePill, { backgroundColor: `${theme.accent}18` }]}>
+                  <Icon name="tone" size={TYPE.caption.fontSize} color={theme.accent} />
+                  <Text style={[styles.liveText, { color: theme.accent, fontFamily: theme.fontBodyMedium }]}>VALUE STUDY</Text>
+                </View>
+              )}
               {!!healed && !showOriginal && (
                 <View style={[styles.livePill, { backgroundColor: `${theme.accent}18` }]}>
                   <Icon name="history" size={TYPE.caption.fontSize} color={theme.accent} />
@@ -913,9 +1022,19 @@ export function DesignEditor({
                   intensity={0.5}
                   style={{ backgroundColor: project?.canvas.background ?? theme.stock }}
                 />
-                {(showOriginal ? originalPreview : healed ?? preview) && (
-                  <Image source={{ uri: (showOriginal ? originalPreview : healed ?? preview)! }} style={StyleSheet.absoluteFill} contentFit="fill" alt={project?.title ?? design.title} />
-                )}
+                {(() => {
+                  // The value study replaces the preview while the tone tool is
+                  // open, because the only way to judge a separation is to look
+                  // at it in place of the picture it came from.
+                  const shown = showOriginal
+                    ? originalPreview
+                    : tool === "tone" && study
+                      ? study.dataUrl
+                      : healed ?? preview;
+                  return shown ? (
+                    <Image source={{ uri: shown }} style={StyleSheet.absoluteFill} contentFit="fill" alt={project?.title ?? design.title} />
+                  ) : null;
+                })()}
                 {showGrid && <View pointerEvents="none" style={StyleSheet.absoluteFill}>{[1, 2, 3].map(index => <View key={`v${index}`} style={[styles.gridLine, { left: `${index * 25}%`, top: 0, bottom: 0, width: StyleSheet.hairlineWidth, backgroundColor: theme.accent }]} />)}{[1, 2, 3].map(index => <View key={`h${index}`} style={[styles.gridLine, { top: `${index * 25}%`, left: 0, right: 0, height: StyleSheet.hairlineWidth, backgroundColor: theme.accent }]} />)}</View>}
                 {!!selected && tool === "select" && !showOriginal && (
                   <View
@@ -1018,6 +1137,11 @@ export function DesignEditor({
               onBrushColor={rememberBrushColor}
               pen={pen}
               onPen={rememberPen}
+              plan={plan}
+              study={study}
+              onPlan={setPlan}
+              onStudy={runToneStudy}
+              onSeparate={applySeparation}
               pencilOnly={pencilOnly}
               onPencilOnly={setPencilOnly}
               onThreshold={setThreshold}
@@ -1086,6 +1210,11 @@ function Inspector({
   onBrushColor,
   pen,
   onPen,
+  plan,
+  study,
+  onPlan,
+  onStudy,
+  onSeparate,
   pencilOnly,
   onPencilOnly,
   onThreshold,
@@ -1135,6 +1264,11 @@ function Inspector({
   onLineWeight: (value: number) => void;
   pen: PenSettings;
   onPen: (patch: Partial<PenSettings>) => void;
+  plan: SeparationPlan;
+  study: ToneStudy | null;
+  onPlan: (plan: SeparationPlan) => void;
+  onStudy: (plan: SeparationPlan) => void;
+  onSeparate: () => void;
   pencilOnly: boolean;
   onPencilOnly: (value: boolean) => void;
   onProject: (label: string, project: EditableDesignProject) => void;
@@ -1317,6 +1451,157 @@ function Inspector({
 
   if (tool === "crop") {
     return <PanelTitle icon="crop-outline" title="Crop the project" subtitle="The canvas changes, but source layers remain intact and movable."><Button label="Choose crop" icon="crop-outline" variant="primary" onPress={onCrop} /></PanelTitle>;
+  }
+
+  if (tool === "tone") {
+    const inked = plan.passes.filter((pass) => pass.shading).length;
+    return (
+      <PanelTitle
+        icon="contrast-outline"
+        title="Value study"
+        subtitle="Decide which greys become ink before any line exists. This is the step that separates a stencil from a filter."
+      >
+        <SliderRow
+          label="Values"
+          value={plan.bands}
+          min={MIN_BANDS}
+          max={MAX_BANDS}
+          step={1}
+          display={`${plan.bands}`}
+          onChange={(value) => onPlan(resizePlan(plan, value))}
+        />
+        <View style={styles.segmentRow}>
+          {(
+            [
+              { id: "balanced" as BandStrategy, label: "Balanced" },
+              { id: "even" as BandStrategy, label: "Even" },
+            ]
+          ).map((item) => {
+            const active = plan.strategy === item.id;
+            return (
+              <Pressable
+                key={item.id}
+                onPress={() => {
+                  onPlan({ ...plan, strategy: item.id });
+                  Haptics.selectionAsync();
+                }}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                style={[styles.symmetryChip, { backgroundColor: active ? theme.accent : theme.surfaceAlt, borderColor: active ? theme.accent : theme.line }]}
+              >
+                <Text style={[TYPE.micro, { color: active ? theme.accentText : theme.muted, fontFamily: theme.fontBodyMedium }]}>
+                  {item.label.toUpperCase()}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        <Text style={[TYPE.caption, { color: theme.muted, fontFamily: theme.fontBody }]}>
+          {plan.strategy === "balanced"
+            ? "Each value holds about the same amount of the picture. Separates a photo shot in flat light, which even bands cannot."
+            : "The 0–255 range split into equal slices. Right when the photo already uses its whole range."}
+        </Text>
+
+        {plan.passes.map((pass, band) => (
+          <View key={band} style={styles.symmetryBlock}>
+            <View style={styles.toneHeader}>
+              <View
+                style={[
+                  styles.toneSwatch,
+                  {
+                    backgroundColor: `rgb(${study?.tones[band] ?? 255},${study?.tones[band] ?? 255},${study?.tones[band] ?? 255})`,
+                    borderColor: theme.line,
+                  },
+                ]}
+              />
+              <Text style={[TYPE.caption, { flex: 1, color: theme.foreground, fontFamily: theme.fontBodyMedium }]}>
+                {BAND_LABELS[band] ?? `Value ${band + 1}`}
+              </Text>
+              {!!study && (
+                <Text style={[TYPE.micro, { color: theme.muted, fontFamily: theme.fontBody }]}>
+                  {Math.round((study.coverage[band] ?? 0) * 100)}%
+                </Text>
+              )}
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.segmentRow}>
+              <Pressable
+                onPress={() => onPlan(setPass(plan, band, null))}
+                accessibilityRole="button"
+                accessibilityState={{ selected: !pass.shading }}
+                style={[styles.symmetryChip, { backgroundColor: !pass.shading ? theme.accent : theme.surfaceAlt, borderColor: !pass.shading ? theme.accent : theme.line }]}
+              >
+                <Text style={[TYPE.micro, { color: !pass.shading ? theme.accentText : theme.muted, fontFamily: theme.fontBodyMedium }]}>PAPER</Text>
+              </Pressable>
+              {SHADING_STYLES.map((item) => {
+                const active = pass.shading?.style === item.id;
+                return (
+                  <Pressable
+                    key={item.id}
+                    onPress={() => {
+                      onPlan(setPass(plan, band, item.id));
+                      Haptics.selectionAsync();
+                    }}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                    style={[styles.symmetryChip, { backgroundColor: active ? theme.accent : theme.surfaceAlt, borderColor: active ? theme.accent : theme.line }]}
+                  >
+                    <Text style={[TYPE.micro, { color: active ? theme.accentText : theme.muted, fontFamily: theme.fontBodyMedium }]}>
+                      {item.label.toUpperCase()}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+            {!!pass.shading && (
+              <>
+                <Text style={[TYPE.micro, { color: theme.muted, fontFamily: theme.fontBody }]}>
+                  {SHADING_STYLES.find((item) => item.id === pass.shading?.style)?.caption}
+                </Text>
+                <SliderRow
+                  label="Density"
+                  value={pass.shading.density}
+                  min={0.05}
+                  max={1}
+                  step={0.05}
+                  display={`${Math.round(pass.shading.density * 100)}%`}
+                  onChange={(value) => onPlan(patchPass(plan, band, { density: value }))}
+                />
+                <SliderRow
+                  label="Angle"
+                  value={pass.shading.angle}
+                  min={0}
+                  max={180}
+                  step={5}
+                  display={`${Math.round(pass.shading.angle)}°`}
+                  onChange={(value) => onPlan(patchPass(plan, band, { angle: value }))}
+                />
+                <SliderRow
+                  label="Mark weight"
+                  value={pass.shading.weight}
+                  min={0.5}
+                  max={8}
+                  step={0.5}
+                  display={`${pass.shading.weight} px`}
+                  onChange={(value) => onPlan(patchPass(plan, band, { weight: value }))}
+                />
+              </>
+            )}
+          </View>
+        ))}
+
+        <Button label={study ? "Rebuild the study" : "Build the value study"} icon="contrast-outline" onPress={() => onStudy(plan)} />
+        <Button
+          label={`Shade ${inked} value${inked === 1 ? "" : "s"} into layers`}
+          icon="layers-outline"
+          variant="primary"
+          disabled={!inked}
+          onPress={onSeparate}
+        />
+        <Text style={[TYPE.caption, { color: theme.muted, fontFamily: theme.fontBody }]}>
+          Each value becomes its own editable layer, darkest on top. Print the outline alone and keep the shading as reference, or transfer both.
+        </Text>
+      </PanelTitle>
+    );
   }
 
   if (tool === "layers") {
@@ -1758,6 +2043,8 @@ const styles = StyleSheet.create({
   workspaceMeta: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: SPACE.xs, marginBottom: SPACE.xs },
   immersiveBar: { position: "absolute", left: SPACE.sm, right: SPACE.sm, bottom: SPACE.sm, borderRadius: RADIUS.lg, padding: SPACE.sm, gap: SPACE.xs },
   immersiveRow: { flexDirection: "row", alignItems: "center", gap: SPACE.xs },
+  toneHeader: { flexDirection: "row", alignItems: "center", gap: SPACE.xs },
+  toneSwatch: { width: 20, height: 20, borderRadius: RADIUS.sm, borderWidth: 1 },
   immersiveButton: { width: 42, height: 42, borderRadius: RADIUS.pill, alignItems: "center", justifyContent: "center" },
   livePill: { flexDirection: "row", alignItems: "center", gap: 6, borderRadius: RADIUS.pill, paddingHorizontal: 9, paddingVertical: 5 },
   liveDot: { width: 6, height: 6, borderRadius: 3 },

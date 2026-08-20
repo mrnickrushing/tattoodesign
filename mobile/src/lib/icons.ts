@@ -28,6 +28,7 @@ export type IconName =
   | "swap"
   | "expand"
   | "collapse"
+  | "tone"
   | "flash"
   | "palette"
   | "contrast"
@@ -108,6 +109,7 @@ export const ICONS: Record<IconName, IconDefinition> = {
   swap: { sf: "arrow.left.arrow.right", ion: "swap-horizontal" },
   expand: { sf: "arrow.up.left.and.arrow.down.right", ion: "expand-outline" },
   collapse: { sf: "arrow.down.right.and.arrow.up.left", ion: "contract-outline" },
+  tone: { sf: "circle.lefthalf.filled", ion: "contrast-outline" },
   flash: { sf: "bolt.fill", ion: "flash" },
   palette: { sf: "paintpalette", ion: "color-palette" },
   contrast: { sf: "circle.lefthalf.filled", ion: "contrast-outline" },
