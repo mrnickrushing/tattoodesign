@@ -78,7 +78,9 @@ import { PaperSubstrate } from "@/components/PaperSubstrate";
 import { getPrinterProfile, savePrinterProfile, type PrinterProfile } from "@/lib/printerProfiles";
 import { type IconName } from "@/lib/icons";
 import { SPACE, RADIUS, TYPE, lift } from "@/lib/theme";
-import { CONTENT_MAX_WIDTH, useContentBottomInset } from "@/lib/chrome";
+import { useContentBottomInset, useContentWidth } from "@/lib/chrome";
+import { contextMenuProps, useArrowNudge, useShortcut } from "@/lib/desktopInput";
+import { SHORTCUTS } from "@/lib/shortcuts";
 
 type SheetTemplate = { id: string; label: string; widthIn: number; heightIn: number };
 
@@ -133,6 +135,7 @@ function clamp(value: number, min: number, max: number) {
 export default function BuilderScreen() {
   const { brand, theme } = useBrand();
   const bottomInset = useContentBottomInset();
+  const contentWidth = useContentWidth("canvas");
   const { sheet: requestedSheetId } = useLocalSearchParams<{ sheet?: string }>();
   const { width: screenWidth } = useWindowDimensions();
 
@@ -540,6 +543,29 @@ export default function BuilderScreen() {
     setSelectedId(null);
     setSyncKey((k) => k + 1);
   }
+
+  // A laptop has a keyboard sitting right there doing nothing, while every
+  // action needs a press-and-hold or a pinch that a mouse cannot perform.
+  useShortcut(SHORTCUTS.undo, history.length ? undo : null);
+  useShortcut(SHORTCUTS.remove, selectedId ? removeSelected : null);
+  useShortcut(SHORTCUTS.removeAlt, selectedId ? removeSelected : null);
+  useShortcut(SHORTCUTS.close, selectedId ? () => setSelectedId(null) : null);
+  useArrowNudge(
+    selectedId
+      ? (delta, coarse) => {
+          const item = items.find((i) => i.id === selectedId);
+          if (!item || item.locked) return;
+          // An eighth of an inch matches the precision grid; Shift moves a
+          // whole one, which is the difference between nudging and placing.
+          const step = coarse ? 1 : 0.125;
+          commitItem(item.id, {
+            ...item,
+            xIn: item.xIn + delta.x * step,
+            yIn: item.yIn + delta.y * step,
+          });
+        }
+      : null
+  );
 
   function removeSelected() {
     if (!selectedId) return;
@@ -1092,7 +1118,7 @@ export default function BuilderScreen() {
   return (
     <ScrollView
       style={{ backgroundColor: theme.background }}
-      contentContainerStyle={[styles.scroll, { paddingBottom: bottomInset, maxWidth: CONTENT_MAX_WIDTH, width: "100%", alignSelf: "center" }]}
+      contentContainerStyle={[styles.scroll, { paddingBottom: bottomInset, width: "100%", ...contentWidth }]}
     >
       <ScreenHeader
         eyebrow={brand.builder.tabLabel}
@@ -1484,9 +1510,12 @@ export default function BuilderScreen() {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                 setMenu(d);
               }}
+              // With a mouse, long-press is press-and-wait-and-hope. The right
+              // button is what that gesture means on a laptop.
+              {...contextMenuProps(() => setMenu(d))}
               accessibilityRole="button"
               accessibilityLabel={`Add ${d.title} to sheet`}
-              accessibilityHint="Long press for more actions"
+              accessibilityHint="Long press or right-click for more actions"
               style={({ pressed }) => [
                 styles.libraryThumb,
                 { borderColor: theme.line, backgroundColor: theme.stock, opacity: pressed ? 0.7 : 1 },

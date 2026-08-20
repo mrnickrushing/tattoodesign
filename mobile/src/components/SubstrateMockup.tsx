@@ -31,7 +31,7 @@ import {
   type Substrate,
 } from "@/lib/substrate";
 import { RADIUS, SPACE, TYPE } from "@/lib/theme";
-import { CONTENT_MAX_WIDTH } from "@/lib/chrome";
+import { READING_MAX_WIDTH } from "@/lib/chrome";
 
 /**
  * What it looks like on the actual thing.
@@ -474,7 +474,7 @@ function PlacedDesign({
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  screen: { flex: 1, paddingHorizontal: SPACE.md, width: "100%", maxWidth: CONTENT_MAX_WIDTH, alignSelf: "center" },
+  screen: { flex: 1, paddingHorizontal: SPACE.md, width: "100%", maxWidth: READING_MAX_WIDTH, alignSelf: "center" },
   topbar: { flexDirection: "row", alignItems: "center", gap: SPACE.sm, paddingVertical: SPACE.sm },
   iconButton: { width: 38, height: 38, borderRadius: RADIUS.pill, alignItems: "center", justifyContent: "center" },
   stageWrap: { alignItems: "center", justifyContent: "center" },

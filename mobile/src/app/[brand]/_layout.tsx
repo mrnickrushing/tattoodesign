@@ -1,4 +1,4 @@
-import { View, Text, Pressable, StyleSheet } from "react-native";
+import { View, Text, Pressable, StyleSheet, useWindowDimensions } from "react-native";
 import { Tabs, useLocalSearchParams, router, Redirect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
@@ -10,7 +10,11 @@ import { BrandProvider, useBrand } from "@/context/BrandContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { GlassSurface, hasLiquidGlass } from "@/components/GlassSurface";
 import { Icon } from "@/components/Icon";
+import { isWide } from "@/lib/breakpoints";
 import type { IconName } from "@/lib/icons";
+
+/** Wide enough for the longest tab label without wrapping. */
+const SIDEBAR_WIDTH = 208;
 
 const tabIcons: Record<string, IconName> = {
   index: "home",
@@ -35,6 +39,12 @@ export default function BrandLayout() {
 
 function BrandChrome() {
   const { brand, theme, appearance } = useBrand();
+  const { width } = useWindowDimensions();
+  // On anything laptop-sized the bottom bar is in the wrong place: it is a
+  // thumb affordance on a device nobody is holding, and it wastes the one
+  // dimension a desktop window has plenty of. Moving it to the side is what
+  // stops the app reading as a phone dropped into a browser.
+  const wide = isWide(width);
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.background }}>
@@ -54,23 +64,42 @@ function BrandChrome() {
           screenOptions={({ route }) => ({
             headerShown: false,
             sceneStyle: { backgroundColor: theme.background },
-            tabBarStyle: {
-              // An absolute bar lets the liquid layer refract scrolling content.
-              // Older runtimes retain the exact surfaced bar they shipped with.
-              backgroundColor: hasLiquidGlass ? "transparent" : theme.surface,
-              borderTopColor: theme.line,
-              borderTopWidth: 1,
-              height: SPACE.xxl * 2,
-              paddingTop: SPACE.xs,
-              paddingHorizontal: SPACE.xs,
-              ...(hasLiquidGlass ? { position: "absolute" as const } : {}),
-            },
-            tabBarBackground: hasLiquidGlass ? () => <TabBarGlass brandId={brand.id} /> : undefined,
-            tabBarItemStyle: {
-              borderRadius: RADIUS.lg,
-              marginHorizontal: SPACE.xs - 3,
-              marginVertical: SPACE.xs - 2,
-            },
+            tabBarPosition: wide ? ("left" as const) : ("bottom" as const),
+            tabBarStyle: wide
+              ? {
+                  backgroundColor: theme.surface,
+                  borderRightColor: theme.line,
+                  borderRightWidth: 1,
+                  width: SIDEBAR_WIDTH,
+                  paddingTop: SPACE.md,
+                  paddingHorizontal: SPACE.sm,
+                }
+              : {
+                  // An absolute bar lets the liquid layer refract scrolling
+                  // content. Older runtimes retain the exact surfaced bar they
+                  // shipped with.
+                  backgroundColor: hasLiquidGlass ? "transparent" : theme.surface,
+                  borderTopColor: theme.line,
+                  borderTopWidth: 1,
+                  height: SPACE.xxl * 2,
+                  paddingTop: SPACE.xs,
+                  paddingHorizontal: SPACE.xs,
+                  ...(hasLiquidGlass ? { position: "absolute" as const } : {}),
+                },
+            tabBarBackground: hasLiquidGlass && !wide ? () => <TabBarGlass brandId={brand.id} /> : undefined,
+            tabBarItemStyle: wide
+              ? {
+                  borderRadius: RADIUS.md,
+                  marginHorizontal: 0,
+                  marginVertical: 2,
+                  paddingVertical: SPACE.sm,
+                  justifyContent: "flex-start",
+                }
+              : {
+                  borderRadius: RADIUS.lg,
+                  marginHorizontal: SPACE.xs - 3,
+                  marginVertical: SPACE.xs - 2,
+                },
             tabBarActiveBackgroundColor: `${theme.accent}16`,
             tabBarActiveTintColor: theme.accent,
             tabBarInactiveTintColor: theme.muted,

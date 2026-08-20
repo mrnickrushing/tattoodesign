@@ -72,6 +72,8 @@ import {
   type PenSettings,
 } from "@/lib/penInput";
 import { renderStroke } from "@/lib/ribbon";
+import { useShortcut } from "@/lib/desktopInput";
+import { SHORTCUTS } from "@/lib/shortcuts";
 import { findSurface, maxApparentWidthIn, printScale, surfacesFor } from "@/lib/curveWarp";
 import {
   DEFAULT_BANDS,
@@ -918,6 +920,13 @@ export function DesignEditor({
     file.write(html);
     await shareUri(file.uri);
   }
+
+  // The editor is where a keyboard helps most: undo is the single most-used
+  // action in it, and on a laptop it currently needs a mouse trip to a toolbar
+  // button every time.
+  useShortcut(SHORTCUTS.undo, past.length && !busy ? undo : null);
+  useShortcut(SHORTCUTS.redo, future.length && !busy ? redo : null);
+  useShortcut(SHORTCUTS.close, immersive ? () => setImmersive(false) : confirmClose);
 
   /**
    * Full-screen drawing. Entering from a tool that has nothing to do with the

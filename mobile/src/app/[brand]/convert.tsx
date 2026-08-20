@@ -43,7 +43,8 @@ import { Skeleton } from "@/components/Skeleton";
 import { StencilReveal } from "@/components/StencilReveal";
 import { ScreenHeader, Notice, Card } from "@/components/ui";
 import { RADIUS, SPACE, TYPE } from "@/lib/theme";
-import { CONTENT_MAX_WIDTH, useContentBottomInset } from "@/lib/chrome";
+import { useContentBottomInset, useContentWidth } from "@/lib/chrome";
+import { useFileDrop } from "@/lib/desktopInput";
 
 type RevealTrace = { paths: Point[][]; width: number; height: number };
 
@@ -86,6 +87,7 @@ async function traceConvertedStencil(
 export default function ConvertScreen() {
   const { brand, theme } = useBrand();
   const bottomInset = useContentBottomInset();
+  const contentWidth = useContentWidth("canvas");
   /** The photo as picked. Crops are always taken from this, so re-cropping
    *  never compounds — the second crop isn't a crop of the first. */
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
@@ -189,6 +191,23 @@ export default function ConvertScreen() {
     }
   }
 
+  /**
+   * One way in for a photo, however it arrived — picked, or dropped onto the
+   * window. Sizes are optional because a dropped file has none until it
+   * decodes, and the pipeline reads them off the image anyway.
+   */
+  function acceptPhoto(dataUrl: string, width?: number, height?: number) {
+    setSourceUrl(dataUrl);
+    if (width && height) setSourceSize({ width, height });
+    setCropped(null);
+    setSaved(false);
+    setSourceDesign(null);
+  }
+
+  // On a laptop, dragging a file onto the window is how anyone expects to
+  // bring one in; clicking through a picker is the phone affordance.
+  useFileDrop((dataUrl) => acceptPhoto(dataUrl));
+
   async function pickImage() {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
@@ -205,12 +224,7 @@ export default function ConvertScreen() {
     });
     const asset = result.canceled ? null : result.assets[0];
     if (!asset?.base64) return;
-    const dataUrl = imageDataUrl(asset.base64, asset.mimeType);
-    setSourceUrl(dataUrl);
-    setSourceSize({ width: asset.width, height: asset.height });
-    setCropped(null);
-    setSaved(false);
-    setSourceDesign(null);
+    acceptPhoto(imageDataUrl(asset.base64, asset.mimeType), asset.width, asset.height);
     setResultDesign(null);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   }
@@ -294,7 +308,7 @@ export default function ConvertScreen() {
   return (
     <ScrollView
       style={{ backgroundColor: theme.background }}
-      contentContainerStyle={[styles.scroll, { paddingBottom: bottomInset, maxWidth: CONTENT_MAX_WIDTH, width: "100%", alignSelf: "center" }]}
+      contentContainerStyle={[styles.scroll, { paddingBottom: bottomInset, width: "100%", ...contentWidth }]}
     >
       <ScreenHeader
         eyebrow={brand.convert.tabLabel}
@@ -965,9 +979,16 @@ function RevealedResultPane({
   );
 }
 
+/** Tall enough to judge linework, short enough to sit above the fold. */
+const PANE_MAX_HEIGHT = 460;
+
 const styles = StyleSheet.create({
   scroll: { padding: SPACE.md, paddingTop: SPACE.lg, paddingBottom: SPACE.xxl },
-  panes: { flexDirection: "row", gap: SPACE.sm },
+  // A square pane is right on a phone, where width is the constraint. Given a
+  // laptop's width the same rule makes each pane taller than the window, so
+  // the traced result — the thing you are here to look at — ends up below the
+  // fold. Capped so both panes stay visible at once.
+  panes: { flexDirection: "row", gap: SPACE.sm, maxHeight: PANE_MAX_HEIGHT },
   waitingPane: {
     flex: 1,
     aspectRatio: 1,

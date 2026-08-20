@@ -40,7 +40,7 @@ import { File } from "expo-file-system";
 import { proofHtml, type ProofDesign } from "@/lib/proofSheet";
 import { shareUri } from "@/lib/files";
 import { RADIUS, SPACE, TYPE } from "@/lib/theme";
-import { CONTENT_MAX_WIDTH, useContentBottomInset } from "@/lib/chrome";
+import { useContentBottomInset, useContentWidth } from "@/lib/chrome";
 
 const STATUS: { id: ReviewStatus; label: string }[] = [
   { id: "draft", label: "Draft" },
@@ -52,6 +52,7 @@ const STATUS: { id: ReviewStatus; label: string }[] = [
 export default function ProjectsScreen() {
   const { brand, theme } = useBrand();
   const bottomInset = useContentBottomInset();
+  const contentWidth = useContentWidth("reading");
   const [projects, setProjects] = useState<ClientProject[]>([]);
   const [designs, setDesigns] = useState<LibraryDesign[]>([]);
   const [editing, setEditing] = useState<ClientProject | null>(null);
@@ -228,7 +229,7 @@ export default function ProjectsScreen() {
   return (
     <ScrollView
       style={{ backgroundColor: theme.background }}
-      contentContainerStyle={[styles.scroll, { paddingBottom: bottomInset, maxWidth: CONTENT_MAX_WIDTH, width: "100%", alignSelf: "center" }]}
+      contentContainerStyle={[styles.scroll, { paddingBottom: bottomInset, width: "100%", ...contentWidth }]}
     >
       <ScreenHeader
         eyebrow="Client workspace"
