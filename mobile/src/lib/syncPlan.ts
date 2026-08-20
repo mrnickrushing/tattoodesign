@@ -123,3 +123,24 @@ export function imagesToTransfer(plan: SyncPlan): number {
     (action) => (action.kind === "push" || action.kind === "pull") && action.withImage
   ).length;
 }
+
+/**
+ * A fingerprint of image bytes.
+ *
+ * FNV-1a over the base64 rather than a real digest: this only ever answers
+ * "are these the same bytes as last time", both sides compute it the same way,
+ * and pulling in a crypto dependency to compare two local strings would be
+ * machinery for its own sake. Collisions would mean a stale image; at a few
+ * hundred designs that is not a risk worth a hash library.
+ */
+export function hashImage(dataUrl: string): string {
+  const body = dataUrl.slice(dataUrl.indexOf(",") + 1);
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < body.length; i++) {
+    hash ^= body.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  // Length as well as the hash: cheap, and it separates the one collision
+  // class that actually shows up, which is two differently-sized exports.
+  return `${hash.toString(36)}-${body.length.toString(36)}`;
+}

@@ -9,6 +9,7 @@
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { generateId } from "./id";
+import { hashImage } from "./syncPlan";
 import { stripDataUrlPrefix } from "./files";
 import type { BrandId } from "./brands";
 import { Skia } from "@shopify/react-native-skia";
@@ -34,7 +35,27 @@ export type LibraryDesign = {
   /** Lowercase labels for search — client names, motifs, collections. */
   tags?: string[];
   favorite?: boolean;
+  /**
+   * When this design last changed. Sync orders every decision by it, so any
+   * mutation that does not bump it is a change the other devices never see.
+   * Absent on entries written before sync existed; they fall back to
+   * createdAt, which is the correct "as old as it looks".
+   */
+  updatedAt?: number;
+  /**
+   * A tombstone. Deleting keeps the record so the deletion can travel — a
+   * design merely absent from a device is almost always one it has not seen
+   * yet, and treating that as a deletion is how a sync eats a library.
+   */
+  deleted?: boolean;
+  /** Fingerprint of the image bytes, so unchanged pixels are never re-sent. */
+  imageHash?: string;
 };
+
+/** Last-changed time, tolerating entries that predate sync. */
+export function changedAt(design: LibraryDesign): number {
+  return design.updatedAt ?? design.createdAt;
+}
 
 /** Shape written by the original base64-in-AsyncStorage version. */
 type LegacyDesign = Omit<LibraryDesign, "uri"> & { dataUrl?: string; uri?: string };
@@ -43,7 +64,15 @@ function key(brand: BrandId) {
   return `inkline:design-library:${brand}`;
 }
 
+/**
+ * Everything worth showing. Tombstones are records of a deletion, not designs,
+ * so they never reach a screen — getLibraryWithTombstones is for sync.
+ */
 export async function getLibrary(brand: BrandId): Promise<LibraryDesign[]> {
+  return (await getLibraryWithTombstones(brand)).filter((design) => !design.deleted);
+}
+
+export async function getLibraryWithTombstones(brand: BrandId): Promise<LibraryDesign[]> {
   try {
     const raw = await AsyncStorage.getItem(key(brand));
     if (!raw) return [];
@@ -141,6 +170,8 @@ export async function addToLibrary(
     title: design.title,
     source: design.source,
     createdAt: Date.now(),
+    updatedAt: Date.now(),
+    imageHash: hashImage(design.dataUrl),
     width: decoded?.width(),
     height: decoded?.height(),
   };
@@ -149,13 +180,23 @@ export async function addToLibrary(
 }
 
 export async function removeFromLibrary(brand: BrandId, id: string): Promise<void> {
-  const designs = await getLibrary(brand);
+  const designs = await getLibraryWithTombstones(brand);
   const gone = designs.find((d) => d.id === id);
   if (gone) await deleteDesignImage(brand, gone.file ?? `${gone.id}.png`);
+  // The record stays, marked and timestamped, so the deletion can reach the
+  // other devices. The pixels go immediately — a tombstone is metadata.
   await save(
     brand,
-    designs.filter((d) => d.id !== id)
+    designs.map((d) =>
+      d.id === id ? { ...d, deleted: true, updatedAt: Date.now(), file: undefined, uri: "" } : d
+    )
   );
+}
+
+/** Drops a tombstone for good, once every device has seen the deletion. */
+export async function forgetTombstone(brand: BrandId, id: string): Promise<void> {
+  const designs = await getLibraryWithTombstones(brand);
+  await save(brand, designs.filter((d) => !(d.id === id && d.deleted)));
 }
 
 /**
@@ -173,7 +214,13 @@ export async function replaceInLibrary(
 
   const name = `${id}-${Date.now().toString(36)}.png`;
   const uri = await writeDesignImage(brand, name, dataUrl);
-  const updated: LibraryDesign = { ...existing, file: name, uri };
+  const updated: LibraryDesign = {
+    ...existing,
+    file: name,
+    uri,
+    updatedAt: Date.now(),
+    imageHash: hashImage(dataUrl),
+  };
   await save(
     brand,
     designs.map((d) => (d.id === id ? updated : d))
@@ -191,7 +238,7 @@ export async function setDesignTags(
   const designs = await getLibrary(brand);
   await save(
     brand,
-    designs.map((d) => (d.id === id ? { ...d, tags } : d))
+    designs.map((d) => (d.id === id ? { ...d, tags, updatedAt: Date.now() } : d))
   );
 }
 
@@ -203,7 +250,7 @@ export async function setDesignFavorite(
   const designs = await getLibrary(brand);
   await save(
     brand,
-    designs.map((d) => (d.id === id ? { ...d, favorite } : d))
+    designs.map((d) => (d.id === id ? { ...d, favorite, updatedAt: Date.now() } : d))
   );
 }
 
@@ -215,6 +262,6 @@ export async function renameInLibrary(
   const designs = await getLibrary(brand);
   await save(
     brand,
-    designs.map((d) => (d.id === id ? { ...d, title } : d))
+    designs.map((d) => (d.id === id ? { ...d, title, updatedAt: Date.now() } : d))
   );
 }

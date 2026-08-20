@@ -10,8 +10,9 @@ import { Button } from "@/components/Button";
 import { Icon } from "@/components/Icon";
 import { ScreenHeader, Card, SectionLabel, Notice } from "@/components/ui";
 import type { IconName } from "@/lib/icons";
-import { SPACE, TYPE } from "@/lib/theme";
+import { RADIUS, SPACE, TYPE } from "@/lib/theme";
 import { useContentBottomInset, useContentWidth } from "@/lib/chrome";
+import { getSyncToken, setSyncToken as setStoredSyncToken, syncLibrary } from "@/lib/librarySync";
 import { getGenerationUsage, getSpendLimit, setSpendLimit, totalEstimatedSpend } from "@/lib/generationUsage";
 import { preferences } from "@/lib/preferences";
 import { createEncryptedBackup, restoreEncryptedBackup } from "@/lib/encryptedBackup";
@@ -20,6 +21,59 @@ import { shareUri } from "@/lib/files";
 export default function SettingsScreen() {
   const { brand, theme } = useBrand();
   const bottomInset = useContentBottomInset();
+  const [syncToken, setSyncToken] = useState("");
+  const [savedToken, setSavedToken] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncProgress, setSyncProgress] = useState("Syncing");
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [syncFailed, setSyncFailed] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    getSyncToken().then((token) => {
+      if (!active) return;
+      setSyncToken(token);
+      setSavedToken(!!token);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function saveSyncToken() {
+    await setStoredSyncToken(syncToken);
+    setSavedToken(!!syncToken.trim());
+    setSyncFailed(false);
+    setSyncMessage("Key saved. This device can reach the shared library now.");
+  }
+
+  async function runSync() {
+    setSyncing(true);
+    setSyncFailed(false);
+    setSyncMessage(null);
+    setSyncProgress("Syncing");
+    try {
+      const result = await syncLibrary(brand.id, (done, total) =>
+        setSyncProgress(total ? `${done}/${total}` : "Syncing")
+      );
+      const moved: string[] = [];
+      if (result.pushed) moved.push(`${result.pushed} sent`);
+      if (result.pulled) moved.push(`${result.pulled} received`);
+      if (result.removedHere + result.removedThere) {
+        moved.push(`${result.removedHere + result.removedThere} removed`);
+      }
+      setSyncMessage(
+        moved.length
+          ? `${moved.join(" · ")}. ${result.unchanged} already matched.`
+          : `Already in sync — all ${result.unchanged} designs match.`
+      );
+    } catch (e) {
+      setSyncFailed(true);
+      setSyncMessage(e instanceof Error ? e.message : "The sync didn't finish.");
+    } finally {
+      setSyncing(false);
+    }
+  }
   const contentWidth = useContentWidth("reading");
   const {
     currentlyRunning,
@@ -270,6 +324,51 @@ export default function SettingsScreen() {
 
       <View style={{ height: SPACE.lg }} />
 
+      <SectionLabel>Shared library</SectionLabel>
+      <Card>
+        <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 13, lineHeight: 18 }}>
+          Every device keeps its own library. Paste the sync key here and this one
+          joins the shared copy — designs made anywhere show up everywhere.
+        </Text>
+        <TextInput
+          value={syncToken}
+          onChangeText={setSyncToken}
+          placeholder="Sync key"
+          placeholderTextColor={theme.muted}
+          autoCapitalize="none"
+          autoCorrect={false}
+          secureTextEntry
+          style={[
+            styles.input,
+            { color: theme.foreground, borderColor: theme.line, backgroundColor: theme.surfaceAlt, fontFamily: theme.fontBody },
+          ]}
+        />
+        <View style={styles.syncRow}>
+          <Button
+            label="Save key"
+            icon="key-outline"
+            onPress={saveSyncToken}
+            disabled={!syncToken.trim() || syncing}
+            style={{ flex: 1 }}
+          />
+          <Button
+            label={syncing ? syncProgress : "Sync now"}
+            icon="sync-outline"
+            variant="primary"
+            onPress={runSync}
+            disabled={syncing || !savedToken}
+            style={{ flex: 1.3 }}
+          />
+        </View>
+        {!!syncMessage && (
+          <Text style={{ color: syncFailed ? theme.danger : theme.muted, fontFamily: theme.fontBody, fontSize: 13, marginTop: SPACE.sm }}>
+            {syncMessage}
+          </Text>
+        )}
+      </Card>
+
+      <View style={{ height: SPACE.lg }} />
+
       <SectionLabel>Session defaults</SectionLabel>
       <Card>
         <Text style={{ color: theme.foreground, fontFamily: theme.fontBody, fontSize: 13, lineHeight: 18 }}>
@@ -400,6 +499,15 @@ function shortId(id?: string | null) {
 }
 
 const styles = StyleSheet.create({
+  input: {
+    borderWidth: 1,
+    borderRadius: RADIUS.md,
+    paddingHorizontal: SPACE.sm,
+    paddingVertical: SPACE.sm,
+    marginTop: SPACE.sm,
+    fontSize: 14,
+  },
+  syncRow: { flexDirection: "row", gap: SPACE.sm, marginTop: SPACE.sm },
   scroll: { padding: SPACE.md, paddingTop: SPACE.lg, paddingBottom: SPACE.xxl },
   row: {
     flexDirection: "row",
