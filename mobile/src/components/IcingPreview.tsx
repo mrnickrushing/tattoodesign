@@ -26,6 +26,7 @@ import {
   type IcingColors,
 } from "@/lib/icing";
 import { readImageDataUrl } from "@/lib/imageSource";
+import { describeRecipe, recipeFor } from "@/lib/icingRecipe";
 import { SPACE, RADIUS, TYPE } from "@/lib/theme";
 
 /**
@@ -158,6 +159,9 @@ export function IcingPreview({
           selected={colors.line}
           onPick={(hex) => pick({ line: hex })}
         />
+
+        <MixIt hex={colors.flood} label="Flood" />
+        <MixIt hex={colors.line} label="Piping" />
 
         <Button
           label={saved ? "Saved to your designs" : "Save this version"}
@@ -319,7 +323,70 @@ function colorLuminance(hex: string) {
   return 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4);
 }
 
+
+/**
+ * How to actually mix the colour on screen.
+ *
+ * The preview could always show a design in a colour; it could never tell you
+ * what to put in the bowl to get there, which is where the digital part
+ * stopped being useful. Presented as a starting point rather than a
+ * measurement — royal icing deepens as it rests, gels differ by brand and
+ * batch, and no two white bases are the same.
+ */
+function MixIt({ hex, label }: { hex: string; label: string }) {
+  const { theme } = useBrand();
+  const [cups, setCups] = useState(1);
+  const recipe = recipeFor(hex, cups);
+  if (!recipe) return null;
+
+  return (
+    <View style={styles.mixBlock}>
+      <View style={styles.mixHeader}>
+        <View style={[styles.mixSwatch, { backgroundColor: hex, borderColor: theme.line }]} />
+        <Text style={[TYPE.micro, { flex: 1, color: theme.muted, fontFamily: theme.fontBodyMedium }]}>
+          {label.toUpperCase()} · MIX IT
+        </Text>
+        <View style={styles.mixCups}>
+          {[1, 2, 4].map((value) => {
+            const active = value === cups;
+            return (
+              <Pressable
+                key={value}
+                onPress={() => setCups(value)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={`${value} cup${value === 1 ? "" : "s"}`}
+                style={[
+                  styles.mixCup,
+                  { backgroundColor: active ? theme.accent : theme.surfaceAlt, borderColor: active ? theme.accent : theme.line },
+                ]}
+              >
+                <Text style={[TYPE.micro, { color: active ? theme.accentText : theme.muted, fontFamily: theme.fontBodyMedium }]}>
+                  {value}C
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+      <Text style={[TYPE.body, { color: theme.foreground, fontFamily: theme.fontBodyMedium }]}>
+        {describeRecipe(recipe)}
+      </Text>
+      <Text style={[TYPE.caption, { color: theme.muted, fontFamily: theme.fontBody }]}>
+        {recipe.closeness < 0.55
+          ? `No bottle is close to this one — start here and expect to adjust. ${recipe.note}`
+          : recipe.note}
+      </Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  mixBlock: { marginTop: SPACE.md, gap: SPACE.xs },
+  mixHeader: { flexDirection: "row", alignItems: "center", gap: SPACE.xs },
+  mixSwatch: { width: 18, height: 18, borderRadius: RADIUS.sm, borderWidth: 1 },
+  mixCups: { flexDirection: "row", gap: 4 },
+  mixCup: { borderWidth: 1, borderRadius: RADIUS.pill, paddingHorizontal: SPACE.xs, paddingVertical: 3 },
   root: { flex: 1, padding: SPACE.md },
   head: { flexDirection: "row", alignItems: "center", gap: SPACE.sm, marginBottom: SPACE.md },
   title: { ...TYPE.heading, letterSpacing: 0.3 },
