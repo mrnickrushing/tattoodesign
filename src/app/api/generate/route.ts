@@ -22,7 +22,7 @@ const QUALITY_ESTIMATES: Record<ImageProvider, Record<ImageQuality, number>> = {
   claude: { draft: 0.03, standard: 0.05, best: 0.07 },
 };
 
-export async function GET() {
+async function handleGet() {
   return NextResponse.json({
     providers: PROVIDERS.map((id) => ({
       id,
@@ -57,7 +57,7 @@ function missingConfiguration(provider: ImageProvider): string | null {
   return null;
 }
 
-export async function POST(req: NextRequest) {
+async function handlePost(req: NextRequest) {
   let body: {
     prompt?: string;
     style?: string;
@@ -346,4 +346,51 @@ async function directWithClaude(prompt: string, reference?: ReferenceImage): Pro
   )?.text;
   if (!directed?.trim()) throw new Error("Claude returned no art direction.");
   return directed.trim();
+}
+
+/**
+ * Which origins may call this from a browser.
+ *
+ * Not "*". The endpoint is unauthenticated and spends real money on every
+ * request, so a wildcard would let any web page anywhere burn the budget using
+ * a visitor's IP and the rate limiter's per-IP allowance. Cross-origin is only
+ * needed for the web app during development anyway — deployed to the same
+ * origin as this route, the browser never asks.
+ */
+function allowedOrigin(origin: string | null): string | null {
+  if (!origin) return null;
+  try {
+    const url = new URL(origin);
+    if (url.hostname === "localhost" || url.hostname === "127.0.0.1") return origin;
+    if (url.hostname.endsWith(".up.railway.app")) return origin;
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function withCors(response: Response, origin: string | null): Response {
+  const allowed = allowedOrigin(origin);
+  if (!allowed) return response;
+  response.headers.set("Access-Control-Allow-Origin", allowed);
+  // The allow-list varies by request, so caches must not reuse one origin's
+  // response for another's.
+  response.headers.set("Vary", "Origin");
+  return response;
+}
+
+export async function OPTIONS(req: NextRequest) {
+  const response = new Response(null, { status: 204 });
+  response.headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  response.headers.set("Access-Control-Allow-Headers", "Content-Type");
+  response.headers.set("Access-Control-Max-Age", "86400");
+  return withCors(response, req.headers.get("origin"));
+}
+
+export async function GET(req: NextRequest) {
+  return withCors(await handleGet(), req.headers.get("origin"));
+}
+
+export async function POST(req: NextRequest) {
+  return withCors(await handlePost(req), req.headers.get("origin"));
 }
