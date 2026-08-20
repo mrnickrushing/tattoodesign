@@ -1,0 +1,7 @@
+# expo-router builds this as a single-page app, so every route is served by
+# index.html and resolved client-side. Without this a deep link — or a refresh
+# anywhere other than the root — asks the host for a file that was never
+# exported, and gets a 404.
+#
+# Real files are matched first, so this only ever catches routes.
+/*  /index.html  200
