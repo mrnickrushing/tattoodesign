@@ -4,13 +4,20 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import * as SplashScreen from "expo-splash-screen";
 import { useFonts } from "expo-font";
 import { View } from "react-native";
-import { BebasNeue_400Regular } from "@expo-google-fonts/bebas-neue";
-import { Sora_400Regular, Sora_600SemiBold } from "@expo-google-fonts/sora";
-import { PlayfairDisplay_700Bold } from "@expo-google-fonts/playfair-display";
-import { Caveat_600SemiBold } from "@expo-google-fonts/caveat";
-import { Inter_400Regular, Inter_600SemiBold } from "@expo-google-fonts/inter";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { loadSkia } from "@/lib/skiaReady";
+
+// Required by exact path, not imported from the package root. A root import
+// pulls in every weight and style the package ships — Inter alone is eighteen
+// weights in two styles — and asset requires are not tree-shaken, so all of
+// them end up in the bundle. This is 11MB of fonts against about 1MB.
+const BebasNeue_400Regular = require("@expo-google-fonts/bebas-neue/400Regular/BebasNeue_400Regular.ttf");
+const Sora_400Regular = require("@expo-google-fonts/sora/400Regular/Sora_400Regular.ttf");
+const Sora_600SemiBold = require("@expo-google-fonts/sora/600SemiBold/Sora_600SemiBold.ttf");
+const PlayfairDisplay_700Bold = require("@expo-google-fonts/playfair-display/700Bold/PlayfairDisplay_700Bold.ttf");
+const Caveat_600SemiBold = require("@expo-google-fonts/caveat/600SemiBold/Caveat_600SemiBold.ttf");
+const Inter_400Regular = require("@expo-google-fonts/inter/400Regular/Inter_400Regular.ttf");
+const Inter_600SemiBold = require("@expo-google-fonts/inter/600SemiBold/Inter_600SemiBold.ttf");
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 

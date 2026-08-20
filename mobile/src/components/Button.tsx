@@ -1,5 +1,5 @@
 import { Pressable, Text, ActivityIndicator, StyleSheet, View, type ViewStyle } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
 import { useBrand } from "@/context/BrandContext";

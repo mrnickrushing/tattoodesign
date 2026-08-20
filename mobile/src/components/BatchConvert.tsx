@@ -11,7 +11,7 @@ import { Image } from "expo-image";
 import { File } from "expo-file-system";
 import * as ImagePicker from "expo-image-picker";
 import * as Haptics from "expo-haptics";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useBrand } from "@/context/BrandContext";
 import { Button } from "@/components/Button";

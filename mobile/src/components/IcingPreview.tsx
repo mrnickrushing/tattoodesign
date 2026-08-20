@@ -11,7 +11,7 @@ import {
   type LayoutChangeEvent,
 } from "react-native";
 import { Image } from "expo-image";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import * as Haptics from "expo-haptics";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Canvas, LinearGradient, RoundedRect } from "@shopify/react-native-skia";

@@ -14,7 +14,7 @@ import { pickImageFile } from "@/lib/imageImport";
 import { imageDataUrl } from "@/lib/imageType";
 import Slider from "@react-native-community/slider";
 import * as Haptics from "expo-haptics";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { useBrand } from "@/context/BrandContext";
 import {
   DEFAULT_STENCIL_OPTIONS,

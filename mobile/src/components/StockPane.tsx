@@ -8,7 +8,7 @@ import {
   type ViewStyle,
 } from "react-native";
 import { Image } from "expo-image";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import * as Haptics from "expo-haptics";
 import { useBrand } from "@/context/BrandContext";
 import { ImageViewer } from "@/components/ImageViewer";

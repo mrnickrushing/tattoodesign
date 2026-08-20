@@ -1,4 +1,4 @@
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { SymbolView, type SymbolWeight } from "expo-symbols";
 import { Platform } from "react-native";
 import { useBrand } from "@/context/BrandContext";

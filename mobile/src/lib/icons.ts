@@ -1,4 +1,6 @@
-import { Ionicons } from "@expo/vector-icons";
+// Type-only: a value import here would register every icon family the
+// package ships, for the sake of one keyof.
+import type { Ionicons } from "@expo/vector-icons";
 
 export type IconName =
   | "home"
