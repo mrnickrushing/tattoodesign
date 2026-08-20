@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { LINE_WEIGHT_DIRECTION, SHADING_VOCABULARY, getBrand } from "@/lib/brands";
+import { FLAT_OUTPUT_DIRECTION, LINE_WEIGHT_DIRECTION, SHADING_VOCABULARY, getBrand } from "@/lib/brands";
 import { checkRateLimit, getClientKey } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
@@ -157,7 +157,8 @@ export async function POST(req: NextRequest) {
     shading.render,
     inkConstraint,
     LINE_WEIGHT_DIRECTION,
-    "Isolated on a solid pure white background, centered composition.",
+    FLAT_OUTPUT_DIRECTION,
+    "Centered composition, the design filling most of the frame.",
     outlineDirection,
     referenceDirection,
   ].filter(Boolean).join(" ");

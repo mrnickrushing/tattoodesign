@@ -134,6 +134,21 @@ export const SHADING_VOCABULARY: ShadingVocabulary[] = [
 ];
 
 /**
+ * The artwork has to BE the image, not be photographed.
+ *
+ * "Isolated on a solid pure white background" is not enough on its own: asked
+ * for tattoo flash, a model will happily hand back a photograph of the drawing
+ * lying on a desk, complete with paper edges, a drop shadow and perspective.
+ * That is a picture of a stencil rather than a stencil, and downstream it is
+ * worse than useless — measured on a real generation, the surround left only
+ * 10% of the frame reading as paper, which is enough to make the converter
+ * treat a clean line drawing as a photograph and trace it instead of keeping
+ * it.
+ */
+export const FLAT_OUTPUT_DIRECTION =
+  "Output the artwork itself as a flat digital image filling the frame on pure white #FFFFFF. This is not a photograph of artwork: no sheet of paper, no paper texture or grain, no desk or table, no drop shadow, no perspective or tilt, no vignette, no frame or border, no background scenery, no mockup.";
+
+/**
  * Line weight hierarchy: the thing that separates a professional stencil from
  * an evenly-traced one. A real piece uses a heavy contour to hold the
  * silhouette, a medium line for internal structure and a light line for

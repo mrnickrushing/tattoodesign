@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { BRANDS, BRAND_IDS, LINE_WEIGHT_DIRECTION, SHADING_VOCABULARY } from "./brands";
+import { BRANDS, BRAND_IDS, FLAT_OUTPUT_DIRECTION, LINE_WEIGHT_DIRECTION, SHADING_VOCABULARY } from "./brands";
 
 test("style ids are unique within each brand", () => {
   for (const id of BRAND_IDS) {
@@ -85,4 +85,22 @@ test("every mobile shading id exists in the web app's brand contract", () => {
 test("the line weight direction asks for a hierarchy, not a uniform weight", () => {
   assert.ok(LINE_WEIGHT_DIRECTION.length > 40);
   assert.match(LINE_WEIGHT_DIRECTION, /never draw every line at the same weight/i);
+});
+
+test("every generation forbids being handed a photograph of the artwork", () => {
+  // A model asked for flash will otherwise return a photo of the drawing on a
+  // desk. Measured on a real generation, the paper and shadow left only 10% of
+  // the frame reading as white, which is enough to make the converter treat a
+  // clean line drawing as a photograph and trace it rather than keep it.
+  for (const phrase of ["not a photograph", "no drop shadow", "no perspective", "#FFFFFF"]) {
+    assert.ok(
+      FLAT_OUTPUT_DIRECTION.toLowerCase().includes(phrase.toLowerCase()),
+      `the flat-output rule should rule out "${phrase}"`
+    );
+  }
+});
+
+test("the flat-output rule exists in the web app's brand contract too", () => {
+  const webBrands = readFileSync(join(__dirname, "../../../src/lib/brands.ts"), "utf8");
+  assert.ok(webBrands.includes("FLAT_OUTPUT_DIRECTION"), "the server builds the prompt from its own copy");
 });

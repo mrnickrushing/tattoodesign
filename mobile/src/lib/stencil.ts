@@ -5,7 +5,7 @@
 // runs entirely on the device.
 
 import { Skia, ColorType, AlphaType, ImageFormat } from "@shopify/react-native-skia";
-import { DEFAULT_CENTERLINE, centerlineStencil, classifySource } from "./lineart";
+import { DEFAULT_CENTERLINE, centerlineStencil, classifySource, inkMask } from "./lineart";
 import { structuralEdges, thresholdsFrom } from "./edges";
 import { skeletonize } from "./vectorize";
 
@@ -277,17 +277,27 @@ export async function stencilMask(
   // to suppress — blurring it only softens the very strokes we are about to
   // threshold — so the centreline path reads the unblurred pixels.
   const bytes = Uint8Array.from(flat, (value) => Math.max(0, Math.min(255, Math.round(value))));
-  const wantsCenterline =
-    opts.mode === "centerline" ||
-    (opts.autoDetectSource && opts.mode === "outline" && classifySource(bytes).kind === "lineart");
 
-  if (wantsCenterline) {
+  // Redrawing is a choice, not the default. It thins every stroke to one
+  // weight, which is right for artwork whose lines are too thick or doubled to
+  // transfer — and wrong for artwork that was drawn properly, because a good
+  // stencil uses a heavy contour, a medium structural line and a fine detail
+  // line, and flattening those to a single weight throws away the thing that
+  // makes it read from across the room.
+  if (opts.mode === "centerline") {
     const { mask } = centerlineStencil(bytes, width, height, skeletonize, {
       threshold: DEFAULT_CENTERLINE.threshold,
       fillRadius: DEFAULT_CENTERLINE.fillRadius,
       weight: Math.max(1, opts.lineWeight),
     });
     return { mask, width, height };
+  }
+
+  // Already a drawing: the lines are the thing we were trying to recover, so
+  // the whole job is to make them crisp. Anything cleverer than a threshold
+  // here can only lose what the artwork already had.
+  if (opts.autoDetectSource && opts.mode === "outline" && classifySource(bytes).kind === "lineart") {
+    return { mask: inkMask(bytes, DEFAULT_CENTERLINE.threshold), width, height };
   }
 
   const gray = boxBlur(flat, width, height, opts.denoise);
