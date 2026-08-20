@@ -367,6 +367,10 @@ function allowedOrigin(origin: string | null): string | null {
     // expo.app. Same app, different origin — so it has to be named here or the
     // browser refuses every call to the generator.
     if (url.hostname.endsWith(".expo.app")) return origin;
+    // The custom domain the web app is served from.
+    if (url.hostname === "rushingtechnologies.com" || url.hostname.endsWith(".rushingtechnologies.com")) {
+      return origin;
+    }
   } catch {
     return null;
   }
