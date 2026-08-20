@@ -3,7 +3,7 @@
 // the layout math stays testable off-device.
 
 import { Asset } from "expo-asset";
-import { File } from "expo-file-system";
+import { readImageBase64 } from "./imageSource";
 import { ImageFormat, Skia, type SkTypeface } from "@shopify/react-native-skia";
 import { arcLayout, layoutBounds, letteringStyle, type LetteringStyleId } from "./lettering";
 
@@ -25,7 +25,7 @@ async function loadTypeface(asset: string): Promise<SkTypeface> {
   const resolved = Asset.fromModule(module);
   if (!resolved.localUri) await resolved.downloadAsync();
   const uri = resolved.localUri ?? resolved.uri;
-  const base64 = await new File(uri).base64();
+  const base64 = await readImageBase64(uri);
   const typeface = Skia.Typeface.MakeFreeTypeFaceFromData(Skia.Data.fromBase64(base64));
   if (!typeface) throw new Error("The lettering font could not be loaded.");
   typefaceCache.set(asset, typeface);

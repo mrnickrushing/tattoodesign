@@ -12,7 +12,6 @@ import {
 import { Image } from "expo-image";
 import type { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
-import * as Print from "expo-print";
 import * as Haptics from "expo-haptics";
 import { router, useLocalSearchParams } from "expo-router";
 import Animated, {
@@ -44,6 +43,7 @@ import {
 } from "@/lib/sheetLibrary";
 import { File, Paths } from "expo-file-system";
 import { generateId } from "@/lib/id";
+import { printHtml } from "@/lib/printing";
 import { imageDataUrl } from "@/lib/imageType";
 import { pickImageFile } from "@/lib/imageImport";
 import { saveDataUrlToPhotos, shareDataUrl, shareUri } from "@/lib/files";
@@ -1045,7 +1045,7 @@ export default function BuilderScreen() {
         `html,body { margin:0; padding:0; }` +
         `img { width:${template.widthIn}in; height:${template.heightIn}in; display:block;${active.mirrored ? "transform:scaleX(-1);" : ""} }` +
         `</style></head><body><img src="${dataUrl}" /></body></html>`;
-      await Print.printAsync({ html, width: widthPx, height: heightPx });
+      await printHtml(html, { width: widthPx, height: heightPx });
     } catch (e) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       Alert.alert("Couldn't print", e instanceof Error ? e.message : "Try again.");
@@ -1083,7 +1083,7 @@ export default function BuilderScreen() {
         return `<section><div class="tile"><img src="${dataUrl}" style="width:${widthIn}in;height:${heightIn}in;left:${-col * stepX}in;top:${-row * stepY}in"/></div><span>${row + 1}.${col + 1} · page ${index + 1}/${rows * cols}</span><i class="tl">+</i><i class="tr">+</i><i class="bl">+</i><i class="br">+</i></section>`;
       }).join("");
       const html = `<html><head><style>@page{size:${page.w}in ${page.h}in;margin:0}*{box-sizing:border-box}body{margin:0}section{width:${page.w}in;height:${page.h}in;padding:${margin}in;position:relative;page-break-after:always}.tile{width:${tileW}in;height:${tileH}in;overflow:hidden;position:relative;border:1px dashed #999}.tile img{position:absolute;max-width:none}span{position:absolute;right:.5in;bottom:.18in;font:9pt sans-serif}i{position:absolute;font:14pt monospace;font-style:normal}.tl{left:.38in;top:.29in}.tr{right:.38in;top:.29in}.bl{left:.38in;bottom:.28in}.br{right:.38in;bottom:.28in}</style></head><body>${pages}</body></html>`;
-      await Print.printAsync({ html, width: Math.round(page.w * 72), height: Math.round(page.h * 72) });
+      await printHtml(html, { width: Math.round(page.w * 72), height: Math.round(page.h * 72) });
     } catch (error) {
       Alert.alert("Couldn't tile print", error instanceof Error ? error.message : "Try again.");
     }

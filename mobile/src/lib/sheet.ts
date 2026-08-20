@@ -11,7 +11,7 @@
 // resolution rather than whatever the screen happened to show.
 
 import { Skia, ImageFormat } from "@shopify/react-native-skia";
-import { File } from "expo-file-system";
+import { readImageBase64 } from "./imageSource";
 
 export type SheetItemLayout = {
   uri: string;
@@ -50,7 +50,7 @@ export async function composeSheet(
   for (const item of items) {
     let image;
     try {
-      const base64 = await new File(item.uri).base64();
+      const base64 = await readImageBase64(item.uri);
       const data = Skia.Data.fromBase64(base64);
       image = Skia.Image.MakeImageFromEncoded(data);
     } catch {

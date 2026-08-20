@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Image, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import Slider from "@react-native-community/slider";
-import * as Print from "expo-print";
 import * as Haptics from "expo-haptics";
 import { useBrand } from "@/context/BrandContext";
 import { Button } from "@/components/Button";
@@ -10,6 +9,7 @@ import { PaperSubstrate } from "@/components/PaperSubstrate";
 import { Skeleton } from "@/components/Skeleton";
 import { Card, Chip, Notice, SectionLabel } from "@/components/ui";
 import { BLE_PRINTING_AVAILABLE, printEscPosOverBle, requestBlePermission, scanBlePrinters, type BlePrinterDevice } from "@/lib/blePrinter";
+import { printHtml } from "@/lib/printing";
 import { dataUrlToEscPos } from "@/lib/escpos";
 import { calibrationCorrection, PRINTER_PRESETS, profileWarnings, type PrinterProfile } from "@/lib/printerProfiles";
 import { DEFAULT_OVERLAP_IN, describeTiling, planTiles, tileCount, tileRects, tiledSheetHtml } from "@/lib/tiling";
@@ -80,7 +80,7 @@ export function PrinterStudio({ visible, profile, pageWidthIn, pageHeightIn, onC
       return `<i style="left:${(index / 10) * profile.scaleCorrection}in;height:${height}px"></i>`;
     }).join("");
     const html = `<html><head><style>@page{size:8.5in 11in;margin:.5in}body{font-family:-apple-system,sans-serif}.ruler{position:relative;width:${corrected}in;height:54px;border-bottom:2px solid #000}.ruler i{position:absolute;bottom:0;border-left:1px solid #000}.labels{width:${corrected}in;display:flex;justify-content:space-between;font-size:11px;margin-top:5px}</style></head><body><h2>Inkline calibration</h2><p>Print at 100% / Actual Size, then measure between 0 and 6.</p><div class="ruler">${ticks}</div><div class="labels"><b>0</b><b>1</b><b>2</b><b>3</b><b>4</b><b>5</b><b>6 in</b></div></body></html>`;
-    await Print.printAsync({ html });
+    await printHtml(html);
   }
 
   function applyCalibration() {
@@ -96,9 +96,7 @@ export function PrinterStudio({ visible, profile, pageWidthIn, pageHeightIn, onC
   async function printTiled() {
     if (!proof) return Alert.alert("No proof yet", "Wait for the proof to finish building, then try again.");
     try {
-      await Print.printAsync({
-        html: tiledSheetHtml(tiling, proof, { mirrored: profile.mirrored }),
-      });
+      await printHtml(tiledSheetHtml(tiling, proof, { mirrored: profile.mirrored }));
     } catch (error) {
       Alert.alert("Couldn't print tiles", error instanceof Error ? error.message : "Try again.");
     }

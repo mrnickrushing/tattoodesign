@@ -26,6 +26,7 @@ import {
   type ReviewStatus,
 } from "@/lib/clientProjects";
 import { getLibrary, setDesignTags, type LibraryDesign } from "@/lib/designLibrary";
+import { htmlToPdf } from "@/lib/printing";
 import { normalizeTags } from "@/lib/libraryFilter";
 import {
   describeAppointment,
@@ -35,7 +36,6 @@ import {
   sortByAppointment,
 } from "@/lib/appointments";
 import * as ImagePicker from "expo-image-picker";
-import * as Print from "expo-print";
 import { File } from "expo-file-system";
 import { proofHtml, type ProofDesign } from "@/lib/proofSheet";
 import { shareUri } from "@/lib/files";
@@ -194,10 +194,7 @@ export default function ProjectsScreen() {
           // fine with the designs that loaded.
         }
       }
-      const { uri } = await Print.printToFileAsync({
-        html: proofHtml(project, proofDesigns, brand.name),
-      });
-      await shareUri(uri);
+      await shareUri(await htmlToPdf(proofHtml(project, proofDesigns, brand.name)));
       if (project.status === "draft") {
         Alert.alert("Mark as sent?", "Move this project to In review now the proof is out?", [
           { text: "Keep as draft", style: "cancel" },

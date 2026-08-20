@@ -6,7 +6,7 @@
 // needle or the icing bag comes out.
 //
 // Pure string building so layout and escaping are testable; the screen owns
-// expo-print and the share sheet.
+// the platform print path in printing.ts and the share sheet.
 
 import type { ClientProject } from "./clientProjects";
 import { formatAppointmentDate } from "./appointments";
@@ -39,7 +39,7 @@ const STATUS_LABEL: Record<ClientProject["status"], string> = {
 export const FALLBACK_WIDTH_IN = 3;
 
 /**
- * Renders the proof as printable HTML for expo-print.
+ * Renders the proof as printable HTML for lib/printing.ts.
  *
  * Every design is drawn at its true printed size: the agreed `sizeIn` when
  * the project has one, otherwise FALLBACK_WIDTH_IN wide with the aspect
