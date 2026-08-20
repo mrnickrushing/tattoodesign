@@ -8,11 +8,16 @@
 // them. Entries saved under the old scheme are migrated on first read.
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Directory, File, Paths } from "expo-file-system";
 import { generateId } from "./id";
 import { stripDataUrlPrefix } from "./files";
 import type { BrandId } from "./brands";
 import { Skia } from "@shopify/react-native-skia";
+import {
+  deleteDesignImage,
+  readDesignBase64,
+  resolveDesignImage,
+  writeDesignImage,
+} from "./designFiles";
 
 export type LibraryDesign = {
   id: string;
@@ -38,53 +43,32 @@ function key(brand: BrandId) {
   return `inkline:design-library:${brand}`;
 }
 
-function designsDir(brand: BrandId): Directory {
-  const dir = new Directory(Paths.document, "designs", brand);
-  // idempotent as well as the exists check: create() throws on an existing
-  // directory otherwise, and two saves can race here.
-  if (!dir.exists) dir.create({ intermediates: true, idempotent: true });
-  return dir;
-}
-
-function writePng(brand: BrandId, name: string, dataUrl: string): string {
-  const file = new File(designsDir(brand), name);
-  if (file.exists) file.delete();
-  file.write(stripDataUrlPrefix(dataUrl), { encoding: "base64" });
-  return file.uri;
-}
-
-function deleteFile(brand: BrandId, name?: string) {
-  if (!name) return;
-  try {
-    const file = new File(designsDir(brand), name);
-    if (file.exists) file.delete();
-  } catch {
-    // Already gone is the outcome we wanted anyway.
-  }
-}
-
 export async function getLibrary(brand: BrandId): Promise<LibraryDesign[]> {
   try {
     const raw = await AsyncStorage.getItem(key(brand));
     if (!raw) return [];
     const entries = JSON.parse(raw) as LegacyDesign[];
 
-    const dir = designsDir(brand);
     let migrated = false;
     const result: LibraryDesign[] = [];
     for (const entry of entries) {
       if (entry.uri) {
-        // Re-derive the path instead of trusting the stored one. An app
-        // update re-creates the iOS container under a new UUID, which
-        // invalidates every absolute file:// URI we wrote — the PNG is still
-        // there under the same name, so the library would go blank for no
-        // reason at all.
-        const file = new File(dir, entry.file ?? `${entry.id}.png`);
-        const uri = file.exists ? file.uri : entry.uri;
+        // Ask the store where the image is rather than trusting the stored
+        // path. On a phone an app update re-creates the container under a new
+        // UUID and invalidates every absolute file:// URI ever written; in a
+        // browser an object URL is only valid for the document that made it.
+        // Either way a remembered URI is a dead link and the library would go
+        // blank for no reason at all.
+        const name = entry.file ?? `${entry.id}.png`;
+        const found = await resolveDesignImage(brand, name);
+        const uri = found ?? entry.uri;
         let normalized = { ...(entry as LibraryDesign), uri };
-        if ((!normalized.width || !normalized.height) && file.exists) {
+        if (!normalized.width || !normalized.height) {
           try {
-            const decoded = Skia.Image.MakeImageFromEncoded(Skia.Data.fromBase64(await file.base64()));
+            const base64 = await readDesignBase64(brand, name);
+            const decoded = base64
+              ? Skia.Image.MakeImageFromEncoded(Skia.Data.fromBase64(base64))
+              : null;
             if (decoded) {
               normalized = { ...normalized, width: decoded.width(), height: decoded.height() };
               migrated = true;
@@ -101,7 +85,7 @@ export async function getLibrary(brand: BrandId): Promise<LibraryDesign[]> {
         // Old base64 entry — move the bytes to a file, keep the metadata.
         try {
           const name = `${entry.id}.png`;
-          const uri = writePng(brand, name, entry.dataUrl);
+          const uri = await writeDesignImage(brand, name, entry.dataUrl);
           const { dataUrl: _drop, ...rest } = entry;
           const decoded = Skia.Image.MakeImageFromEncoded(Skia.Data.fromBase64(stripDataUrlPrefix(entry.dataUrl)));
           result.push({
@@ -138,7 +122,7 @@ export async function addToLibrary(
   const entry: LibraryDesign = {
     id,
     file: name,
-    uri: writePng(brand, name, design.dataUrl),
+    uri: await writeDesignImage(brand, name, design.dataUrl),
     title: design.title,
     source: design.source,
     createdAt: Date.now(),
@@ -152,7 +136,7 @@ export async function addToLibrary(
 export async function removeFromLibrary(brand: BrandId, id: string): Promise<void> {
   const designs = await getLibrary(brand);
   const gone = designs.find((d) => d.id === id);
-  if (gone) deleteFile(brand, gone.file ?? `${gone.id}.png`);
+  if (gone) await deleteDesignImage(brand, gone.file ?? `${gone.id}.png`);
   await save(
     brand,
     designs.filter((d) => d.id !== id)
@@ -173,14 +157,14 @@ export async function replaceInLibrary(
   if (!existing) return null;
 
   const name = `${id}-${Date.now().toString(36)}.png`;
-  const uri = writePng(brand, name, dataUrl);
+  const uri = await writeDesignImage(brand, name, dataUrl);
   const updated: LibraryDesign = { ...existing, file: name, uri };
   await save(
     brand,
     designs.map((d) => (d.id === id ? updated : d))
   );
   // Only once the new one is safely written and recorded.
-  deleteFile(brand, existing.file ?? `${existing.id}.png`);
+  await deleteDesignImage(brand, existing.file ?? `${existing.id}.png`);
   return updated;
 }
 

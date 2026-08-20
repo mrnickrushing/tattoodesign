@@ -832,20 +832,20 @@ export default function BuilderScreen() {
         key: "place",
         label: "Size it up",
         hint: brand.id === "sugar" ? "True size, or on a photo" : "True size, or on the skin",
-        icon: "resize-outline",
+        icon: "resize",
         onPress: () => void openPlacement(design),
       },
       {
         key: "edit",
         label: "Edit",
         hint: "Touch up, crop, cut line",
-        icon: "brush-outline",
+        icon: "brush",
         onPress: () => setEditing(design),
       },
       {
         key: "view",
         label: "View full screen",
-        icon: "expand-outline",
+        icon: "expand",
         onPress: () => setPreview(design),
       },
       // Icing colors and the real-object mockup are Sugar Haus questions;
@@ -856,14 +856,14 @@ export default function BuilderScreen() {
               key: "mockup",
               label: "On a cake pop or cookie",
               hint: "Place it and see it wrapped",
-              icon: "ellipse-outline" as const,
+              icon: "substrate" as const,
               onPress: () => setMockup(design),
             },
             {
               key: "icing",
               label: "Try icing colors",
               hint: "Flood and piping",
-              icon: "color-palette-outline" as const,
+              icon: "palette" as const,
               onPress: () => setIcing(design),
             },
           ]
@@ -872,14 +872,14 @@ export default function BuilderScreen() {
         key: "favorite",
         label: design.favorite ? "Unfavorite" : "Favorite",
         hint: design.favorite ? undefined : "Pin it to the front of the library",
-        icon: design.favorite ? "star" : "star-outline",
+        icon: design.favorite ? "favoriteFilled" : "favorite",
         onPress: () => toggleFavorite(design),
       },
       {
         key: "tags",
         label: "Tags",
         hint: design.tags?.length ? design.tags.join(", ") : "Client, motif, collection",
-        icon: "pricetags-outline",
+        icon: "tag",
         onPress: () =>
           openPrompt({ kind: "tag-design", id: design.id, initial: (design.tags ?? []).join(", ") }),
       },
@@ -887,7 +887,7 @@ export default function BuilderScreen() {
         key: "remix",
         label: "Remix",
         hint: "Generate variations from this design",
-        icon: "sparkles-outline",
+        icon: "generate",
         onPress: () => {
           setMenu(null);
           router.push({ pathname: "/[brand]/generate", params: { brand: brand.id, remix: design.id } });
@@ -896,14 +896,14 @@ export default function BuilderScreen() {
       {
         key: "rename",
         label: "Rename",
-        icon: "text-outline",
+        icon: "text",
         onPress: () => openPrompt({ kind: "rename-design", id: design.id, initial: design.title }),
       },
       {
         key: "handoff",
         label: "Hand off",
         hint: "Send to the other phone, tags included",
-        icon: "paper-plane-outline",
+        icon: "send",
         onPress: () => {
           setMenu(null);
           void handOffDesign(design);
@@ -913,7 +913,7 @@ export default function BuilderScreen() {
         key: "share",
         label: "Share",
         hint: "AirDrop, Messages, anywhere",
-        icon: "share-outline",
+        icon: "share",
         onPress: async () => {
           try {
             await shareUri(design.uri);
@@ -925,7 +925,7 @@ export default function BuilderScreen() {
       {
         key: "delete",
         label: "Delete",
-        icon: "trash-outline",
+        icon: "delete",
         tone: "danger",
         onPress: () =>
           Alert.alert(`Delete "${design.title}"?`, "This can't be undone.", [
@@ -1516,11 +1516,11 @@ export default function BuilderScreen() {
           preview
             ? [
                 {
-                  icon: "resize-outline",
+                  icon: "resize",
                   label: "Size it up",
                   onPress: () => void openPlacement(preview),
                 },
-                { icon: "brush-outline", label: "Edit", onPress: () => setEditing(preview) },
+                { icon: "brush" as const, label: "Edit", onPress: () => setEditing(preview) },
               ]
             : undefined
         }

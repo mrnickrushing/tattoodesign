@@ -68,7 +68,14 @@ export function wrapForSurface(
   surface: Surface,
   apparentWidthIn: number,
   apparentHeightIn: number,
-  direction: "compensate" | "foreshorten" = "compensate"
+  direction: "compensate" | "foreshorten" = "compensate",
+  /**
+   * White is right for something being printed — that is what the paper is.
+   * It is wrong for a preview laid over a coloured cake pop, where the ground
+   * has to stay clear or the design arrives as a white rectangle sitting on
+   * the icing.
+   */
+  ground: "paper" | "clear" = "paper"
 ): string {
   const image = decode(dataUrl);
   const width = image.width();
@@ -78,7 +85,7 @@ export function wrapForSurface(
   const surfaceOut = Skia.Surface.Make(width, height);
   if (!surfaceOut) throw new Error("The surface wrap is too large for this device.");
   const canvas = surfaceOut.getCanvas();
-  canvas.clear(Skia.Color("white"));
+  canvas.clear(ground === "paper" ? Skia.Color("white") : Skia.Color("transparent"));
 
   const mesh = warpMesh(width, height, surface, apparentWidthIn, apparentHeightIn, direction);
   const paint = Skia.Paint();

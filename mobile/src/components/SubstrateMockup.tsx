@@ -31,6 +31,7 @@ import {
   type Substrate,
 } from "@/lib/substrate";
 import { RADIUS, SPACE, TYPE } from "@/lib/theme";
+import { CONTENT_MAX_WIDTH } from "@/lib/chrome";
 
 /**
  * What it looks like on the actual thing.
@@ -97,17 +98,28 @@ export function SubstrateMockup({
   const warpKey = `${substrate.surfaceId}:${widthIn.toFixed(2)}:${aspect.toFixed(3)}`;
 
   useEffect(() => {
-    if (!curved || !surface) return;
     let active = true;
     (async () => {
       try {
+        // The paper goes first. A traced stencil is black on white, and white
+        // is what "no ink" looks like on paper — left in, it arrives as a
+        // white rectangle sitting on the icing.
+        // A library design is a file:// path on a phone and a blob: URL in a
+        // browser; Skia decodes neither. Resolve to bytes first.
+        const { readImageDataUrl } = await import("@/lib/imageSource");
+        const { knockOutPaper } = await import("@/lib/knockout");
+        const bare = knockOutPaper(await readImageDataUrl(uri));
+        if (!curved || !surface) {
+          if (active) setWarped({ key: warpKey, uri: bare });
+          return;
+        }
         const { wrapForSurface } = await import("@/lib/productionTools");
-        const out = wrapForSurface(uri, surface, widthIn, widthIn * aspect, "foreshorten");
+        const out = wrapForSurface(bare, surface, widthIn, widthIn * aspect, "foreshorten", "clear");
         if (active) setWarped({ key: warpKey, uri: out });
       } catch {
-        // Skia is not available everywhere this can open. The unwarped design
-        // is an honest fallback: the same placement, without the
-        // foreshortening.
+        // Skia is not available everywhere this can open. The untouched design
+        // is an honest fallback: the same placement, with its paper still
+        // attached and no foreshortening.
       }
     })();
     return () => {
@@ -462,7 +474,7 @@ function PlacedDesign({
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  screen: { flex: 1, paddingHorizontal: SPACE.md },
+  screen: { flex: 1, paddingHorizontal: SPACE.md, width: "100%", maxWidth: CONTENT_MAX_WIDTH, alignSelf: "center" },
   topbar: { flexDirection: "row", alignItems: "center", gap: SPACE.sm, paddingVertical: SPACE.sm },
   iconButton: { width: 38, height: 38, borderRadius: RADIUS.pill, alignItems: "center", justifyContent: "center" },
   stageWrap: { alignItems: "center", justifyContent: "center" },

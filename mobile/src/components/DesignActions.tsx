@@ -1,19 +1,18 @@
 import { Modal, View, Text, StyleSheet, Pressable, ScrollView } from "react-native";
 import { Image } from "expo-image";
-import type { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useBrand } from "@/context/BrandContext";
 import { Icon } from "@/components/Icon";
 import { PaperSubstrate } from "@/components/PaperSubstrate";
-import { ICONS, type IconName } from "@/lib/icons";
+import type { IconName } from "@/lib/icons";
 import { SPACE, RADIUS, TYPE } from "@/lib/theme";
 
 export type DesignAction = {
   key: string;
   label: string;
   hint?: string;
-  icon: keyof typeof Ionicons.glyphMap;
+  icon: IconName;
   tone?: "danger";
   onPress: () => void;
 };
@@ -81,7 +80,7 @@ export function DesignActions({
                   pressed && { backgroundColor: theme.surfaceAlt },
                 ]}
               >
-                <Icon name={iconNameFor(action.icon)} size={SPACE.md + SPACE.xs} color={color} />
+                <Icon name={action.icon} size={SPACE.md + SPACE.xs} color={color} />
                 <View style={{ flex: 1 }}>
                   <Text style={[TYPE.body, { color, fontFamily: theme.fontBody }]}>
                     {action.label}
@@ -105,9 +104,6 @@ export function DesignActions({
   );
 }
 
-function iconNameFor(icon: keyof typeof Ionicons.glyphMap): IconName {
-  return (Object.keys(ICONS) as IconName[]).find((name) => ICONS[name].ion === icon) ?? "document";
-}
 
 const styles = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: "rgba(8,7,7,0.55)" },

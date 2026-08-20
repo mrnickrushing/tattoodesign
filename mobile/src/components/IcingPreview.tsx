@@ -25,6 +25,7 @@ import {
   recolor,
   type IcingColors,
 } from "@/lib/icing";
+import { readImageDataUrl } from "@/lib/imageSource";
 import { SPACE, RADIUS, TYPE } from "@/lib/theme";
 
 /**
@@ -55,7 +56,10 @@ export function IcingPreview({
 
   useEffect(() => {
     let active = true;
-    recolor(uri, colors)
+    // A library design is a file:// path on a phone and a blob: URL in a
+    // browser; recolor decodes base64 and can read neither.
+    readImageDataUrl(uri)
+      .then((source) => recolor(source, colors))
       .then((result) => {
         if (!active) return;
         setPreview(result);
