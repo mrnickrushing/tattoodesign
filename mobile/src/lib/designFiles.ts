@@ -46,12 +46,12 @@ export async function deleteDesignImage(brand: BrandId, name: string): Promise<v
  * trusted its stored paths would go blank for no reason at all.
  */
 export async function resolveDesignImage(brand: BrandId, name: string): Promise<string | null> {
-  try {
-    const file = new File(designsDir(brand), name);
-    return file.exists ? file.uri : null;
-  } catch {
-    return null;
-  }
+  // null means definitively absent. A failure to look at all throws instead,
+  // so a caller pruning dead entries can tell "this design is gone" from
+  // "storage is unavailable right now" and never deletes a library because a
+  // read happened to fail.
+  const file = new File(designsDir(brand), name);
+  return file.exists ? file.uri : null;
 }
 
 export async function readDesignBase64(brand: BrandId, name: string): Promise<string | null> {

@@ -60,9 +60,24 @@ export async function getLibrary(brand: BrandId): Promise<LibraryDesign[]> {
         // Either way a remembered URI is a dead link and the library would go
         // blank for no reason at all.
         const name = entry.file ?? `${entry.id}.png`;
-        const found = await resolveDesignImage(brand, name);
-        const uri = found ?? entry.uri;
-        let normalized = { ...(entry as LibraryDesign), uri };
+        let found: string | null;
+        try {
+          found = await resolveDesignImage(brand, name);
+        } catch {
+          // Storage is unreachable, not empty. Keep the entry as it is rather
+          // than concluding the design is gone — deleting a library because a
+          // read failed is unrecoverable, showing a stale one is not.
+          result.push(entry as LibraryDesign);
+          continue;
+        }
+        if (!found) {
+          // The image really is gone. Dropping the record is the honest
+          // outcome: a design whose pixels no longer exist is a blank tile
+          // that stays blank and does nothing when tapped.
+          migrated = true;
+          continue;
+        }
+        let normalized = { ...(entry as LibraryDesign), uri: found };
         if (!normalized.width || !normalized.height) {
           try {
             const base64 = await readDesignBase64(brand, name);
@@ -77,7 +92,7 @@ export async function getLibrary(brand: BrandId): Promise<LibraryDesign[]> {
             // Keep the design available even when optional metadata can't be recovered.
           }
         }
-        if (uri !== entry.uri) migrated = true;
+        if (found !== entry.uri) migrated = true;
         result.push(normalized);
         continue;
       }

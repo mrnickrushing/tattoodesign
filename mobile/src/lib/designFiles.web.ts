@@ -41,12 +41,12 @@ export async function deleteDesignImage(brand: BrandId, name: string): Promise<v
 }
 
 export async function resolveDesignImage(brand: BrandId, name: string): Promise<string | null> {
-  try {
-    const blob = await withStore<Blob | undefined>(STORES.designs, "readonly", (store) => store.get(key(brand, name)));
-    return blob ? URL.createObjectURL(blob) : null;
-  } catch {
-    return null;
-  }
+  // null means definitively absent; a failure to reach the store throws. See
+  // the native version for why the distinction matters.
+  const blob = await withStore<Blob | undefined>(STORES.designs, "readonly", (store) =>
+    store.get(key(brand, name))
+  );
+  return blob ? URL.createObjectURL(blob) : null;
 }
 
 export async function readDesignBase64(brand: BrandId, name: string): Promise<string | null> {
