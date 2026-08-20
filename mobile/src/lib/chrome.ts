@@ -11,6 +11,16 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { hasLiquidGlass } from "@/components/GlassSurface";
 import { SPACE } from "./theme";
 
+/**
+ * Widest a column of content is allowed to get.
+ *
+ * A phone layout stretched across a 13-inch iPad gives line lengths nobody can
+ * read and controls marooned at opposite edges. Capping the column and
+ * centring it keeps every screen looking deliberate on a tablet without
+ * needing a second layout.
+ */
+export const CONTENT_MAX_WIDTH = 820;
+
 /** Must match the tabBarStyle height in app/[brand]/_layout.tsx. */
 export const TAB_BAR_HEIGHT = SPACE.xxl * 2;
 

@@ -3,7 +3,7 @@
     "name": "Inkline",
     "slug": "inkline",
     "version": "1.4.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/images/inkline-icon-v2.png",
     "scheme": "inkline",
     "userInterfaceStyle": "automatic",

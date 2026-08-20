@@ -28,7 +28,7 @@ import {
   type SheetDraft,
 } from "@/lib/sheetLibrary";
 import { RADIUS, SPACE, TYPE, glow, lift } from "@/lib/theme";
-import { useContentBottomInset } from "@/lib/chrome";
+import { CONTENT_MAX_WIDTH, useContentBottomInset } from "@/lib/chrome";
 
 const TOOL_ICONS = {
   generate: "generate",
@@ -102,7 +102,7 @@ export default function StudioDashboard() {
     <>
       <ScrollView
         style={{ backgroundColor: theme.background }}
-        contentContainerStyle={[styles.scroll, { paddingBottom: bottomInset }]}
+        contentContainerStyle={[styles.scroll, { paddingBottom: bottomInset, maxWidth: CONTENT_MAX_WIDTH, width: "100%", alignSelf: "center" }]}
       >
         <ScreenHeader
           eyebrow="Studio home"

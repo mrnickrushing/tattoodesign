@@ -243,6 +243,11 @@ export function DesignEditor({
   const [currentSamples, setCurrentSamples] = useState<PenSample[]>([]);
   const [pen, setPen] = useState<PenSettings>(DEFAULT_PEN);
   const [pencilOnly, setPencilOnly] = useState(false);
+  // Only offered once a stylus has actually been seen. Apple Pencil is an iPad
+  // accessory — it does not pair with any iPhone — so on a phone the control
+  // would be a switch whose only effect is to stop drawing working, with
+  // nothing on screen to explain why.
+  const [sawStylus, setSawStylus] = useState(false);
   const [immersive, setImmersive] = useState(false);
   const [symmetry, setSymmetry] = useState<SymmetrySettings>(DEFAULT_SYMMETRY);
   const [letteringText, setLetteringText] = useState("");
@@ -393,6 +398,7 @@ export function DesignEditor({
    */
   function addStrokeSample(x: number, y: number, stylus: StylusReading) {
     if (!project) return;
+    if (stylus && !sawStylus) setSawStylus(true);
     const raw = sampleFromStylus(
       Math.max(0, Math.min(project.canvas.width, x / scale)),
       Math.max(0, Math.min(project.canvas.height, y / scale)),
@@ -1102,6 +1108,7 @@ export function DesignEditor({
               onBrush={rememberBrush}
               pencilOnly={pencilOnly}
               onPencilOnly={setPencilOnly}
+              stylusSeen={sawStylus}
               canUndo={!!past.length && !busy}
               canRedo={!!future.length && !busy}
               onUndo={undo}
@@ -1157,6 +1164,7 @@ export function DesignEditor({
               onSeparate={applySeparation}
               pencilOnly={pencilOnly}
               onPencilOnly={setPencilOnly}
+              stylusSeen={sawStylus}
               onThreshold={setThreshold}
               onLineWeight={setLineWeight}
               onProject={(label, next) => commit(label, next)}
@@ -1230,6 +1238,7 @@ function Inspector({
   onSeparate,
   pencilOnly,
   onPencilOnly,
+  stylusSeen,
   onThreshold,
   onLineWeight,
   onProject,
@@ -1284,6 +1293,7 @@ function Inspector({
   onSeparate: () => void;
   pencilOnly: boolean;
   onPencilOnly: (value: boolean) => void;
+  stylusSeen: boolean;
   onProject: (label: string, project: EditableDesignProject) => void;
   onTransform: (patch: Partial<DesignLayer["transform"]>, label: string) => void;
   onCrop: () => void;
@@ -1319,7 +1329,7 @@ function Inspector({
             <Pressable key={color} onPress={() => onBrushColor(color)} accessibilityLabel={`Brush color ${color}`} style={[styles.swatch, { backgroundColor: color, borderColor: color === brushColor ? theme.accent : theme.line }]} />
           ))}
         </View>
-        <PenControls pen={pen} onPen={onPen} pencilOnly={pencilOnly} onPencilOnly={onPencilOnly} />
+        <PenControls pen={pen} onPen={onPen} pencilOnly={pencilOnly} onPencilOnly={onPencilOnly} stylusSeen={stylusSeen} />
         <SymmetryControls symmetry={symmetry} onSymmetry={onSymmetry} />
       </PanelTitle>
     );
@@ -1739,6 +1749,7 @@ function ImmersiveBar({
   onBrush,
   pencilOnly,
   onPencilOnly,
+  stylusSeen,
   canUndo,
   canRedo,
   onUndo,
@@ -1752,6 +1763,7 @@ function ImmersiveBar({
   onBrush: (value: number) => void;
   pencilOnly: boolean;
   onPencilOnly: (value: boolean) => void;
+  stylusSeen: boolean;
   canUndo: boolean;
   canRedo: boolean;
   onUndo: () => void;
@@ -1793,18 +1805,20 @@ function ImmersiveBar({
           );
         })}
 
-        <Pressable
-          onPress={() => {
-            onPencilOnly(!pencilOnly);
-            Haptics.selectionAsync();
-          }}
-          accessibilityRole="switch"
-          accessibilityState={{ checked: pencilOnly }}
-          accessibilityLabel="Pencil only"
-          style={[styles.immersiveButton, { backgroundColor: pencilOnly ? theme.accent : theme.surfaceAlt }]}
-        >
-          <Icon name="edit" size={TYPE.body.fontSize + SPACE.xs / 2} color={pencilOnly ? theme.accentText : theme.foreground} />
-        </Pressable>
+        {stylusSeen && (
+          <Pressable
+            onPress={() => {
+              onPencilOnly(!pencilOnly);
+              Haptics.selectionAsync();
+            }}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: pencilOnly }}
+            accessibilityLabel="Pencil only"
+            style={[styles.immersiveButton, { backgroundColor: pencilOnly ? theme.accent : theme.surfaceAlt }]}
+          >
+            <Icon name="edit" size={TYPE.body.fontSize + SPACE.xs / 2} color={pencilOnly ? theme.accentText : theme.foreground} />
+          </Pressable>
+        )}
 
         <View style={{ flex: 1 }} />
 
@@ -1862,11 +1876,13 @@ function PenControls({
   onPen,
   pencilOnly,
   onPencilOnly,
+  stylusSeen,
 }: {
   pen: PenSettings;
   onPen: (patch: Partial<PenSettings>) => void;
   pencilOnly: boolean;
   onPencilOnly: (value: boolean) => void;
+  stylusSeen: boolean;
 }) {
   const { theme } = useBrand();
   return (
@@ -1917,23 +1933,27 @@ function PenControls({
         display={pen.taperLength < 1 ? "Off" : `${Math.round(pen.taperLength)} px`}
         onChange={(value) => onPen({ taperLength: value })}
       />
-      <Pressable
-        onPress={() => {
-          onPencilOnly(!pencilOnly);
-          Haptics.selectionAsync();
-        }}
-        accessibilityRole="switch"
-        accessibilityState={{ checked: pencilOnly }}
-        style={[styles.symmetryChip, { alignSelf: "flex-start", backgroundColor: pencilOnly ? theme.accent : theme.surfaceAlt, borderColor: pencilOnly ? theme.accent : theme.line }]}
-      >
-        <Text style={[TYPE.micro, { color: pencilOnly ? theme.accentText : theme.muted, fontFamily: theme.fontBodyMedium }]}>
-          PENCIL ONLY
-        </Text>
-      </Pressable>
+      {stylusSeen && (
+        <Pressable
+          onPress={() => {
+            onPencilOnly(!pencilOnly);
+            Haptics.selectionAsync();
+          }}
+          accessibilityRole="switch"
+          accessibilityState={{ checked: pencilOnly }}
+          style={[styles.symmetryChip, { alignSelf: "flex-start", backgroundColor: pencilOnly ? theme.accent : theme.surfaceAlt, borderColor: pencilOnly ? theme.accent : theme.line }]}
+        >
+          <Text style={[TYPE.micro, { color: pencilOnly ? theme.accentText : theme.muted, fontFamily: theme.fontBodyMedium }]}>
+            PENCIL ONLY
+          </Text>
+        </Pressable>
+      )}
       <Text style={[TYPE.caption, { color: theme.muted, fontFamily: theme.fontBody }]}>
-        {pencilOnly
-          ? "Fingers pan and pinch; only the Pencil leaves a mark, so you can rest your hand on the glass."
-          : "Pressure and tilt need a stylus. A finger draws at the nominal width, with steadying and taper still applied."}
+        {!stylusSeen
+          ? "Steadying and taper work with a finger. Pressure and tilt need a stylus — Apple Pencil is iPad-only, so on a phone those two sit idle."
+          : pencilOnly
+            ? "Fingers pan and pinch; only the Pencil leaves a mark, so you can rest your hand on the glass."
+            : "Pressure and tilt are live. Turn on Pencil only to rest your hand on the glass."}
       </Text>
     </View>
   );

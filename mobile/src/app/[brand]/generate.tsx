@@ -68,7 +68,7 @@ import {
   SectionLabel,
 } from "@/components/ui";
 import { RADIUS, SPACE, TYPE } from "@/lib/theme";
-import { useContentBottomInset } from "@/lib/chrome";
+import { CONTENT_MAX_WIDTH, useContentBottomInset } from "@/lib/chrome";
 
 const STYLE_ICONS: Record<
   string,
@@ -280,7 +280,7 @@ export default function GenerateScreen() {
           provider,
           {
             quality,
-            shading,
+            shading: brand.generate.offersShading ? shading : "none",
             reference: reference
               ? {
                   data: reference.data,
@@ -466,7 +466,7 @@ export default function GenerateScreen() {
     >
       <ScrollView
         style={{ backgroundColor: theme.background }}
-        contentContainerStyle={[styles.scroll, { paddingBottom: bottomInset }]}
+        contentContainerStyle={[styles.scroll, { paddingBottom: bottomInset, maxWidth: CONTENT_MAX_WIDTH, width: "100%", alignSelf: "center" }]}
         keyboardShouldPersistTaps="handled"
       >
         <ScreenHeader
@@ -928,6 +928,8 @@ export default function GenerateScreen() {
             ))}
           </View>
 
+          {brand.generate.offersShading && (
+          <>
           <Text
             style={[
               styles.field,
@@ -964,6 +966,8 @@ export default function GenerateScreen() {
               ? ""
               : " · The render comes back shaded; the stencil beside it is still pure line."}
           </Text>
+          </>
+          )}
 
           {error && (
             <View style={{ marginTop: SPACE.md }}>

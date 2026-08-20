@@ -42,7 +42,7 @@ import { Skeleton } from "@/components/Skeleton";
 import { StencilReveal } from "@/components/StencilReveal";
 import { ScreenHeader, Notice, Card } from "@/components/ui";
 import { RADIUS, SPACE, TYPE } from "@/lib/theme";
-import { useContentBottomInset } from "@/lib/chrome";
+import { CONTENT_MAX_WIDTH, useContentBottomInset } from "@/lib/chrome";
 
 type RevealTrace = { paths: Point[][]; width: number; height: number };
 
@@ -284,7 +284,7 @@ export default function ConvertScreen() {
   return (
     <ScrollView
       style={{ backgroundColor: theme.background }}
-      contentContainerStyle={[styles.scroll, { paddingBottom: bottomInset }]}
+      contentContainerStyle={[styles.scroll, { paddingBottom: bottomInset, maxWidth: CONTENT_MAX_WIDTH, width: "100%", alignSelf: "center" }]}
     >
       <ScreenHeader
         eyebrow={brand.convert.tabLabel}

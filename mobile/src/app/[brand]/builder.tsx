@@ -53,6 +53,7 @@ import { ScreenHeader, Chip, SectionLabel, Card } from "@/components/ui";
 import { ImageViewer } from "@/components/ImageViewer";
 import { NamePrompt } from "@/components/NamePrompt";
 import { IcingPreview } from "@/components/IcingPreview";
+import { SubstrateMockup } from "@/components/SubstrateMockup";
 import { PlacementPreview } from "@/components/PlacementPreview";
 import { DesignActions, type DesignAction } from "@/components/DesignActions";
 import { allTags, filterDesigns, normalizeTags, type SourceFilter } from "@/lib/libraryFilter";
@@ -76,7 +77,7 @@ import { PaperSubstrate } from "@/components/PaperSubstrate";
 import { getPrinterProfile, savePrinterProfile, type PrinterProfile } from "@/lib/printerProfiles";
 import { type IconName } from "@/lib/icons";
 import { SPACE, RADIUS, TYPE, lift } from "@/lib/theme";
-import { useContentBottomInset } from "@/lib/chrome";
+import { CONTENT_MAX_WIDTH, useContentBottomInset } from "@/lib/chrome";
 
 type SheetTemplate = { id: string; label: string; widthIn: number; heightIn: number };
 
@@ -149,6 +150,7 @@ export default function BuilderScreen() {
   const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [icing, setIcing] = useState<LibraryDesign | null>(null);
+  const [mockup, setMockup] = useState<LibraryDesign | null>(null);
   const [menu, setMenu] = useState<LibraryDesign | null>(null);
   const [placing, setPlacing] = useState<LibraryDesign | null>(null);
   const [placingWidthIn, setPlacingWidthIn] = useState(3);
@@ -845,9 +847,17 @@ export default function BuilderScreen() {
         icon: "expand-outline",
         onPress: () => setPreview(design),
       },
-      // Icing colors are a Sugar Haus question; flash is inked.
+      // Icing colors and the real-object mockup are Sugar Haus questions;
+      // flash goes on skin, which has its own placement mode.
       ...(brand.id === "sugar"
         ? [
+            {
+              key: "mockup",
+              label: "On a cake pop or cookie",
+              hint: "Place it and see it wrapped",
+              icon: "ellipse-outline" as const,
+              onPress: () => setMockup(design),
+            },
             {
               key: "icing",
               label: "Try icing colors",
@@ -1081,7 +1091,7 @@ export default function BuilderScreen() {
   return (
     <ScrollView
       style={{ backgroundColor: theme.background }}
-      contentContainerStyle={[styles.scroll, { paddingBottom: bottomInset }]}
+      contentContainerStyle={[styles.scroll, { paddingBottom: bottomInset, maxWidth: CONTENT_MAX_WIDTH, width: "100%", alignSelf: "center" }]}
     >
       <ScreenHeader
         eyebrow={brand.builder.tabLabel}
@@ -1591,6 +1601,10 @@ export default function BuilderScreen() {
           initialWidthIn={placingWidthIn}
           onClose={() => setPlacing(null)}
         />
+      )}
+
+      {mockup && (
+        <SubstrateMockup uri={mockup.uri} title={mockup.title} onClose={() => setMockup(null)} />
       )}
 
       {icing && (

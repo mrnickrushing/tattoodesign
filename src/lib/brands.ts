@@ -43,6 +43,12 @@ export type BrandConfig = {
     subtitle: string;
     promptPlaceholder: string;
     styles: GenerateStyle[];
+    /**
+     * Whether to offer the shading vocabulary. It is tattoo technique language
+     * — whip, pepper, grey wash — and means nothing to someone laying out a
+     * cookie, so Sugar Haus does without.
+     */
+    offersShading: boolean;
     /** How the AI prompt frames the subject, e.g. "Tattoo flash design" */
     subjectFraming: string;
     /** What the linework should look like it's meant for. */
@@ -203,6 +209,7 @@ export const BRANDS: Record<BrandId, BrandConfig> = {
       subtitle:
         "Describe the piece — subject, mood, style — and generate clean black-line flash art on a white background, powered by Gemini.",
       promptPlaceholder: "e.g. a swallow wrapped around a dagger, bold traditional",
+      offersShading: true,
       subjectFraming: "Tattoo flash design",
       outputFraming: "suitable for a tattoo stencil, like classic flash sheet art",
       styles: [
@@ -328,6 +335,7 @@ export const BRANDS: Record<BrandId, BrandConfig> = {
       subtitle:
         "Describe the design — subject, mood, style — and generate clean black-line cookie and cake art on a white background, powered by Gemini.",
       promptPlaceholder: "e.g. a daisy wreath cookie, simple outline for flooding",
+      offersShading: false,
       subjectFraming: "Cookie and cake decorating design",
       outputFraming: "suitable for a royal icing stencil or cutter template",
       styles: [
