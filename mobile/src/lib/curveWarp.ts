@@ -58,7 +58,12 @@ export const SURFACES: Surface[] = [
   // Sugar: measured the same way, around the thing.
   { id: "cakepop", label: "Cake pop", caption: "A 1.5in ball — curves away in every direction", kind: "sphere", circumferenceIn: 4.7, brand: "sugar" },
   { id: "truffle", label: "Truffle", caption: "A 1.1in ball", kind: "sphere", circumferenceIn: 3.5, brand: "sugar" },
-  { id: "domecookie", label: "Domed cookie", caption: "A shallow 4in dome", kind: "sphere", circumferenceIn: 12.6, brand: "sugar" },
+  // A royal-iced cookie is close to flat with a slight crown, so it is a cap
+  // of a large sphere, not a small one. The first pass used a 4in dome, which
+  // for a 3in cookie means the cookie spans three quarters of the ball — that
+  // is a dome-topped cupcake, and it exaggerated the edge compression enough
+  // to be misleading.
+  { id: "domecookie", label: "Domed cookie", caption: "The slight crown on an iced cookie", kind: "sphere", circumferenceIn: 28.3, brand: "sugar" },
   { id: "tier6", label: "6in cake tier", caption: "About 18.8in around", kind: "cylinder", circumferenceIn: 18.8, brand: "sugar" },
   { id: "tier8", label: "8in cake tier", caption: "About 25.1in around", kind: "cylinder", circumferenceIn: 25.1, brand: "sugar" },
   { id: "tumbler", label: "Tumbler", caption: "A tapered 9.4in cup", kind: "cone", circumferenceIn: 9.4, farCircumferenceIn: 7, brand: "sugar" },
