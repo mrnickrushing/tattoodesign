@@ -44,6 +44,7 @@ import {
 } from "@/lib/sheetLibrary";
 import { File, Paths } from "expo-file-system";
 import { generateId } from "@/lib/id";
+import { imageDataUrl } from "@/lib/imageType";
 import { pickImageFile } from "@/lib/imageImport";
 import { saveDataUrlToPhotos, shareDataUrl, shareUri } from "@/lib/files";
 import { composeSheet } from "@/lib/sheet";
@@ -968,7 +969,7 @@ export default function BuilderScreen() {
       quality: 1,
     });
     if (result.canceled || !result.assets[0]?.base64) return;
-    const dataUrl = `data:image/jpeg;base64,${result.assets[0].base64}`;
+    const dataUrl = imageDataUrl(result.assets[0].base64, result.assets[0].mimeType);
     await addToLibrary(brand.id, {
       dataUrl,
       title: `Upload ${new Date().toLocaleTimeString()}`,

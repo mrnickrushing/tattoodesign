@@ -47,11 +47,17 @@ export function ScreenHeader({
   /** Adds a quiet physical-paper layer while retaining the established header gradient by default. */
   ground?: boolean;
 }) {
-  const { brand, theme } = useBrand();
+  const { brand, theme, appearance } = useBrand();
   const titleType = size === "display" ? TYPE.display : TYPE.title;
+  // The gradient has to follow the appearance, because the title on top of it
+  // is drawn in theme.foreground. Sugar Haus follows the system, so a hardcoded
+  // light gradient put a light-theme background under a dark-theme title and
+  // the heading became pale-on-pale — invisible on any device set to dark.
   const heroColors =
-    brand.id === "ink"
-      ? (["#211715", theme.surface, "#11100f"] as const)
+    appearance === "dark"
+      ? brand.id === "ink"
+        ? (["#211715", theme.surface, "#11100f"] as const)
+        : (["#2a1d22", theme.surface, "#191114"] as const)
       : (["#ffffff", "#fcebf1", "#faeee7"] as const);
 
   return (

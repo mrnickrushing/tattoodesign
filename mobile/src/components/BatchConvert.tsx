@@ -17,6 +17,7 @@ import { useBrand } from "@/context/BrandContext";
 import { Button } from "@/components/Button";
 import { Notice } from "@/components/ui";
 import { addToLibrary, setDesignTags } from "@/lib/designLibrary";
+import { imageDataUrl } from "@/lib/imageType";
 import { stencilize, type StencilOptions } from "@/lib/stencil";
 import {
   BATCH_LIMIT,
@@ -90,7 +91,7 @@ export function BatchConvert({
     (async () => {
       try {
         const base64 = await new File(next.uri).base64();
-        const traced = await stencilize(`data:image/jpeg;base64,${base64}`, options);
+        const traced = await stencilize(imageDataUrl(base64), options);
         if (!cancelled) setState((current) => (current ? completeItem(current, next.id, traced) : current));
       } catch (e) {
         if (!cancelled)

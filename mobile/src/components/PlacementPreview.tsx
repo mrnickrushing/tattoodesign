@@ -23,6 +23,7 @@ import { useBrand } from "@/context/BrandContext";
 import { Button } from "@/components/Button";
 import { Chip, Notice } from "@/components/ui";
 import { composePlacement } from "@/lib/placement";
+import { imageDataUrl } from "@/lib/imageType";
 import { saveDataUrlToPhotos } from "@/lib/files";
 import { CARD_HEIGHT_IN, CARD_WIDTH_IN, getScreenPpi, setScreenPpi } from "@/lib/measure";
 import { PREF_KEYS, preferences } from "@/lib/preferences";
@@ -220,7 +221,7 @@ export function PlacementPreview({
       const shot = await cameraRef.current.takePictureAsync({ base64: true, quality: 0.9 });
       if (!shot?.base64) throw new Error("The camera returned no frame.");
       setPhoto({
-        uri: `data:image/jpeg;base64,${shot.base64}`,
+        uri: imageDataUrl(shot.base64),
         width: shot.width,
         height: shot.height,
       });
@@ -251,10 +252,10 @@ export function PlacementPreview({
           base64: true,
           quality: 0.9,
         });
-    if (result.canceled || !result.assets[0]?.base64) return;
-    const asset = result.assets[0];
+    const asset = result.canceled ? null : result.assets[0];
+    if (!asset?.base64) return;
     setPhoto({
-      uri: `data:image/jpeg;base64,${asset.base64}`,
+      uri: imageDataUrl(asset.base64, asset.mimeType),
       width: asset.width,
       height: asset.height,
     });

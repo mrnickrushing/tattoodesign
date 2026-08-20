@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { pickImageFile } from "@/lib/imageImport";
+import { imageDataUrl } from "@/lib/imageType";
 import Slider from "@react-native-community/slider";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
@@ -141,9 +142,18 @@ export default function ConvertScreen() {
           setResultUrl(next);
           setResultReveal(reveal);
         }
-      } catch {
-        if (seq === pipelineSeq.current)
-          setError("Couldn't process that image. Try a different photo.");
+      } catch (e) {
+        // Say what actually went wrong. "Try a different photo" blames the
+        // photo for what is often a device or browser limitation, and it left
+        // nothing to go on when the whole pipeline failed for one reason.
+        console.error("[convert] pipeline failed", e);
+        if (seq === pipelineSeq.current) {
+          setError(
+            e instanceof Error && e.message
+              ? e.message
+              : "Couldn't process that image. Try a different photo."
+          );
+        }
       } finally {
         if (seq === pipelineSeq.current) setProcessing(false);
       }
@@ -193,9 +203,9 @@ export default function ConvertScreen() {
       base64: true,
       quality: 1,
     });
-    if (result.canceled || !result.assets[0]?.base64) return;
-    const asset = result.assets[0];
-    const dataUrl = `data:image/jpeg;base64,${asset.base64}`;
+    const asset = result.canceled ? null : result.assets[0];
+    if (!asset?.base64) return;
+    const dataUrl = imageDataUrl(asset.base64, asset.mimeType);
     setSourceUrl(dataUrl);
     setSourceSize({ width: asset.width, height: asset.height });
     setCropped(null);
