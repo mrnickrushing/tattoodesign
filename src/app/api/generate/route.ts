@@ -363,6 +363,10 @@ function allowedOrigin(origin: string | null): string | null {
     const url = new URL(origin);
     if (url.hostname === "localhost" || url.hostname === "127.0.0.1") return origin;
     if (url.hostname.endsWith(".up.railway.app")) return origin;
+    // The web build is hosted on EAS, which serves it from a subdomain of
+    // expo.app. Same app, different origin — so it has to be named here or the
+    // browser refuses every call to the generator.
+    if (url.hostname.endsWith(".expo.app")) return origin;
   } catch {
     return null;
   }
