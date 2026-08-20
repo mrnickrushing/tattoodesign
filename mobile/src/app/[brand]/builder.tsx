@@ -56,6 +56,7 @@ import { NamePrompt } from "@/components/NamePrompt";
 import { IcingPreview } from "@/components/IcingPreview";
 import { SubstrateMockup } from "@/components/SubstrateMockup";
 import { OrderPlanner } from "@/components/OrderPlanner";
+import { HealedTimeline } from "@/components/HealedTimeline";
 import { describeAge, getPrintLog, printsOf, recordPrint, summarisePrints, type PrintRecord } from "@/lib/printLog";
 import { PlacementPreview } from "@/components/PlacementPreview";
 import { DesignActions, type DesignAction } from "@/components/DesignActions";
@@ -158,6 +159,7 @@ export default function BuilderScreen() {
   const [icing, setIcing] = useState<LibraryDesign | null>(null);
   const [mockup, setMockup] = useState<LibraryDesign | null>(null);
   const [printLog, setPrintLog] = useState<PrintRecord[]>([]);
+  const [healed, setHealed] = useState<LibraryDesign | null>(null);
   const [menu, setMenu] = useState<LibraryDesign | null>(null);
   const [placing, setPlacing] = useState<LibraryDesign | null>(null);
   const [placingWidthIn, setPlacingWidthIn] = useState(3);
@@ -872,6 +874,17 @@ export default function BuilderScreen() {
         icon: "brush",
         onPress: () => setEditing(design),
       },
+      ...(brand.id === "ink"
+        ? [
+            {
+              key: "healed" as const,
+              label: "How it healed",
+              hint: "Real photos over time",
+              icon: "history" as const,
+              onPress: () => setHealed(design),
+            },
+          ]
+        : []),
       ...(summarisePrints(printLog, design.id)
         ? [
             {
@@ -1687,6 +1700,15 @@ export default function BuilderScreen() {
           title={placing.title}
           initialWidthIn={placingWidthIn}
           onClose={() => setPlacing(null)}
+        />
+      )}
+
+      {healed && (
+        <HealedTimeline
+          designId={healed.id}
+          title={healed.title}
+          createdAt={healed.createdAt}
+          onClose={() => setHealed(null)}
         />
       )}
 
