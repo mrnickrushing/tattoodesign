@@ -40,11 +40,21 @@ const PAPER_LEVEL = 235;
 const INK_LEVEL = 60;
 
 /**
- * Line art is bimodal: nearly all paper and ink, with very little in between.
- * A photograph — even a high-contrast one — lives in the middle. The cutoff is
- * deliberately generous, because misreading a drawing as a photo produces the
- * doubled-line output this module exists to avoid, while misreading a photo as
- * a drawing merely produces a flat threshold, which is a recoverable mistake.
+ * Line art is mostly paper and ink; a photograph lives in the middle.
+ *
+ * The cutoffs are calibrated against three real images rather than guessed,
+ * because the obvious guess is wrong. Dotwork stipple — which is exactly the
+ * shading a good stencil uses — is thousands of tiny anti-aliased dots, and
+ * every one of them contributes mid-tone pixels. A drawing that is
+ * unmistakably a drawing measured 14% mid, which a tight bimodality test
+ * rejects.
+ *
+ *   clean dotwork line art   paper 0.71   ink 0.15   mid 0.14
+ *   fully rendered artwork   paper 0.40   ink 0.21   mid 0.39
+ *   photo of art on a desk   paper 0.10   ink 0.14   mid 0.75
+ *
+ * Paper coverage separates those three far more cleanly than mid-tone does,
+ * so it carries most of the weight.
  */
 export function classifySource(gray: Uint8Array): SourceProfile {
   if (!gray.length) return { kind: "photo", paper: 0, ink: 0, mid: 0 };
@@ -57,7 +67,7 @@ export function classifySource(gray: Uint8Array): SourceProfile {
   const total = gray.length;
   const mid = (total - paper - ink) / total;
   return {
-    kind: mid < 0.12 && paper / total > 0.4 && ink / total > 0.002 ? "lineart" : "photo",
+    kind: mid < 0.25 && paper / total > 0.55 && ink / total > 0.002 ? "lineart" : "photo",
     paper: paper / total,
     ink: ink / total,
     mid,

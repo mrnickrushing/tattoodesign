@@ -159,3 +159,29 @@ test("a blank page produces a blank stencil rather than throwing", () => {
 test("the output is the same size as the input", () => {
   assert.equal(centerlineStencil(bar(4), W, H, thin).mask.length, W * H);
 });
+
+/** Reproduces the pixel statistics measured on real images. */
+function withProfile(paper: number, ink: number): Uint8Array {
+  const out = new Uint8Array(10000);
+  const paperCount = Math.round(paper * out.length);
+  const inkCount = Math.round(ink * out.length);
+  for (let i = 0; i < out.length; i++) {
+    out[i] = i < paperCount ? 250 : i < paperCount + inkCount ? 10 : 140;
+  }
+  return out;
+}
+
+test("dotwork line art is recognised despite its stipple being mid-tone", () => {
+  // Measured on a real generation: thousands of anti-aliased dots put 14% of
+  // the image in the middle of the range, and a tight bimodality test rejects
+  // the very artwork a good stencil is made of.
+  assert.equal(classifySource(withProfile(0.71, 0.15)).kind, "lineart");
+});
+
+test("a fully rendered illustration is still not line art", () => {
+  assert.equal(classifySource(withProfile(0.4, 0.21)).kind, "photo");
+});
+
+test("a photograph of artwork on a desk is still not line art", () => {
+  assert.equal(classifySource(withProfile(0.1, 0.14)).kind, "photo");
+});
