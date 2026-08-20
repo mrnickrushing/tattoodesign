@@ -77,6 +77,13 @@ export const SHADING_VOCABULARY: ShadingVocabulary[] = [
     label: "Line only",
     caption: "Pure outline, nothing filled — the classic transfer stencil",
     render: "",
+    // Stated rather than left absent. An absent rule falls through to the
+    // style's, and several styles — black & grey, chicano, dotwork — declare
+    // rules that permit full tonal rendering. So picking "Line only" on one of
+    // those produced a shaded illustration: the option said line only and the
+    // prompt said otherwise.
+    constraint:
+      "Pure black ink linework only on white. No shading, no gradients, no grey, no color, no rendering, no airbrushing, no stippling, no hatching — flat outlines only.",
   },
   {
     id: "whip",

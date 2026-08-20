@@ -6,6 +6,7 @@
 
 import { Skia, ColorType, AlphaType, ImageFormat } from "@shopify/react-native-skia";
 import { DEFAULT_CENTERLINE, centerlineStencil, classifySource } from "./lineart";
+import { structuralEdges, thresholdsFrom } from "./edges";
 import { skeletonize } from "./vectorize";
 
 export type StencilOptions = {
@@ -203,6 +204,22 @@ function buildMask(
   return mask;
 }
 
+/**
+ * Whether the picture is a subject on a plain field or rendered edge to edge.
+ *
+ * A photo of a rose on a wall has large flat areas; a fully shaded
+ * illustration has texture everywhere. The second needs a much longer run
+ * before a fragment is believed to be a line, or its shading arrives as dirt.
+ */
+function isPlainSubject(gray: Uint8Array): boolean {
+  if (!gray.length) return true;
+  let flatRuns = 0;
+  for (let i = 1; i < gray.length; i++) {
+    if (Math.abs(gray[i] - gray[i - 1]) <= 2) flatRuns++;
+  }
+  return flatRuns / gray.length > 0.7;
+}
+
 export type StencilMask = {
   /** One byte per pixel: 1 where a line was detected, 0 elsewhere. */
   mask: Uint8Array;
@@ -273,10 +290,23 @@ export async function stencilMask(
     return { mask, width, height };
   }
 
-  let gray = boxBlur(flat, width, height, opts.denoise);
+  const gray = boxBlur(flat, width, height, opts.denoise);
+
+  if (opts.mode === "outline" || opts.mode === "fine") {
+    // Thin to the ridge and follow it, rather than thresholding the gradient
+    // and thickening what survives. On a fully rendered illustration the old
+    // way welded every neighbouring edge pixel into solid black; see
+    // lib/edges.ts.
+    const dense = classifySource(bytes).kind === "photo" && !isPlainSubject(bytes);
+    const cutoff = opts.mode === "fine" ? opts.threshold * 1.18 : opts.threshold;
+    const lines = structuralEdges(gray, width, height, thresholdsFrom(cutoff, dense));
+    const weight = Math.max(0, opts.lineWeight - 1);
+    return { mask: weight > 0 ? dilate(lines, width, height, weight) : lines, width, height };
+  }
+
   const magnitude = sobelMagnitude(gray, width, height);
   const rawMask = buildMask(opts.mode, gray, magnitude, width, height, opts.threshold);
-  const mask = dilate(rawMask, width, height, opts.mode === "fine" ? Math.max(0, opts.lineWeight - 1) : opts.lineWeight);
+  const mask = dilate(rawMask, width, height, opts.lineWeight);
 
   return { mask, width, height };
 }

@@ -144,7 +144,10 @@ export async function POST(req: NextRequest) {
     shading.constraint ??
     style.inkConstraint ??
     "Pure black ink linework only, no shading, no color, no gradients, no gray.";
-  const tonal = !!(shading.constraint ?? style.inkConstraint);
+  // Whether the piece carries tone, which is a question about the shading
+  // chosen — not about whether a rule happens to be present. Line only means
+  // line only even on a style that would otherwise render itself in grey.
+  const tonal = shading.id !== "none";
   const outlineDirection = tonal
     ? `Crisp, production-ready rendering ${brand.generate.outputFraming}.`
     : `Clean unbroken outlines ${brand.generate.outputFraming}.`;
