@@ -50,7 +50,19 @@ export type LibraryDesign = {
   deleted?: boolean;
   /** Fingerprint of the image bytes, so unchanged pixels are never re-sent. */
   imageHash?: string;
+  /**
+   * Previous images, newest first.
+   *
+   * Editing used to delete the version it replaced, so a design iterated five
+   * times had no way back to the third — and the one you printed is often not
+   * the one you ended up with. Bounded, because history is worth keeping and
+   * not worth keeping forever.
+   */
+  history?: { file: string; at: number }[];
 };
+
+/** How many previous versions of a design are kept. */
+export const HISTORY_LIMIT = 8;
 
 /** Last-changed time, tolerating entries that predate sync. */
 export function changedAt(design: LibraryDesign): number {
@@ -182,7 +194,10 @@ export async function addToLibrary(
 export async function removeFromLibrary(brand: BrandId, id: string): Promise<void> {
   const designs = await getLibraryWithTombstones(brand);
   const gone = designs.find((d) => d.id === id);
-  if (gone) await deleteDesignImage(brand, gone.file ?? `${gone.id}.png`);
+  if (gone) {
+    await deleteDesignImage(brand, gone.file ?? `${gone.id}.png`);
+    for (const version of gone.history ?? []) await deleteDesignImage(brand, version.file);
+  }
   // The record stays, marked and timestamped, so the deletion can reach the
   // other devices. The pixels go immediately — a tombstone is metadata.
   await save(
@@ -214,19 +229,29 @@ export async function replaceInLibrary(
 
   const name = `${id}-${Date.now().toString(36)}.png`;
   const uri = await writeDesignImage(brand, name, dataUrl);
+
+  // The version being replaced moves into history rather than being deleted.
+  const previous = existing.file
+    ? [{ file: existing.file, at: changedAt(existing) }, ...(existing.history ?? [])]
+    : existing.history ?? [];
+  const kept = previous.slice(0, HISTORY_LIMIT);
+  const dropped = previous.slice(HISTORY_LIMIT);
+
   const updated: LibraryDesign = {
     ...existing,
     file: name,
     uri,
     updatedAt: Date.now(),
     imageHash: hashImage(dataUrl),
+    history: kept,
   };
   await save(
     brand,
     designs.map((d) => (d.id === id ? updated : d))
   );
-  // Only once the new one is safely written and recorded.
-  await deleteDesignImage(brand, existing.file ?? `${existing.id}.png`);
+  // Only what fell off the end of the history, and only once the new version
+  // is safely written and recorded.
+  for (const stale of dropped) await deleteDesignImage(brand, stale.file);
   return updated;
 }
 
@@ -264,4 +289,30 @@ export async function renameInLibrary(
     brand,
     designs.map((d) => (d.id === id ? { ...d, title, updatedAt: Date.now() } : d))
   );
+}
+
+/**
+ * Puts an earlier version back as the current one.
+ *
+ * Restoring is an edit like any other: the version being replaced joins the
+ * history, so going back is itself undoable. Anything else would make
+ * restoring the one destructive operation in the editor.
+ */
+export async function restoreVersion(
+  brand: BrandId,
+  id: string,
+  file: string
+): Promise<LibraryDesign | null> {
+  const base64 = await readDesignBase64(brand, file);
+  if (!base64) return null;
+  return replaceInLibrary(brand, id, `data:image/png;base64,${base64}`);
+}
+
+/** A usable URI for one stored version, or null if its pixels are gone. */
+export async function versionImage(brand: BrandId, file: string): Promise<string | null> {
+  try {
+    return await resolveDesignImage(brand, file);
+  } catch {
+    return null;
+  }
 }

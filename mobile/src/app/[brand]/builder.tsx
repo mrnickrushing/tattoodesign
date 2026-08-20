@@ -57,6 +57,7 @@ import { IcingPreview } from "@/components/IcingPreview";
 import { SubstrateMockup } from "@/components/SubstrateMockup";
 import { OrderPlanner } from "@/components/OrderPlanner";
 import { HealedTimeline } from "@/components/HealedTimeline";
+import { VersionHistory } from "@/components/VersionHistory";
 import { describeAge, getPrintLog, printsOf, recordPrint, summarisePrints, type PrintRecord } from "@/lib/printLog";
 import { PlacementPreview } from "@/components/PlacementPreview";
 import { DesignActions, type DesignAction } from "@/components/DesignActions";
@@ -160,6 +161,7 @@ export default function BuilderScreen() {
   const [mockup, setMockup] = useState<LibraryDesign | null>(null);
   const [printLog, setPrintLog] = useState<PrintRecord[]>([]);
   const [healed, setHealed] = useState<LibraryDesign | null>(null);
+  const [versions, setVersions] = useState<LibraryDesign | null>(null);
   const [menu, setMenu] = useState<LibraryDesign | null>(null);
   const [placing, setPlacing] = useState<LibraryDesign | null>(null);
   const [placingWidthIn, setPlacingWidthIn] = useState(3);
@@ -874,6 +876,17 @@ export default function BuilderScreen() {
         icon: "brush",
         onPress: () => setEditing(design),
       },
+      ...((design.history?.length ?? 0) > 0
+        ? [
+            {
+              key: "versions" as const,
+              label: "Earlier versions",
+              hint: `${design.history!.length} kept`,
+              icon: "history" as const,
+              onPress: () => setVersions(design),
+            },
+          ]
+        : []),
       ...(brand.id === "ink"
         ? [
             {
@@ -1700,6 +1713,17 @@ export default function BuilderScreen() {
           title={placing.title}
           initialWidthIn={placingWidthIn}
           onClose={() => setPlacing(null)}
+        />
+      )}
+
+      {versions && (
+        <VersionHistory
+          design={versions}
+          onClose={() => setVersions(null)}
+          onRestored={() => {
+            setVersions(null);
+            refreshLibrary();
+          }}
         />
       )}
 
