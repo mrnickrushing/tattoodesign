@@ -258,7 +258,13 @@ export function warpMesh(
 ): WarpMesh {
   const columns = Math.max(2, Math.round(divisions));
   const rows = Math.max(2, Math.round(divisions));
-  const map = direction === "compensate" ? compensate : foreshorten;
+  // A mesh asks, for each *output* pixel, where in the source it comes from —
+  // so the lookup is the inverse of the effect being produced. Building the
+  // compensated print means every printed position asks what the eye will see
+  // there, which is foreshorten; building the proof asks the other way round.
+  // Getting this backwards applies the distortion twice in the same direction
+  // instead of once, which still looks bent and is simply wrong.
+  const lookup = direction === "compensate" ? foreshorten : compensate;
 
   const positions: { x: number; y: number }[] = [];
   const uvs: { x: number; y: number }[] = [];
@@ -266,10 +272,7 @@ export function warpMesh(
     for (let column = 0; column <= columns; column++) {
       const u = column / columns;
       const v = row / rows;
-      // The mesh is driven from the destination back to the source: every
-      // output vertex asks where its pixels come from, which is what stops
-      // the warp tearing where the map expands.
-      const from = map({ u, v }, surface, apparentWidthIn, apparentHeightIn);
+      const from = lookup({ u, v }, surface, apparentWidthIn, apparentHeightIn);
       positions.push({ x: u * width, y: v * height });
       uvs.push({
         x: Math.max(0, Math.min(1, from.u)) * width,

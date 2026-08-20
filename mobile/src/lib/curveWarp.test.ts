@@ -199,3 +199,41 @@ test("a degenerate surface is treated as flat rather than dividing by zero", () 
   assert.deepEqual(compensate({ u: 0.3, v: 0.4 }, broken, 2, 2), { u: 0.3, v: 0.4 });
   assert.equal(printScale(broken, 3), 1);
 });
+
+test("the mesh samples through the inverse of the effect it produces", () => {
+  // Each output pixel asks where in the source it comes from, so building the
+  // compensated print looks up through foreshorten. Using the same-named map
+  // would apply the distortion twice in one direction — still bent, still
+  // wrong, and hard to spot by eye.
+  const mesh = warpMesh(100, 100, wrist, 1.2, 1.2, "compensate", 4);
+  const index = 1 * (4 + 1) + 1; // row 1, column 1 => u = v = 0.25
+  const expected = foreshorten({ u: 0.25, v: 0.25 }, wrist, 1.2, 1.2);
+  assert.ok(Math.abs(mesh.uvs[index].x - expected.u * 100) < 1e-6, `sampled ${mesh.uvs[index].x}`);
+
+  const proof = warpMesh(100, 100, wrist, 1.2, 1.2, "foreshorten", 4);
+  const other = compensate({ u: 0.25, v: 0.25 }, wrist, 1.2, 1.2);
+  assert.ok(Math.abs(proof.uvs[index].x - other.u * 100) < 1e-6);
+});
+
+test("compensating gives the edges of the sheet more of the design", () => {
+  // The printed edges are what wraps away, so they have to carry more paper
+  // per unit of design than the middle does.
+  const mesh = warpMesh(1000, 1000, wrist, 1.5, 1.5, "compensate", 10);
+  const row = mesh.uvs.slice(0, 11).map((uv) => uv.x);
+  const edgeSpan = row[1] - row[0];
+  const middleSpan = row[6] - row[5];
+  assert.ok(edgeSpan < middleSpan, `edge ${edgeSpan} should be tighter than middle ${middleSpan}`);
+});
+
+test("the compensated print never needs to sample past the artwork", () => {
+  // foreshorten contracts, so a correct mesh stays in bounds on its own and
+  // the clamp in warpMesh is a belt, not the thing holding it up.
+  for (const surface of SURFACES) {
+    for (const size of [0.5, 1, 2, 4]) {
+      for (const uv of warpMesh(100, 100, surface, size, size, "compensate", 8).uvs) {
+        assert.ok(uv.x >= -1e-6 && uv.x <= 100 + 1e-6, `${surface.id} at ${size}in sampled ${uv.x}`);
+        assert.ok(uv.y >= -1e-6 && uv.y <= 100 + 1e-6, `${surface.id} at ${size}in sampled ${uv.y}`);
+      }
+    }
+  }
+});
