@@ -1,4 +1,15 @@
-import { AlphaType, ColorType, ImageFormat, Skia } from "@shopify/react-native-skia";
+import {
+  AlphaType,
+  BlendMode,
+  ColorType,
+  FilterMode,
+  ImageFormat,
+  MipmapMode,
+  Skia,
+  TileMode,
+  VertexMode,
+} from "@shopify/react-native-skia";
+import { warpMesh, type Surface } from "./curveWarp";
 import { stripDataUrlPrefix } from "./files";
 import { agePixels, healingProfile, type HealAge } from "./healing";
 
@@ -42,23 +53,57 @@ export function inspectProduction(dataUrl: string, dpi = 203, brand: "ink" | "su
   ];
 }
 
-export function wrapForSurface(dataUrl: string, amount: number, taper: number): string {
+/**
+ * Redraws the artwork through a surface map.
+ *
+ * The previous version stretched vertical strips by a hand-tuned polynomial,
+ * which could only ever squeeze one axis and had no relationship to any actual
+ * measurement — a "35% curvature" that meant nothing you could hold a tape
+ * measure against. This resamples through a triangle mesh instead, so a cake
+ * pop can move pixels in both axes at once and the amount of correction comes
+ * from a real circumference.
+ */
+export function wrapForSurface(
+  dataUrl: string,
+  surface: Surface,
+  apparentWidthIn: number,
+  apparentHeightIn: number,
+  direction: "compensate" | "foreshorten" = "compensate"
+): string {
   const image = decode(dataUrl);
-  const width = image.width(), height = image.height();
-  const surface = Skia.Surface.Make(width, height);
-  if (!surface) throw new Error("The surface wrap is too large for this device.");
-  const canvas = surface.getCanvas();
+  const width = image.width();
+  const height = image.height();
+  if (surface.kind === "flat" || surface.circumferenceIn <= 0) return dataUrl;
+
+  const surfaceOut = Skia.Surface.Make(width, height);
+  if (!surfaceOut) throw new Error("The surface wrap is too large for this device.");
+  const canvas = surfaceOut.getCanvas();
   canvas.clear(Skia.Color("white"));
-  const strips = Math.min(240, width);
-  for (let n = 0; n < strips; n++) {
-    const sx = Math.floor((n / strips) * width), sx2 = Math.ceil(((n + 1) / strips) * width);
-    const center = ((n + 0.5) / strips) * 2 - 1;
-    const curveScale = 1 - amount * 0.34 * center * center;
-    const dx = width / 2 + center * (width / 2) * (1 - amount * 0.16) - ((sx2 - sx) * curveScale) / 2;
-    const dh = height * (1 - taper * Math.abs(center) * 0.28);
-    canvas.drawImageRect(image, Skia.XYWHRect(sx, 0, sx2 - sx, height), Skia.XYWHRect(dx, (height - dh) / 2, Math.max(1, (sx2 - sx) * curveScale + 1), dh), Skia.Paint());
-  }
-  return `data:image/png;base64,${surface.makeImageSnapshot().encodeToBase64(ImageFormat.PNG)}`;
+
+  const mesh = warpMesh(width, height, surface, apparentWidthIn, apparentHeightIn, direction);
+  const paint = Skia.Paint();
+  paint.setAntiAlias(true);
+  // The image is the texture the mesh samples, so it has to be a shader rather
+  // than something drawn — drawVertices paints with whatever the paint holds.
+  paint.setShader(
+    image.makeShaderOptions(
+      TileMode.Decal,
+      TileMode.Decal,
+      FilterMode.Linear,
+      MipmapMode.None
+    )
+  );
+
+  const vertices = Skia.MakeVertices(
+    VertexMode.Triangles,
+    mesh.positions,
+    mesh.uvs,
+    undefined,
+    mesh.indices
+  );
+  canvas.drawVertices(vertices, BlendMode.Src, paint);
+
+  return `data:image/png;base64,${surfaceOut.makeImageSnapshot().encodeToBase64(ImageFormat.PNG)}`;
 }
 
 /**

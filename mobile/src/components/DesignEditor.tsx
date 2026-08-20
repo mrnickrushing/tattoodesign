@@ -72,6 +72,7 @@ import {
   type PenSettings,
 } from "@/lib/penInput";
 import { renderStroke } from "@/lib/ribbon";
+import { findSurface, maxApparentWidthIn, printScale, surfacesFor } from "@/lib/curveWarp";
 import {
   DEFAULT_BANDS,
   MAX_BANDS,
@@ -255,8 +256,8 @@ export function DesignEditor({
   const [cropping, setCropping] = useState(false);
   const [lineWeight, setLineWeight] = useState(1);
   const [threshold, setThreshold] = useState(60);
-  const [wrapAmount, setWrapAmount] = useState(0.35);
-  const [wrapTaper, setWrapTaper] = useState(0.2);
+  const [surfaceId, setSurfaceId] = useState("flat");
+  const [wrapWidthIn, setWrapWidthIn] = useState(3);
   const [findings, setFindings] = useState<ProductionFinding[]>([]);
   const [healAge, setHealAge] = useState<HealAge>("fresh");
   const [healed, setHealed] = useState<string | null>(null);
@@ -827,13 +828,25 @@ export function DesignEditor({
     }
   }
 
-  async function applyWrap() {
+  /**
+   * `compensate` is what you print — pre-distorted so it reads correctly once
+   * it is on the curve. `foreshorten` is the proof — what the flat artwork
+   * will actually look like there. Both come off the same map.
+   */
+  async function applyWrap(direction: "compensate" | "foreshorten") {
     if (!project || !preview) return;
+    const surface = findSurface(surfaceId);
+    if (!surface || surface.kind === "flat") {
+      setError("Pick the surface this is going on first.");
+      return;
+    }
     try {
-      const warped = wrapForSurface(preview, wrapAmount, wrapTaper);
+      const heightIn = wrapWidthIn * (project.canvas.height / project.canvas.width);
+      const warped = wrapForSurface(preview, surface, wrapWidthIn, heightIn, direction);
       const hidden = { ...project, layers: project.layers.map((layer) => ({ ...layer, visible: false })) };
-      const result = await addRasterAsset(hidden, warped, "Surface wrap proof");
-      await commit("Surface wrap", result.project);
+      const label = direction === "compensate" ? "Compensated for" : "Proof on";
+      const result = await addRasterAsset(hidden, warped, `${label} ${surface.label.toLowerCase()}`);
+      await commit(`${label} ${surface.label.toLowerCase()}`, result.project);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't build the surface wrap.");
     }
@@ -1156,11 +1169,11 @@ export function DesignEditor({
               onCleanup={cleanUpStrokes}
               nodeMode={nodeMode}
               onNodeMode={setNodeMode}
-              wrapAmount={wrapAmount}
-              wrapTaper={wrapTaper}
+              surfaceId={surfaceId}
+              wrapWidthIn={wrapWidthIn}
               findings={findings}
-              onWrapAmount={setWrapAmount}
-              onWrapTaper={setWrapTaper}
+              onSurface={setSurfaceId}
+              onWrapWidth={setWrapWidthIn}
               onApplyWrap={applyWrap}
               onInspect={runProductionCheck}
               healAge={healAge}
@@ -1229,11 +1242,11 @@ function Inspector({
   onCleanup,
   nodeMode,
   onNodeMode,
-  wrapAmount,
-  wrapTaper,
+  surfaceId,
+  wrapWidthIn,
   findings,
-  onWrapAmount,
-  onWrapTaper,
+  onSurface,
+  onWrapWidth,
   onApplyWrap,
   onInspect,
   healAge,
@@ -1281,12 +1294,12 @@ function Inspector({
   onCleanup: () => void;
   nodeMode: "move" | "delete" | "insert";
   onNodeMode: (mode: "move" | "delete" | "insert") => void;
-  wrapAmount: number;
-  wrapTaper: number;
+  surfaceId: string;
+  wrapWidthIn: number;
   findings: ProductionFinding[];
-  onWrapAmount: (value: number) => void;
-  onWrapTaper: (value: number) => void;
-  onApplyWrap: () => void;
+  onSurface: (id: string) => void;
+  onWrapWidth: (value: number) => void;
+  onApplyWrap: (direction: "compensate" | "foreshorten") => void;
   onInspect: () => void;
   healAge: HealAge;
   onHealAge: (age: HealAge) => void;
@@ -1648,8 +1661,13 @@ function Inspector({
   if (tool === "production") {
     return (
       <PanelTitle icon="shield-checkmark-outline" title="Production desk" subtitle="Preflight, compensate for curved placement, compare a capture, and prepare a client proof.">
-        <SliderRow label="Surface curvature" value={wrapAmount} min={0} max={1} step={0.05} display={`${Math.round(wrapAmount * 100)}%`} onChange={onWrapAmount} />
-        <SliderRow label="Edge taper" value={wrapTaper} min={0} max={1} step={0.05} display={`${Math.round(wrapTaper * 100)}%`} onChange={onWrapTaper} />
+        <SurfaceControls
+          surfaceId={surfaceId}
+          widthIn={wrapWidthIn}
+          onSurface={onSurface}
+          onWidth={onWrapWidth}
+          onApply={onApplyWrap}
+        />
         <View style={styles.symmetryBlock}>
           <Text style={[TYPE.micro, { color: theme.muted, fontFamily: theme.fontBodyMedium }]}>HOW IT WILL HEAL</Text>
           <View style={styles.segmentRow}>
@@ -1673,7 +1691,6 @@ function Inspector({
           </Text>
         </View>
         <View style={styles.actionRow}>
-          <MiniAction icon="body-outline" label="Apply wrap" onPress={onApplyWrap} />
           <MiniAction icon="shield-checkmark-outline" label="Preflight" onPress={onInspect} />
           <MiniAction icon="camera-outline" label="Check photo" onPress={onCheckCapture} />
           <MiniAction icon="send-outline" label="Review" onPress={onShareReview} />
@@ -1918,6 +1935,91 @@ function PenControls({
           ? "Fingers pan and pinch; only the Pencil leaves a mark, so you can rest your hand on the glass."
           : "Pressure and tilt need a stylus. A finger draws at the nominal width, with steadying and taper still applied."}
       </Text>
+    </View>
+  );
+}
+
+/**
+ * What the artwork is going onto, and how big it will read once it is there.
+ *
+ * Both numbers are real measurements — the circumference of the thing and the
+ * width the piece should appear — rather than an abstract "curvature" that
+ * cannot be checked against a tape measure. The correction follows from them.
+ */
+function SurfaceControls({
+  surfaceId,
+  widthIn,
+  onSurface,
+  onWidth,
+  onApply,
+}: {
+  surfaceId: string;
+  widthIn: number;
+  onSurface: (id: string) => void;
+  onWidth: (value: number) => void;
+  onApply: (direction: "compensate" | "foreshorten") => void;
+}) {
+  const { brand, theme } = useBrand();
+  const surfaces = surfacesFor(brand.id);
+  const surface = findSurface(surfaceId) ?? surfaces[0];
+  const curved = surface.kind !== "flat";
+  const limit = maxApparentWidthIn(surface);
+  const overSized = curved && widthIn > limit;
+  const scale = printScale(surface, widthIn);
+
+  return (
+    <View style={styles.symmetryBlock}>
+      <Text style={[TYPE.micro, { color: theme.muted, fontFamily: theme.fontBodyMedium }]}>GOING ONTO</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.segmentRow}>
+        {surfaces.map((item) => {
+          const active = item.id === surface.id;
+          return (
+            <Pressable
+              key={item.id}
+              onPress={() => {
+                onSurface(item.id);
+                Haptics.selectionAsync();
+              }}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+              style={[styles.symmetryChip, { backgroundColor: active ? theme.accent : theme.surfaceAlt, borderColor: active ? theme.accent : theme.line }]}
+            >
+              <Text style={[TYPE.micro, { color: active ? theme.accentText : theme.muted, fontFamily: theme.fontBodyMedium }]}>
+                {item.label.toUpperCase()}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+      <Text style={[TYPE.caption, { color: theme.muted, fontFamily: theme.fontBody }]}>{surface.caption}</Text>
+
+      {curved && (
+        <>
+          <SliderRow
+            label="Reads as"
+            value={widthIn}
+            min={0.5}
+            max={8}
+            step={0.25}
+            display={`${widthIn.toFixed(2)} in wide`}
+            onChange={onWidth}
+          />
+          <Text style={[TYPE.caption, { color: overSized ? theme.accent : theme.muted, fontFamily: theme.fontBody }]}>
+            {overSized
+              ? `${widthIn.toFixed(2)}in is more curve than one flat piece can cover on a ${surface.label.toLowerCase()}. It will be fitted to ${limit.toFixed(2)}in — split it into pieces if you need it bigger.`
+              : `Print it ${(widthIn * scale).toFixed(2)}in wide (${Math.round((scale - 1) * 100)}% wider) and it will read as ${widthIn.toFixed(2)}in once it is on.`}
+          </Text>
+          {surface.kind === "sphere" && (
+            <Text style={[TYPE.caption, { color: theme.muted, fontFamily: theme.fontBody }]}>
+              A ball cannot be wrapped by flat paper without some distortion. This is the best single piece: true at the centre, approximate at the edge.
+            </Text>
+          )}
+          <View style={styles.actionRow}>
+            <MiniAction icon="body-outline" label="Compensate" onPress={() => onApply("compensate")} />
+            <MiniAction icon="eye-outline" label="Proof it" onPress={() => onApply("foreshorten")} />
+          </View>
+        </>
+      )}
     </View>
   );
 }
