@@ -44,6 +44,8 @@ export async function generateDesign(
   provider: ImageProvider,
   options?: {
     quality?: ImageQuality;
+    /** Id from SHADING_VOCABULARY. Omitted or unknown means line only. */
+    shading?: string;
     reference?: { data: string; mimeType: string; strength: ReferenceStrength };
   }
 ): Promise<GenerateResult> {

@@ -52,6 +52,91 @@ export type BrandConfig = {
   builder: { navLabel: string; title: string; subtitle: string };
 };
 
+/**
+ * How tone is put into a piece, chosen independently of the style.
+ *
+ * A style says what the piece looks like; shading says how its darks are
+ * built. Traditional flash can be flat, whip-shaded or packed solid and still
+ * be traditional, so pairing every combination as its own style would multiply
+ * the list without saying anything new.
+ *
+ * `render` is direction for the finished artwork. `constraint` replaces the
+ * style's ink rule, because "no shading, no gray" and "whip shading" cannot
+ * both be true — that contradiction is why asking for shading previously
+ * produced flat line art anyway.
+ */
+export type ShadingVocabulary = {
+  id: string;
+  label: string;
+  caption: string;
+  render: string;
+  constraint?: string;
+};
+
+export const SHADING_VOCABULARY: ShadingVocabulary[] = [
+  {
+    id: "none",
+    label: "Line only",
+    caption: "Pure outline, nothing filled — the classic transfer stencil",
+    render: "",
+  },
+  {
+    id: "whip",
+    label: "Whip",
+    caption: "Tapered flicks pulled out of each shadow",
+    render:
+      "Build every shadow from whip shading: tapered strokes that start solid at the dark edge and flick out to nothing toward the light.",
+    constraint:
+      "Black ink only, all tone built from tapered whip-shading strokes, no smooth airbrushed gradients, no color.",
+  },
+  {
+    id: "pepper",
+    label: "Pepper",
+    caption: "Stippled grain for soft transitions",
+    render:
+      "Build tone from pepper shading: loose stippled dots, dense in the shadow and thinning into the light.",
+    constraint:
+      "Black ink only, all tone built from stippled dots of varying density, no smooth gradients, no color.",
+  },
+  {
+    id: "greywash",
+    label: "Grey wash",
+    caption: "Smooth diluted black, the black-and-grey standard",
+    render:
+      "Build tone from smooth grey wash: diluted black laid in soft even transitions with clean highlights left open.",
+    constraint: "Black and grey ink only, smooth diluted washes, no color.",
+  },
+  {
+    id: "hatch",
+    label: "Hatching",
+    caption: "Engraved crosshatch, etching sensibility",
+    render:
+      "Build tone from hatching and crosshatching, in the manner of an engraving, with line density carrying the value.",
+    constraint:
+      "Pure black ink only, all tone built from hatched and crosshatched lines, no gradients, no gray fills, no color.",
+  },
+  {
+    id: "solid",
+    label: "Solid black",
+    caption: "Packed black shapes against bare skin",
+    render:
+      "Build tone from solid packed black: shadows fully filled, mid-tones left as bare skin, no intermediate values.",
+    constraint:
+      "Pure black ink only, tone built from solid filled shapes against open skin, no gradients, no gray, no color.",
+  },
+];
+
+/**
+ * Line weight hierarchy: the thing that separates a professional stencil from
+ * an evenly-traced one. A real piece uses a heavy contour to hold the
+ * silhouette, a medium line for internal structure and a light line for
+ * detail, so it still reads from across the room once it has healed and
+ * spread. Asked for explicitly, because a model left to its own devices draws
+ * every line the same weight.
+ */
+export const LINE_WEIGHT_DIRECTION =
+  "Use a deliberate line weight hierarchy: a heavy confident outer contour holding the silhouette, medium weight for internal structure, and the finest lines reserved for detail. Never draw every line at the same weight.";
+
 export const BRANDS: Record<BrandId, BrandConfig> = {
   ink: {
     id: "ink",

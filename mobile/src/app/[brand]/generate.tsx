@@ -18,6 +18,7 @@ import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import * as Haptics from "expo-haptics";
 import { useBrand } from "@/context/BrandContext";
+import { SHADING_VOCABULARY } from "@/lib/brands";
 import {
   generateDesign,
   checkGeneratorAvailable,
@@ -134,6 +135,7 @@ export default function GenerateScreen() {
   const { remix: remixId } = useLocalSearchParams<{ remix?: string }>();
   const [prompt, setPrompt] = useState("");
   const [style, setStyle] = useState(brand.generate.styles[0]?.id ?? "");
+  const [shading, setShading] = useState(SHADING_VOCABULARY[0].id);
   const [provider, setProvider] = useState<ImageProvider>("gemini");
   const [quality, setQuality] = useState<ImageQuality>("standard");
   const [referenceStrength, setReferenceStrength] =
@@ -276,6 +278,7 @@ export default function GenerateScreen() {
           provider,
           {
             quality,
+            shading,
             reference: reference
               ? {
                   data: reference.data,
@@ -286,10 +289,16 @@ export default function GenerateScreen() {
           },
         );
         if (!result.ok) throw new Error(result.error);
+        // A shaded render is not flat line art, and tracing it at the settings
+        // tuned for flat line art finds every edge inside the shading too —
+        // the stencil comes back as mush. Ask for less: a higher gradient
+        // threshold keeps only the contours that hold the drawing together,
+        // and more blur stops stipple and hatching registering as structure.
+        const tonal = shading !== "none";
         const stencil = await stencilize(result.dataUrl, {
-          threshold: 70,
+          threshold: tonal ? 110 : 70,
           lineWeight: 1,
-          denoise: 1,
+          denoise: tonal ? 2 : 1,
         });
         batch.push({
           raw: result.dataUrl,
@@ -916,6 +925,43 @@ export default function GenerateScreen() {
               />
             ))}
           </View>
+
+          <Text
+            style={[
+              styles.field,
+              {
+                color: theme.muted,
+                fontFamily: theme.fontBodyMedium,
+                marginTop: SPACE.md,
+              },
+            ]}
+          >
+            SHADING
+          </Text>
+          <View style={styles.chips} accessibilityRole="radiogroup">
+            {SHADING_VOCABULARY.map((item) => (
+              <Chip
+                key={item.id}
+                label={item.label}
+                active={item.id === shading}
+                onPress={() => {
+                  setShading(item.id);
+                  Haptics.selectionAsync();
+                }}
+              />
+            ))}
+          </View>
+          <Text
+            style={[
+              TYPE.caption,
+              { color: theme.muted, fontFamily: theme.fontBody, marginTop: SPACE.xs },
+            ]}
+          >
+            {SHADING_VOCABULARY.find((item) => item.id === shading)?.caption}
+            {shading === "none"
+              ? ""
+              : " · The render comes back shaded; the stencil beside it is still pure line."}
+          </Text>
 
           {error && (
             <View style={{ marginTop: SPACE.md }}>
