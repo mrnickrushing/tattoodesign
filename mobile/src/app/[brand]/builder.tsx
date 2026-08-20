@@ -55,6 +55,7 @@ import { ImageViewer } from "@/components/ImageViewer";
 import { NamePrompt } from "@/components/NamePrompt";
 import { IcingPreview } from "@/components/IcingPreview";
 import { SubstrateMockup } from "@/components/SubstrateMockup";
+import { OrderPlanner } from "@/components/OrderPlanner";
 import { PlacementPreview } from "@/components/PlacementPreview";
 import { DesignActions, type DesignAction } from "@/components/DesignActions";
 import { allTags, filterDesigns, normalizeTags, type SourceFilter } from "@/lib/libraryFilter";
@@ -1168,6 +1169,19 @@ export default function BuilderScreen() {
         <IconAction icon="add-outline" label="New sheet" onPress={newSheet} />
         <IconAction icon="bookmark-outline" label="Save sheet" onPress={openSavePrompt} />
       </GlassSurface>
+
+      {/* Baking is the craft where materials are the constraint; a stencil
+          artist is not mixing anything by the cup. */}
+      {brand.id === "sugar" && (
+        <View style={{ marginBottom: SPACE.sm }}>
+          <OrderPlanner
+            sheetWidthIn={template.widthIn}
+            sheetHeightIn={template.heightIn}
+            pieceWidthIn={selected?.wIn ?? items[0]?.wIn ?? 3}
+            pieceHeightIn={selected?.hIn ?? items[0]?.hIn ?? 3}
+          />
+        </View>
+      )}
 
       <GlassSurface style={[styles.precisionBar, { borderColor: theme.line }]}>
         <View style={{ flex: 1 }}>
