@@ -155,14 +155,17 @@ function StudioHeader({
     );
   }
 
+  // The glass is a backdrop, not a wrapper. Putting the header's only
+  // height-bearing content inside an absoluteFill child left this View with
+  // nothing to measure, so it collapsed to its 1px border and every screen
+  // below it started under the status bar.
   return (
     <View style={[styles.glassHeader, { borderBottomColor: theme.line }]}>
+      <GlassSurface tint="regular" style={StyleSheet.absoluteFill} />
       {brandId === "ink" && <View pointerEvents="none" style={[styles.headerGlow, { backgroundColor: theme.accentGlow }]} />}
-      <GlassSurface tint="regular" style={StyleSheet.absoluteFill}>
-        <SafeAreaView edges={["top"]}>
-          <View style={styles.header}>{content}</View>
-        </SafeAreaView>
-      </GlassSurface>
+      <SafeAreaView edges={["top"]}>
+        <View style={styles.header}>{content}</View>
+      </SafeAreaView>
     </View>
   );
 }

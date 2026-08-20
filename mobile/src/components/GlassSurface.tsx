@@ -11,12 +11,12 @@ export const hasLiquidGlass =
  * the familiar surfaced card treatment intact on every other device.
  */
 export function GlassSurface({
-  children,
+  children = null,
   tint = "regular",
   style,
   fallbackColor,
 }: {
-  children: ReactNode;
+  children?: ReactNode;
   tint?: GlassStyle;
   style?: StyleProp<ViewStyle>;
   fallbackColor?: string;

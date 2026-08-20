@@ -76,6 +76,7 @@ import { PaperSubstrate } from "@/components/PaperSubstrate";
 import { getPrinterProfile, savePrinterProfile, type PrinterProfile } from "@/lib/printerProfiles";
 import { type IconName } from "@/lib/icons";
 import { SPACE, RADIUS, TYPE, lift } from "@/lib/theme";
+import { useContentBottomInset } from "@/lib/chrome";
 
 type SheetTemplate = { id: string; label: string; widthIn: number; heightIn: number };
 
@@ -129,6 +130,7 @@ function clamp(value: number, min: number, max: number) {
 
 export default function BuilderScreen() {
   const { brand, theme } = useBrand();
+  const bottomInset = useContentBottomInset();
   const { sheet: requestedSheetId } = useLocalSearchParams<{ sheet?: string }>();
   const { width: screenWidth } = useWindowDimensions();
 
@@ -1079,7 +1081,7 @@ export default function BuilderScreen() {
   return (
     <ScrollView
       style={{ backgroundColor: theme.background }}
-      contentContainerStyle={styles.scroll}
+      contentContainerStyle={[styles.scroll, { paddingBottom: bottomInset }]}
     >
       <ScreenHeader
         eyebrow={brand.builder.tabLabel}

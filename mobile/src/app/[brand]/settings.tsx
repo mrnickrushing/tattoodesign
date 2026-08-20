@@ -11,6 +11,7 @@ import { Icon } from "@/components/Icon";
 import { ScreenHeader, Card, SectionLabel, Notice } from "@/components/ui";
 import type { IconName } from "@/lib/icons";
 import { SPACE, TYPE } from "@/lib/theme";
+import { useContentBottomInset } from "@/lib/chrome";
 import { getGenerationUsage, getSpendLimit, setSpendLimit, totalEstimatedSpend } from "@/lib/generationUsage";
 import { preferences } from "@/lib/preferences";
 import { createEncryptedBackup, restoreEncryptedBackup } from "@/lib/encryptedBackup";
@@ -18,6 +19,7 @@ import { shareUri } from "@/lib/files";
 
 export default function SettingsScreen() {
   const { brand, theme } = useBrand();
+  const bottomInset = useContentBottomInset();
   const {
     currentlyRunning,
     availableUpdate,
@@ -152,7 +154,7 @@ export default function SettingsScreen() {
   return (
     <ScrollView
       style={{ backgroundColor: theme.background }}
-      contentContainerStyle={styles.scroll}
+      contentContainerStyle={[styles.scroll, { paddingBottom: bottomInset }]}
     >
       <ScreenHeader
         eyebrow="Settings"

@@ -68,6 +68,7 @@ import {
   SectionLabel,
 } from "@/components/ui";
 import { RADIUS, SPACE, TYPE } from "@/lib/theme";
+import { useContentBottomInset } from "@/lib/chrome";
 
 const STYLE_ICONS: Record<
   string,
@@ -132,6 +133,7 @@ async function traceGeneratedStencil(
 
 export default function GenerateScreen() {
   const { brand, theme } = useBrand();
+  const bottomInset = useContentBottomInset();
   const { remix: remixId } = useLocalSearchParams<{ remix?: string }>();
   const [prompt, setPrompt] = useState("");
   const [style, setStyle] = useState(brand.generate.styles[0]?.id ?? "");
@@ -464,7 +466,7 @@ export default function GenerateScreen() {
     >
       <ScrollView
         style={{ backgroundColor: theme.background }}
-        contentContainerStyle={styles.scroll}
+        contentContainerStyle={[styles.scroll, { paddingBottom: bottomInset }]}
         keyboardShouldPersistTaps="handled"
       >
         <ScreenHeader

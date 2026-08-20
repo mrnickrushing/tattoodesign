@@ -28,6 +28,7 @@ import {
   type SheetDraft,
 } from "@/lib/sheetLibrary";
 import { RADIUS, SPACE, TYPE, glow, lift } from "@/lib/theme";
+import { useContentBottomInset } from "@/lib/chrome";
 
 const TOOL_ICONS = {
   generate: "generate",
@@ -41,6 +42,7 @@ const listTransition = LinearTransition.duration(220).reduceMotion(
 
 export default function StudioDashboard() {
   const { brand, theme } = useBrand();
+  const bottomInset = useContentBottomInset();
   const [designs, setDesigns] = useState<LibraryDesign[]>([]);
   const [sheets, setSheets] = useState<SavedSheet[]>([]);
   const [draft, setDraft] = useState<SheetDraft | null>(null);
@@ -100,7 +102,7 @@ export default function StudioDashboard() {
     <>
       <ScrollView
         style={{ backgroundColor: theme.background }}
-        contentContainerStyle={styles.scroll}
+        contentContainerStyle={[styles.scroll, { paddingBottom: bottomInset }]}
       >
         <ScreenHeader
           eyebrow="Studio home"

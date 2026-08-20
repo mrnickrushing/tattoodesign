@@ -5,6 +5,8 @@
 // runs entirely on the device.
 
 import { Skia, ColorType, AlphaType, ImageFormat } from "@shopify/react-native-skia";
+import { DEFAULT_CENTERLINE, centerlineStencil, classifySource } from "./lineart";
+import { skeletonize } from "./vectorize";
 
 export type StencilOptions = {
   /** Longest side the source image is downscaled to before processing. */
@@ -21,9 +23,18 @@ export type StencilOptions = {
   mode?: StencilMode;
   /** Suppress a flat background sampled from the image corners before tracing. */
   isolateBackground?: boolean;
+  /**
+   * Pick the pipeline from what the source actually is.
+   *
+   * Edge detection is right for a photograph and wrong for a drawing: a
+   * drawing's strokes have two edges each, so every line comes back doubled.
+   * When this is on, an image that is already line art takes the centreline
+   * path instead. See lib/lineart.ts.
+   */
+  autoDetectSource?: boolean;
 };
 
-export type StencilMode = "outline" | "fine" | "photocopy" | "halftone" | "crosshatch";
+export type StencilMode = "outline" | "fine" | "photocopy" | "halftone" | "crosshatch" | "centerline";
 
 export const DEFAULT_STENCIL_OPTIONS: Required<StencilOptions> = {
   maxDimension: 1200,
@@ -33,6 +44,7 @@ export const DEFAULT_STENCIL_OPTIONS: Required<StencilOptions> = {
   invert: false,
   mode: "outline",
   isolateBackground: false,
+  autoDetectSource: true,
 };
 
 function stripDataUrlPrefix(dataUrl: string): string {
@@ -242,8 +254,26 @@ export async function stencilMask(
   if (!pixels) throw new Error("Could not read pixel data");
 
   const prepared = opts.isolateBackground ? suppressBackground(pixels, width, height) : pixels;
-  let gray = toGrayscale(prepared);
-  gray = boxBlur(gray, width, height, opts.denoise);
+  const flat = toGrayscale(prepared);
+
+  // Blurring is noise suppression for edge detection. A drawing has no noise
+  // to suppress — blurring it only softens the very strokes we are about to
+  // threshold — so the centreline path reads the unblurred pixels.
+  const bytes = Uint8Array.from(flat, (value) => Math.max(0, Math.min(255, Math.round(value))));
+  const wantsCenterline =
+    opts.mode === "centerline" ||
+    (opts.autoDetectSource && opts.mode === "outline" && classifySource(bytes).kind === "lineart");
+
+  if (wantsCenterline) {
+    const { mask } = centerlineStencil(bytes, width, height, skeletonize, {
+      threshold: DEFAULT_CENTERLINE.threshold,
+      fillRadius: DEFAULT_CENTERLINE.fillRadius,
+      weight: Math.max(1, opts.lineWeight),
+    });
+    return { mask, width, height };
+  }
+
+  let gray = boxBlur(flat, width, height, opts.denoise);
   const magnitude = sobelMagnitude(gray, width, height);
   const rawMask = buildMask(opts.mode, gray, magnitude, width, height, opts.threshold);
   const mask = dilate(rawMask, width, height, opts.mode === "fine" ? Math.max(0, opts.lineWeight - 1) : opts.lineWeight);

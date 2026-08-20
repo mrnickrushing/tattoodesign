@@ -42,6 +42,7 @@ import { Skeleton } from "@/components/Skeleton";
 import { StencilReveal } from "@/components/StencilReveal";
 import { ScreenHeader, Notice, Card } from "@/components/ui";
 import { RADIUS, SPACE, TYPE } from "@/lib/theme";
+import { useContentBottomInset } from "@/lib/chrome";
 
 type RevealTrace = { paths: Point[][]; width: number; height: number };
 
@@ -83,6 +84,7 @@ async function traceConvertedStencil(
 
 export default function ConvertScreen() {
   const { brand, theme } = useBrand();
+  const bottomInset = useContentBottomInset();
   /** The photo as picked. Crops are always taken from this, so re-cropping
    *  never compounds — the second crop isn't a crop of the first. */
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
@@ -282,7 +284,7 @@ export default function ConvertScreen() {
   return (
     <ScrollView
       style={{ backgroundColor: theme.background }}
-      contentContainerStyle={styles.scroll}
+      contentContainerStyle={[styles.scroll, { paddingBottom: bottomInset }]}
     >
       <ScreenHeader
         eyebrow={brand.convert.tabLabel}
@@ -731,6 +733,12 @@ const ENGINE_OPTIONS: {
     label: "Classic",
     hint: "Clean contour",
     icon: "git-branch-outline",
+  },
+  {
+    id: "centerline",
+    label: "Redraw",
+    hint: "One line per line",
+    icon: "brush-outline",
   },
   {
     id: "fine",
