@@ -7,6 +7,13 @@ implement → PR to main → CI green → verify `baseRefName: main` →
 (`eas update --branch production --environment production`) → next branch from
 fresh main. Runtime stays `1.4.0`; all pure JS.
 
+## Status — milestone complete
+
+All three waves merged sequentially and shipped by OTA to runtime 1.4.0
+(2026-08-19): Studio handoff (#37), Auto-arrange (#38), AR healed preview
+(#39). Suite: 225 tests. Owner gates: AirDrop round-trip with both phones,
+packing feel on a printed sheet, healed overlay believability on skin.
+
 ## Wave 1 — Studio handoff
 
 **Branch** `agent/studio-handoff`
