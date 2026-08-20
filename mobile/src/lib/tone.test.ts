@@ -125,3 +125,41 @@ test("the study is the same size as what it was made from", () => {
   const cuts = thresholds(source, 4, "balanced");
   assert.equal(renderStudy(posterize(source, cuts), cuts).length, 137);
 });
+
+/** A line drawing: mostly paper, a little ink. */
+function drawing(length = 10000, inkShare = 0.15): Uint8Array {
+  const out = new Uint8Array(length);
+  const ink = Math.round(length * inkShare);
+  for (let i = 0; i < length; i++) out[i] = i < ink ? 8 : 252;
+  return out;
+}
+
+test("a picture dominated by one value still separates", () => {
+  // Equal population is degenerate here: 85% of the pixels share a value, so
+  // every target after the first lands on it, the cuts collapse to one number
+  // and the whole study renders as a single flat mid grey.
+  const source = drawing();
+  const bands = posterize(source, thresholds(source, 4, "balanced"));
+  const used = coverage(bands, 4).filter((share) => share > 0.01).length;
+  assert.ok(used >= 2, `the study collapsed to ${used} band(s)`);
+});
+
+test("ink and paper end up in different bands", () => {
+  const source = drawing();
+  const bands = posterize(source, thresholds(source, 4, "balanced"));
+  assert.notEqual(bands[0], bands[bands.length - 1], "ink and paper must not share a band");
+  assert.equal(bands[0], 0, "the ink belongs to the darkest band");
+});
+
+test("the fallback still yields ascending, distinct cuts", () => {
+  const cuts = thresholds(drawing(), 4, "balanced");
+  assert.equal(new Set(cuts).size, cuts.length, "duplicate cuts mean a collapsed study");
+  for (let i = 1; i < cuts.length; i++) assert.ok(cuts[i] > cuts[i - 1]);
+});
+
+test("a single-valued image is still handled rather than dividing by zero", () => {
+  const flat = new Uint8Array(500).fill(120);
+  const cuts = thresholds(flat, 4, "balanced");
+  assert.ok(cuts.every((cut) => Number.isFinite(cut)));
+  assert.ok(posterize(flat, cuts).every((band) => Number.isFinite(band)));
+});

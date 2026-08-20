@@ -1,7 +1,8 @@
-import { Directory, File, Paths } from "expo-file-system";
 import type { BrandId } from "./brands";
 import type { LibraryDesign } from "./designLibrary";
 import { generateId } from "./id";
+import { readAsset, readManifest, writeAsset, writeManifest } from "./projectStore";
+import { readImageBase64 } from "./imageSource";
 import { renderStroke } from "./ribbon";
 
 export const PROJECT_SCHEMA_VERSION = 1;
@@ -173,25 +174,20 @@ export function makeTextLayer(width: number, height: number, text = "New label")
   };
 }
 
-function projectRoot(brand: BrandId, id: string) {
-  const dir = new Directory(Paths.document, "editable-projects", brand, id);
-  if (!dir.exists) dir.create({ intermediates: true, idempotent: true });
-  return dir;
-}
-
-function manifestFile(brand: BrandId, id: string) {
-  return new File(projectRoot(brand, id), "project.json");
-}
-
-export function projectAssetFile(brand: BrandId, id: string, asset: string) {
-  return new File(projectRoot(brand, id), asset);
+/** Base64 for one of a project's layer images, or null if it is missing. */
+export async function projectAssetBase64(
+  brand: BrandId,
+  id: string,
+  asset: string
+): Promise<string | null> {
+  return readAsset(brand, id, asset);
 }
 
 export async function loadProject(brand: BrandId, id: string): Promise<EditableDesignProject | null> {
   try {
-    const file = manifestFile(brand, id);
-    if (!file.exists) return null;
-    const parsed = JSON.parse(await file.text()) as EditableDesignProject;
+    const raw = await readManifest(brand, id);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as EditableDesignProject;
     if (parsed.schemaVersion !== PROJECT_SCHEMA_VERSION || !Array.isArray(parsed.layers)) return null;
     return parsed;
   } catch {
@@ -200,8 +196,7 @@ export async function loadProject(brand: BrandId, id: string): Promise<EditableD
 }
 
 export async function saveProject(project: EditableDesignProject): Promise<void> {
-  const file = manifestFile(project.brand, project.id);
-  file.write(JSON.stringify({ ...project, updatedAt: Date.now() }));
+  await writeManifest(project.brand, project.id, JSON.stringify({ ...project, updatedAt: Date.now() }));
 }
 
 export async function addRasterAsset(
@@ -210,10 +205,7 @@ export async function addRasterAsset(
   name: string
 ): Promise<{ project: EditableDesignProject; layer: RasterLayer }> {
   const asset = `layer-${Date.now().toString(36)}-${generateId()}.png`;
-  projectAssetFile(project.brand, project.id, asset).write(
-    dataUrl.slice(dataUrl.indexOf(",") + 1),
-    { encoding: "base64" }
-  );
+  await writeAsset(project.brand, project.id, asset, dataUrl.slice(dataUrl.indexOf(",") + 1));
   const layer: RasterLayer = {
     id: generateId(),
     kind: "raster",
@@ -234,10 +226,10 @@ export async function loadOrCreateProject(
   const stored = await loadProject(brand, design.id);
   if (stored) return stored;
 
-  const source = new File(design.uri);
+  // The design's own bytes, whatever kind of reference it arrived as — a
+  // file:// path on a phone, a blob: URL in a browser, or already inline.
   const asset = "source.png";
-  const target = projectAssetFile(brand, design.id, asset);
-  target.write(await source.bytes());
+  await writeAsset(brand, design.id, asset, await readImageBase64(design.uri));
   const width = Math.max(1, design.width ?? 1024);
   const height = Math.max(1, design.height ?? 1024);
   const now = Date.now();
@@ -283,9 +275,8 @@ export async function cloneProject(
   next.snapshots = [];
   for (const layer of next.layers) {
     if (layer.kind !== "raster") continue;
-    const source = projectAssetFile(project.brand, project.id, layer.asset);
-    const target = projectAssetFile(project.brand, nextId, layer.asset);
-    if (source.exists) target.write(await source.bytes());
+    const bytes = await readAsset(project.brand, project.id, layer.asset);
+    if (bytes) await writeAsset(project.brand, nextId, layer.asset, bytes);
   }
   await saveProject(next);
   return next;

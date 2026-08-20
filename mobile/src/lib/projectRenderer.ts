@@ -6,7 +6,7 @@ import {
   type SkPaint,
 } from "@shopify/react-native-skia";
 import {
-  projectAssetFile,
+  projectAssetBase64,
   type DesignLayer,
   type EditableDesignProject,
   type ShapeLayer,
@@ -109,9 +109,9 @@ export async function renderProject(project: EditableDesignProject): Promise<str
   for (const layer of project.layers) {
     if (!layer.visible || layer.opacity <= 0) continue;
     if (layer.kind === "raster") {
-      const file = projectAssetFile(project.brand, project.id, layer.asset);
-      if (!file.exists) continue;
-      const image = Skia.Image.MakeImageFromEncoded(Skia.Data.fromBase64(await file.base64()));
+      const bytes = await projectAssetBase64(project.brand, project.id, layer.asset);
+      if (!bytes) continue;
+      const image = Skia.Image.MakeImageFromEncoded(Skia.Data.fromBase64(bytes));
       if (!image) continue;
       const paint = layerPaint(layer);
       withTransform(canvas, layer, () => {

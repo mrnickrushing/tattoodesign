@@ -12,42 +12,7 @@
 
 import type { BrandId } from "./brands";
 import { stripDataUrlPrefix } from "./files";
-
-const DB_NAME = "inkline";
-const STORE = "designs";
-
-let connection: Promise<IDBDatabase> | null = null;
-
-function open(): Promise<IDBDatabase> {
-  if (!connection) {
-    connection = new Promise((resolve, reject) => {
-      const request = indexedDB.open(DB_NAME, 1);
-      request.onupgradeneeded = () => {
-        if (!request.result.objectStoreNames.contains(STORE)) {
-          request.result.createObjectStore(STORE);
-        }
-      };
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => {
-        // Don't cache a failed connection for the life of the tab.
-        connection = null;
-        reject(request.error);
-      };
-    });
-  }
-  return connection;
-}
-
-function run<T>(mode: IDBTransactionMode, work: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
-  return open().then(
-    (db) =>
-      new Promise<T>((resolve, reject) => {
-        const request = work(db.transaction(STORE, mode).objectStore(STORE));
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
-      })
-  );
-}
+import { STORES, withStore } from "./webdb";
 
 const key = (brand: BrandId, name: string) => `${brand}/${name}`;
 
@@ -63,13 +28,13 @@ function toBlob(dataUrl: string): Blob {
 
 export async function writeDesignImage(brand: BrandId, name: string, dataUrl: string): Promise<string> {
   const blob = toBlob(dataUrl);
-  await run("readwrite", (store) => store.put(blob, key(brand, name)) as IDBRequest<IDBValidKey>);
+  await withStore(STORES.designs, "readwrite", (store) => store.put(blob, key(brand, name)) as IDBRequest<IDBValidKey>);
   return URL.createObjectURL(blob);
 }
 
 export async function deleteDesignImage(brand: BrandId, name: string): Promise<void> {
   try {
-    await run("readwrite", (store) => store.delete(key(brand, name)) as IDBRequest<undefined>);
+    await withStore(STORES.designs, "readwrite", (store) => store.delete(key(brand, name)) as IDBRequest<undefined>);
   } catch {
     // Already gone is the outcome we wanted anyway.
   }
@@ -77,7 +42,7 @@ export async function deleteDesignImage(brand: BrandId, name: string): Promise<v
 
 export async function resolveDesignImage(brand: BrandId, name: string): Promise<string | null> {
   try {
-    const blob = await run<Blob | undefined>("readonly", (store) => store.get(key(brand, name)));
+    const blob = await withStore<Blob | undefined>(STORES.designs, "readonly", (store) => store.get(key(brand, name)));
     return blob ? URL.createObjectURL(blob) : null;
   } catch {
     return null;
@@ -86,7 +51,7 @@ export async function resolveDesignImage(brand: BrandId, name: string): Promise<
 
 export async function readDesignBase64(brand: BrandId, name: string): Promise<string | null> {
   try {
-    const blob = await run<Blob | undefined>("readonly", (store) => store.get(key(brand, name)));
+    const blob = await withStore<Blob | undefined>(STORES.designs, "readonly", (store) => store.get(key(brand, name)));
     if (!blob) return null;
     const buffer = new Uint8Array(await blob.arrayBuffer());
     let binary = "";

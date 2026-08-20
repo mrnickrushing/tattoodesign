@@ -6,17 +6,16 @@
 // nothing about how the piece will actually look once it is piped or printed
 // onto the surface itself.
 //
-// So for previewing on a real object, white is turned back into nothing. The
-// cutoff is soft rather than binary — a hard threshold leaves every
-// antialiased edge with a ring of half-white pixels around it, which reads as
-// a grubby halo at exactly the sizes this is meant to be judged at.
+// So for previewing on a real object the paper is turned back into nothing.
+// What counts as paper is measured from the border rather than assumed to be
+// pure white — a scan is on cream, a JPEG is on a thousand shades of
+// nearly-white — and the cutoff is soft, because a hard one leaves every
+// antialiased edge ringed with half-paper pixels, which reads as a grubby halo
+// at exactly the size this is meant to be judged at. See paperMask.ts.
 
 import { AlphaType, ColorType, ImageFormat, Skia } from "@shopify/react-native-skia";
 import { stripDataUrlPrefix } from "./files";
-
-/** Above this the pixel is paper. Below `SOLID` it is fully ink. */
-const PAPER = 246;
-const SOLID = 200;
+import { paperAlpha, profilePaper } from "./paperMask";
 
 export function knockOutPaper(dataUrl: string): string {
   const image = Skia.Image.MakeImageFromEncoded(Skia.Data.fromBase64(stripDataUrlPrefix(dataUrl)));
@@ -36,18 +35,20 @@ export function knockOutPaper(dataUrl: string): string {
     | null;
   if (!pixels) throw new Error("That artwork could not be read.");
 
+  const gray = new Uint8Array(width * height);
+  for (let i = 0; i < gray.length; i++) {
+    const o = i * 4;
+    gray[i] = Math.round(pixels[o] * 0.299 + pixels[o + 1] * 0.587 + pixels[o + 2] * 0.114);
+  }
+  // Measured from the border rather than assumed to be #ffffff, so a scan on
+  // cream or a JPEG full of nearly-white ringing loses its ground too.
+  const profile = profilePaper(gray, width, height);
+
   const out = new Uint8Array(pixels.length);
   out.set(pixels);
-  for (let i = 0; i < out.length; i += 4) {
-    const luminance = out[i] * 0.299 + out[i + 1] * 0.587 + out[i + 2] * 0.114;
-    if (luminance >= PAPER) {
-      out[i + 3] = 0;
-    } else if (luminance > SOLID) {
-      // The antialiased fringe fades out instead of stopping dead, which is
-      // what stops the edges reading as a grubby halo.
-      const ramp = (PAPER - luminance) / (PAPER - SOLID);
-      out[i + 3] = Math.round(out[i + 3] * ramp);
-    }
+  for (let i = 0; i < gray.length; i++) {
+    const o = i * 4;
+    out[o + 3] = Math.round(out[o + 3] * paperAlpha(gray[i], profile));
   }
 
   const result = Skia.Image.MakeImage(

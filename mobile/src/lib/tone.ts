@@ -69,7 +69,27 @@ export function thresholds(gray: Uint8Array, count: number, strategy: BandStrate
   }
   // A flat image can run out of histogram before it runs out of bands.
   while (cuts.length < bands - 1) cuts.push(256);
+
+  // Equal population is degenerate when one value owns most of the picture —
+  // and a line drawing, which is 85% paper, is exactly that. Every target
+  // after the first lands on the same value, the cuts collapse to one number,
+  // and every pixel ends up in a single band whose preview tone is a flat mid
+  // grey. Spreading evenly across the range that is actually used separates
+  // the ink from the paper, which is what was being asked for.
+  if (new Set(cuts).size < cuts.length) return spreadOverRange(gray, bands);
   return cuts;
+}
+
+/** Even cuts across the luminance the image actually uses, not across 0..255. */
+function spreadOverRange(gray: Uint8Array, bands: number): number[] {
+  let low = 255;
+  let high = 0;
+  for (let i = 0; i < gray.length; i++) {
+    if (gray[i] < low) low = gray[i];
+    if (gray[i] > high) high = gray[i];
+  }
+  if (high <= low) return Array.from({ length: bands - 1 }, () => low + 1);
+  return Array.from({ length: bands - 1 }, (_, i) => low + Math.round(((i + 1) * (high - low)) / bands));
 }
 
 /** Which band each pixel falls in, 0 for the darkest. */

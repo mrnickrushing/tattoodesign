@@ -32,7 +32,7 @@ import {
   addRasterAsset,
   cloneProject,
   loadOrCreateProject,
-  projectAssetFile,
+  projectAssetBase64,
   saveProject,
   type DesignLayer,
   type EditableDesignProject,
@@ -824,8 +824,8 @@ export function DesignEditor({
       // complete picture of the project rather than only its vector layers.
       const assets: Record<string, string> = {};
       for (const asset of rasterLayerAssets(project)) {
-        const source = projectAssetFile(project.brand, project.id, asset);
-        if (source.exists) assets[asset] = `data:image/png;base64,${await source.base64()}`;
+        const bytes = await projectAssetBase64(project.brand, project.id, asset);
+        if (bytes) assets[asset] = `data:image/png;base64,${bytes}`;
       }
       file.write(projectToSvg(project, assets));
       await shareUri(file.uri);
