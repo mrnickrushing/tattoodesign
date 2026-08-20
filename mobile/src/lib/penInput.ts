@@ -253,3 +253,49 @@ export function toPoints(samples: PenSample[], base: number, settings: PenSettin
   }
   return out;
 }
+
+/**
+ * Builds a sample from what a gesture handler reports about one touch.
+ *
+ * Kept here, free of any React Native import, so the mapping from raw device
+ * numbers to the units the rest of this module works in is covered by tests
+ * rather than only observable with a Pencil in hand.
+ *
+ * `altitudeAngle` arrives in radians with pi/2 meaning upright — the iOS
+ * convention, which react-native-gesture-handler passes through unchanged from
+ * UITouch. Tilt here is degrees away from vertical, so the two are
+ * complementary, not the same number in different units.
+ */
+export function sampleFromStylus(
+  x: number,
+  y: number,
+  stylus: { pressure?: number; altitudeAngle?: number } | undefined | null
+): PenSample {
+  if (!stylus || typeof stylus.pressure !== "number") {
+    return { x, y, pressure: NO_SENSOR_PRESSURE, tilt: 0, pen: false };
+  }
+  const altitude = typeof stylus.altitudeAngle === "number" ? stylus.altitudeAngle : Math.PI / 2;
+  return {
+    x,
+    y,
+    pressure: clamp01(stylus.pressure),
+    tilt: Math.max(0, Math.min(90, 90 - (altitude * 180) / Math.PI)),
+    pen: true,
+  };
+}
+
+/**
+ * Raw samples in, drawable points out: stabilize, then width and taper.
+ *
+ * The one entry point the editor needs. Going through it means the preview
+ * drawn while the pen is down and the geometry committed when it lifts are
+ * produced by the same code, so a stroke cannot change shape at the moment you
+ * let go of it.
+ */
+export function conditionStroke(
+  samples: PenSample[],
+  base: number,
+  settings: PenSettings
+): Point[] {
+  return toPoints(stabilize(samples, settings.stabilization), base, settings);
+}

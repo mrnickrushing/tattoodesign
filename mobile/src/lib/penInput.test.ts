@@ -5,6 +5,7 @@ import {
   NO_SENSOR_PRESSURE,
   createStabilizer,
   hasPressureData,
+  sampleFromStylus,
   stabilize,
   strokeWidths,
   toPoints,
@@ -165,4 +166,31 @@ test("an empty stroke produces nothing", () => {
   assert.deepEqual(toPoints([], 10, DEFAULT_PEN), []);
   assert.deepEqual(strokeWidths([], 10, DEFAULT_PEN), []);
   assert.deepEqual(stabilize([], 0.5), []);
+});
+
+test("a touch with no stylus data reads as a finger", () => {
+  const finger = sampleFromStylus(10, 20, undefined);
+  assert.equal(finger.pen, false);
+  assert.equal(finger.pressure, NO_SENSOR_PRESSURE);
+  assert.equal(finger.tilt, 0);
+});
+
+test("an upright pencil reports no tilt", () => {
+  const upright = sampleFromStylus(0, 0, { pressure: 0.5, altitudeAngle: Math.PI / 2 });
+  assert.equal(upright.pen, true);
+  assert.ok(Math.abs(upright.tilt) < 1e-9);
+});
+
+test("a pencil laid flat reports full tilt", () => {
+  assert.ok(Math.abs(sampleFromStylus(0, 0, { pressure: 0.5, altitudeAngle: 0 }).tilt - 90) < 1e-9);
+});
+
+test("out-of-range device readings are clamped rather than trusted", () => {
+  assert.equal(sampleFromStylus(0, 0, { pressure: 1.4, altitudeAngle: Math.PI / 2 }).pressure, 1);
+  assert.equal(sampleFromStylus(0, 0, { pressure: -0.2, altitudeAngle: Math.PI / 2 }).pressure, 0);
+  assert.ok(sampleFromStylus(0, 0, { pressure: 0.5, altitudeAngle: -1 }).tilt <= 90);
+});
+
+test("a pencil with no altitude reading is assumed upright", () => {
+  assert.equal(sampleFromStylus(0, 0, { pressure: 0.7 }).tilt, 0);
 });

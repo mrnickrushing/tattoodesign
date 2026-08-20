@@ -27,6 +27,7 @@ export type IconName =
   | "document"
   | "swap"
   | "expand"
+  | "collapse"
   | "flash"
   | "palette"
   | "contrast"
@@ -106,6 +107,7 @@ export const ICONS: Record<IconName, IconDefinition> = {
   document: { sf: "doc.on.doc", ion: "document-text-outline" },
   swap: { sf: "arrow.left.arrow.right", ion: "swap-horizontal" },
   expand: { sf: "arrow.up.left.and.arrow.down.right", ion: "expand-outline" },
+  collapse: { sf: "arrow.down.right.and.arrow.up.left", ion: "contract-outline" },
   flash: { sf: "bolt.fill", ion: "flash" },
   palette: { sf: "paintpalette", ion: "color-palette" },
   contrast: { sf: "circle.lefthalf.filled", ion: "contrast-outline" },

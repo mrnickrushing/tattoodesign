@@ -83,6 +83,7 @@ export const PREF_KEYS = {
   convertOptions: "convert.options",
   brushSize: "editor.brushSize",
   brushColor: "editor.brushColor",
+  pen: "editor.pen",
   placementWidthIn: "placement.widthIn",
 } as const;
 
