@@ -159,9 +159,11 @@ test("stroke paths flatten into canvas coordinates", () => {
   const paths = strokePathsInCanvasSpace(value);
   assert.equal(paths.length, 1);
   // The layer centre (500,400) maps to the transform origin (x + w/2, y + h/2).
-  assert.deepEqual(paths[0][0], { x: 600, y: 450 });
+  // The 3px line width is doubled along with the geometry, so blowout analysis
+  // sees the thickness that will actually print.
+  assert.deepEqual(paths[0][0], { x: 600, y: 450, w: 6 });
   // 100px right of centre, doubled by the layer scale.
-  assert.deepEqual(paths[0][1], { x: 800, y: 450 });
+  assert.deepEqual(paths[0][1], { x: 800, y: 450, w: 6 });
 });
 
 test("erase strokes and hidden layers are left out of canvas paths", () => {

@@ -13,6 +13,7 @@ import {
   type StrokeLayer,
   type TextLayer,
 } from "./designProject";
+import { hasVariableWidth, ribbonOutline } from "./ribbon";
 
 function layerPaint(layer: DesignLayer): SkPaint {
   const paint = Skia.Paint();
@@ -35,6 +36,24 @@ function withTransform(canvas: SkCanvas, layer: DesignLayer, draw: () => void) {
 function drawStrokes(canvas: SkCanvas, layer: StrokeLayer, background: string) {
   for (const stroke of layer.strokes) {
     if (!stroke.points.length) continue;
+    const paint = layerPaint(layer);
+    paint.setColor(Skia.Color(stroke.mode === "erase" ? background : stroke.color));
+    paint.setAlphaf(stroke.opacity * layer.opacity);
+
+    if (hasVariableWidth(stroke.points)) {
+      // A pen stroke has no single width to hand the stroker, so its outline
+      // is built explicitly and filled. See lib/ribbon.ts.
+      const outline = ribbonOutline(stroke.points, stroke.width);
+      if (outline.length < 3) continue;
+      const path = Skia.Path.Make();
+      path.moveTo(outline[0].x, outline[0].y);
+      for (const point of outline.slice(1)) path.lineTo(point.x, point.y);
+      path.close();
+      paint.setStyle(PaintStyle.Fill);
+      canvas.drawPath(path, paint);
+      continue;
+    }
+
     const path = Skia.Path.Make();
     path.moveTo(stroke.points[0].x, stroke.points[0].y);
     if (stroke.points.length === 1) {
@@ -42,13 +61,10 @@ function drawStrokes(canvas: SkCanvas, layer: StrokeLayer, background: string) {
     } else {
       for (const point of stroke.points.slice(1)) path.lineTo(point.x, point.y);
     }
-    const paint = layerPaint(layer);
-    paint.setColor(Skia.Color(stroke.mode === "erase" ? background : stroke.color));
     paint.setStrokeWidth(stroke.width);
     paint.setStyle(PaintStyle.Stroke);
     paint.setStrokeCap(1);
     paint.setStrokeJoin(1);
-    paint.setAlphaf(stroke.opacity * layer.opacity);
     canvas.drawPath(path, paint);
   }
 }
