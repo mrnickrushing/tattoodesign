@@ -158,7 +158,7 @@ export async function POST(req: NextRequest) {
     inkConstraint,
     LINE_WEIGHT_DIRECTION,
     FLAT_OUTPUT_DIRECTION,
-    "Centered composition, the design filling most of the frame.",
+    "One single design, centered, filling most of the frame. Not a sheet, grid, set of variations, or repeated copies.",
     outlineDirection,
     referenceDirection,
   ].filter(Boolean).join(" ");
@@ -193,7 +193,14 @@ async function generateWithGemini(prompt: string, label: string, reference?: Ref
           { text: prompt },
           ...(reference ? [{ inlineData: { data: reference.data, mimeType: reference.mimeType } }] : []),
         ] }],
-        generationConfig: { responseModalities: ["IMAGE"] },
+        // Square, because a piece of flash is not a landscape. Left
+        // unspecified the model returns a wide frame, and then fills the width
+        // it was given by repeating the design across it — a sheet of three
+        // copies instead of one design. OpenAI already asks for 1024x1024.
+        generationConfig: {
+          responseModalities: ["IMAGE"],
+          imageConfig: { aspectRatio: "1:1" },
+        },
       }),
     }
   );
