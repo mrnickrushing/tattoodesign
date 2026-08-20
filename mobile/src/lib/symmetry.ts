@@ -34,6 +34,7 @@ export function clampSegments(segments: number): number {
 
 function mirrorPath(points: Point[], canvas: Canvas, flipX: boolean, flipY: boolean): Point[] {
   return points.map((point) => ({
+    ...point,
     x: flipX ? canvas.width - point.x : point.x,
     y: flipY ? canvas.height - point.y : point.y,
   }));
@@ -47,7 +48,7 @@ function rotatePath(points: Point[], canvas: Canvas, radians: number): Point[] {
   return points.map((point) => {
     const dx = point.x - cx;
     const dy = point.y - cy;
-    return { x: cx + dx * cos - dy * sin, y: cy + dx * sin + dy * cos };
+    return { ...point, x: cx + dx * cos - dy * sin, y: cy + dx * sin + dy * cos };
   });
 }
 

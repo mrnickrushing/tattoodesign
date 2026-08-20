@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getBrand } from "@/lib/brands";
+import { LINE_WEIGHT_DIRECTION, SHADING_VOCABULARY, getBrand } from "@/lib/brands";
 import { checkRateLimit, getClientKey } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
@@ -64,6 +64,7 @@ export async function POST(req: NextRequest) {
     brand?: string;
     provider?: string;
     quality?: string;
+    shading?: string;
     reference?: { data?: string; mimeType?: string; strength?: string };
   };
   try {
@@ -122,6 +123,10 @@ export async function POST(req: NextRequest) {
   const style =
     brand.generate.styles.find((candidate) => candidate.id === body.style) ||
     brand.generate.styles[0];
+  // An unknown value means line-only rather than an error: shading is an
+  // addition, and an older client that does not send one should keep working.
+  const shading =
+    SHADING_VOCABULARY.find((candidate) => candidate.id === body.shading) ?? SHADING_VOCABULARY[0];
   const referenceDirection = reference
     ? {
         loose: "Use the reference only for broad inspiration; freely reinterpret its composition.",
@@ -132,16 +137,23 @@ export async function POST(req: NextRequest) {
   // Line styles get the hard stencil rule; tonal styles (black & grey realism,
   // dotwork) declare their own ink constraint because "no shading, no gray"
   // would forbid the entire point of the style.
+  // Shading wins over the style's ink rule when one was asked for, because
+  // "no shading, no gray" and "whip shading" cannot both be true — that
+  // contradiction is why asking for shading used to produce flat line art.
   const inkConstraint =
+    shading.constraint ??
     style.inkConstraint ??
     "Pure black ink linework only, no shading, no color, no gradients, no gray.";
-  const outlineDirection = style.inkConstraint
+  const tonal = !!(shading.constraint ?? style.inkConstraint);
+  const outlineDirection = tonal
     ? `Crisp, production-ready rendering ${brand.generate.outputFraming}.`
     : `Clean unbroken outlines ${brand.generate.outputFraming}.`;
   const fullPrompt = [
     `${brand.generate.subjectFraming}: ${prompt}.`,
     style.promptDescription + ".",
+    shading.render,
     inkConstraint,
+    LINE_WEIGHT_DIRECTION,
     "Isolated on a solid pure white background, centered composition.",
     outlineDirection,
     referenceDirection,

@@ -36,7 +36,6 @@ import {
   saveProject,
   type DesignLayer,
   type EditableDesignProject,
-  type Point,
   type StrokeLayer,
 } from "@/lib/designProject";
 import {
@@ -65,6 +64,25 @@ import { compareCapture, inspectProduction, simulateHealing, wrapForSurface, typ
 import { HEAL_AGES, type HealAge } from "@/lib/healing";
 import { MIN_LINE_GAP_MM, checkLineSpacing, pxPerMmFromDpi, spacingFinding } from "@/lib/spacing";
 import { PREF_KEYS, isFiniteNumber, preferences } from "@/lib/preferences";
+import {
+  DEFAULT_PEN,
+  conditionStroke,
+  sampleFromStylus,
+  type PenSample,
+  type PenSettings,
+} from "@/lib/penInput";
+import { renderStroke } from "@/lib/ribbon";
+import { findSurface, maxApparentWidthIn, printScale, surfacesFor } from "@/lib/curveWarp";
+import {
+  DEFAULT_BANDS,
+  MAX_BANDS,
+  MIN_BANDS,
+  defaultPlan,
+  type BandStrategy,
+  type SeparationPlan,
+} from "@/lib/tone";
+import { DEFAULT_SHADING, SHADING_STYLES, type ShadingOptions, type ShadingStyle } from "@/lib/shading";
+import { shadingLayers, toneStudy, type ToneStudy } from "@/lib/toneSeparate";
 import { LETTERING_STYLES, letteringStyle, type LetteringStyleId } from "@/lib/lettering";
 import { DEFAULT_CLEANUP, applyCleanup, cleanupReport } from "@/lib/cleanup";
 import {
@@ -89,11 +107,18 @@ import {
   type SymmetrySettings,
 } from "@/lib/symmetry";
 import { ICONS, type IconName } from "@/lib/icons";
-import { RADIUS, SPACE, TYPE, glow, lift } from "@/lib/theme";
+import { RADIUS, SPACE, TYPE, glow, lift, type Theme } from "@/lib/theme";
 
-type EditorTool = "select" | "draw" | "erase" | "nodes" | "insert" | "refine" | "crop" | "layers" | "production" | "history";
+type EditorTool = "select" | "draw" | "erase" | "nodes" | "insert" | "refine" | "tone" | "crop" | "layers" | "production" | "history";
 
 type SaveResult = { id: string; title: string };
+
+/**
+ * What a gesture reports about the stylus, when there is one. Structurally
+ * matched rather than imported: the handler declares this payload as optional
+ * and only fills it for a real pen, which is exactly the shape we want.
+ */
+type StylusReading = { pressure: number; altitudeAngle: number } | undefined;
 
 const TOOLS: { id: EditorTool; label: string; icon: IconName }[] = [
   { id: "select", label: "Arrange", icon: "move" },
@@ -102,6 +127,7 @@ const TOOLS: { id: EditorTool; label: string; icon: IconName }[] = [
   { id: "nodes", label: "Nodes", icon: "nodes" },
   { id: "insert", label: "Add", icon: "add" },
   { id: "refine", label: "Lines", icon: "branch" },
+  { id: "tone", label: "Tone", icon: "contrast" },
   { id: "crop", label: "Crop", icon: "crop" },
   { id: "layers", label: "Layers", icon: "layers" },
   { id: "production", label: "Pro", icon: "production" },
@@ -112,11 +138,80 @@ const TOOLS: { id: EditorTool; label: string; icon: IconName }[] = [
 // canvas size. The resulting geometry scales back up losslessly.
 const TRACE_MAX_DIMENSION = 1400;
 
+// How far a photo is knocked back when it becomes something to draw over.
+// Faint enough that black linework reads clearly on top, strong enough to
+// still see what you are tracing.
+const UNDERLAY_OPACITY = 0.3;
+
+/** Names for the values, darkest first — what an artist would call them. */
+const BAND_LABELS = ["Core black", "Shadow", "Mid tone", "Light", "Highlight", "Paper"];
+
+/** Resize a plan without losing the choices already made for surviving bands. */
+function resizePlan(plan: SeparationPlan, bands: number): SeparationPlan {
+  const fresh = defaultPlan(bands);
+  return {
+    ...fresh,
+    strategy: plan.strategy,
+    passes: fresh.passes.map((pass, index) => plan.passes[index] ?? pass),
+  };
+}
+
+/** Switch one band to a style, or to bare paper. */
+function setPass(plan: SeparationPlan, band: number, style: ShadingStyle | null): SeparationPlan {
+  const fallback = defaultPlan(plan.bands).passes[band]?.shading;
+  return {
+    ...plan,
+    passes: plan.passes.map((pass, index) =>
+      index !== band
+        ? pass
+        : {
+            shading: style
+              ? // Keep whatever density and angle were already dialled in, so
+                // trying a technique does not throw away the tuning.
+                { ...(pass.shading ?? fallback ?? DEFAULT_SHADING), style }
+              : null,
+          }
+    ),
+  };
+}
+
+function patchPass(plan: SeparationPlan, band: number, patch: Partial<ShadingOptions>): SeparationPlan {
+  return {
+    ...plan,
+    passes: plan.passes.map((pass, index) =>
+      index !== band || !pass.shading ? pass : { shading: { ...pass.shading, ...patch } }
+    ),
+  };
+}
+
+/** A raster layer currently serving as a tracing reference. */
+function isUnderlay(layer: DesignLayer): boolean {
+  return layer.kind === "raster" && layer.locked && layer.opacity <= UNDERLAY_OPACITY + 0.01;
+}
+
+// Room left for the floating controls in full-screen drawing mode. Everything
+// else is given over to the canvas.
+const IMMERSIVE_CHROME = 132;
+
 // Thermal stencil printers in printerProfiles.ts run at 203 DPI; preflight
 // measures the artwork as it will actually come off one.
 const PRINT_DPI = 203;
 
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+
+/** Guards a stored pen profile against an older or corrupt shape. */
+function isPenSettings(value: unknown): value is PenSettings {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.stabilization === "number" &&
+    typeof candidate.pressure === "boolean" &&
+    typeof candidate.pressureDepth === "number" &&
+    typeof candidate.tiltGain === "number" &&
+    typeof candidate.velocityTaper === "number" &&
+    typeof candidate.taperLength === "number"
+  );
+}
 
 export function DesignEditor({
   design,
@@ -142,7 +237,13 @@ export function DesignEditor({
   const [dirty, setDirty] = useState(false);
   const [brush, setBrush] = useState(16);
   const [brushColor, setBrushColor] = useState("#111111");
-  const [currentStroke, setCurrentStroke] = useState<Point[]>([]);
+  // Raw samples for the stroke in progress. Conditioning is derived from them
+  // rather than applied on the way in, so the preview under the pen and the
+  // geometry committed when it lifts come out of one call and cannot disagree.
+  const [currentSamples, setCurrentSamples] = useState<PenSample[]>([]);
+  const [pen, setPen] = useState<PenSettings>(DEFAULT_PEN);
+  const [pencilOnly, setPencilOnly] = useState(false);
+  const [immersive, setImmersive] = useState(false);
   const [symmetry, setSymmetry] = useState<SymmetrySettings>(DEFAULT_SYMMETRY);
   const [letteringText, setLetteringText] = useState("");
   const [letteringStyleId, setLetteringStyleId] = useState<LetteringStyleId>("script");
@@ -155,11 +256,13 @@ export function DesignEditor({
   const [cropping, setCropping] = useState(false);
   const [lineWeight, setLineWeight] = useState(1);
   const [threshold, setThreshold] = useState(60);
-  const [wrapAmount, setWrapAmount] = useState(0.35);
-  const [wrapTaper, setWrapTaper] = useState(0.2);
+  const [surfaceId, setSurfaceId] = useState("flat");
+  const [wrapWidthIn, setWrapWidthIn] = useState(3);
   const [findings, setFindings] = useState<ProductionFinding[]>([]);
   const [healAge, setHealAge] = useState<HealAge>("fresh");
   const [healed, setHealed] = useState<string | null>(null);
+  const [plan, setPlan] = useState<SeparationPlan>(() => defaultPlan(DEFAULT_BANDS));
+  const [study, setStudy] = useState<ToneStudy | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -187,10 +290,12 @@ export function DesignEditor({
     Promise.all([
       preferences.get(brand.id, PREF_KEYS.brushSize, 16, isFiniteNumber),
       preferences.get(brand.id, PREF_KEYS.brushColor, "#111111"),
-    ]).then(([size, color]) => {
+      preferences.get(brand.id, PREF_KEYS.pen, DEFAULT_PEN, isPenSettings),
+    ]).then(([size, color, saved]) => {
       if (!active) return;
       setBrush(Math.max(2, Math.min(72, size)));
       setBrushColor(color);
+      setPen(saved);
     });
     return () => {
       active = false;
@@ -207,14 +312,28 @@ export function DesignEditor({
     void preferences.set(brand.id, PREF_KEYS.brushColor, value);
   }
 
+  function rememberPen(patch: Partial<PenSettings>) {
+    setPen((current) => {
+      const next = { ...current, ...patch };
+      void preferences.set(brand.id, PREF_KEYS.pen, next);
+      return next;
+    });
+  }
+
   const selected = useMemo(
     () => project?.layers.find((layer) => layer.id === project.selectedLayerId) ?? null,
     [project]
   );
 
-  const stageW = screenW - SPACE.md * 2;
   const aspect = project ? project.canvas.height / project.canvas.width : 1;
-  const stageH = Math.min(stageW * aspect, screenH * 0.48);
+  // Fit the canvas inside what is available rather than filling the width and
+  // capping the height: one scale factor maps both axes, so a stage whose
+  // aspect does not match the canvas puts every gesture in the wrong place
+  // down the long axis and stretches the preview to match.
+  const availableW = immersive ? screenW - SPACE.sm * 2 : screenW - SPACE.md * 2;
+  const availableH = immersive ? screenH - IMMERSIVE_CHROME : screenH * 0.48;
+  const stageW = Math.min(availableW, availableH / aspect);
+  const stageH = stageW * aspect;
   const scale = project ? stageW / project.canvas.width : 1;
 
   async function persist(next: EditableDesignProject) {
@@ -225,6 +344,9 @@ export function DesignEditor({
       const flattened = await renderProject(bumped);
       setProject(bumped);
       setPreview(flattened);
+      // A study of the previous artwork would quietly keep being shown over
+      // the new one. Better to make it obviously absent than subtly wrong.
+      setStudy(null);
       setHealed(null);
       setHealAge("fresh");
       setDirty(true);
@@ -261,19 +383,35 @@ export function DesignEditor({
     await persist(next);
   }
 
-  function addStrokePoint(x: number, y: number) {
+  /**
+   * One reading from the digitiser, in stage points, conditioned and stored.
+   *
+   * Everything downstream works in canvas pixels, so the position is converted
+   * before it is filtered — smoothing and taper are both distance-based, and
+   * running them in stage points would make the brush behave differently at
+   * every zoom level.
+   */
+  function addStrokeSample(x: number, y: number, stylus: StylusReading) {
     if (!project) return;
-    setCurrentStroke((points) => [
-      ...points,
-      {
-        x: Math.max(0, Math.min(project.canvas.width, x / scale)),
-        y: Math.max(0, Math.min(project.canvas.height, y / scale)),
-      },
-    ]);
+    const raw = sampleFromStylus(
+      Math.max(0, Math.min(project.canvas.width, x / scale)),
+      Math.max(0, Math.min(project.canvas.height, y / scale)),
+      stylus
+    );
+    setCurrentSamples((samples) => [...samples, raw]);
+  }
+
+  function beginStroke(x: number, y: number, stylus: StylusReading) {
+    setCurrentSamples([]);
+    addStrokeSample(x, y, stylus);
   }
 
   async function finishStroke() {
-    if (!project || !currentStroke.length) return;
+    const drawn = conditionStroke(currentSamples, brush / scale, pen);
+    if (!project || !drawn.length) {
+      setCurrentSamples([]);
+      return;
+    }
     let next = project;
     let strokeLayer = selected?.kind === "stroke" && !selected.locked ? selected : null;
     if (!strokeLayer) {
@@ -282,13 +420,15 @@ export function DesignEditor({
     }
     const id = strokeLayer.id;
     // Symmetry commits the whole set as one undo step — one gesture, one entry.
-    const paths = replicateStroke(currentStroke, symmetry, project.canvas);
+    const paths = replicateStroke(drawn, symmetry, project.canvas);
     next = updateLayer(next, id, (layer) => ({
       ...(layer as StrokeLayer),
       strokes: [
         ...(layer as StrokeLayer).strokes,
         ...paths.map((points) => ({
           points,
+          // Nominal width. Per-point widths carry the pen dynamics; this is
+          // what any point without one falls back to.
           width: brush / scale,
           color: brushColor,
           mode: tool === "erase" ? ("erase" as const) : ("draw" as const),
@@ -296,7 +436,7 @@ export function DesignEditor({
         })),
       ],
     }));
-    setCurrentStroke([]);
+    setCurrentSamples([]);
     const base = tool === "erase" ? "Mask stroke" : "Brush stroke";
     await commit(paths.length > 1 ? `${base} ×${paths.length}` : base, next);
   }
@@ -339,11 +479,25 @@ export function DesignEditor({
     );
   }
 
+  // stylusData is populated only for a real stylus — on iOS the handler gates
+  // it on UITouchTypePencil — so its presence is both the pressure reading and
+  // the answer to "was that the Pencil or a palm?".
   const drawGesture = Gesture.Pan()
     .minDistance(0)
-    .onStart((event) => runOnJS(addStrokePoint)(event.x, event.y))
-    .onUpdate((event) => runOnJS(addStrokePoint)(event.x, event.y))
-    .onEnd(() => runOnJS(finishStroke)());
+    .onStart((event) => {
+      "worklet";
+      if (pencilOnly && !event.stylusData) return;
+      runOnJS(beginStroke)(event.x, event.y, event.stylusData);
+    })
+    .onUpdate((event) => {
+      "worklet";
+      if (pencilOnly && !event.stylusData) return;
+      runOnJS(addStrokeSample)(event.x, event.y, event.stylusData);
+    })
+    .onEnd(() => {
+      "worklet";
+      runOnJS(finishStroke)();
+    });
 
   const arrangeGesture = Gesture.Simultaneous(
     Gesture.Pan().onEnd((event) => runOnJS(finishPan)(event.translationX, event.translationY)),
@@ -438,6 +592,52 @@ export function DesignEditor({
       await commit(kind === "stencil" ? "Refine linework" : "Add cut line", result.project);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't process the linework.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * The value study. Judged before any marks are made — if this does not read
+   * as the subject, no amount of shading technique will save the stencil made
+   * from it.
+   */
+  async function runToneStudy(next: SeparationPlan) {
+    setPlan(next);
+    if (!preview) return;
+    setBusy(true);
+    try {
+      setStudy(toneStudy(preview, next.bands, next.strategy));
+      setError(null);
+    } catch (e) {
+      setStudy(null);
+      setError(e instanceof Error ? e.message : "The value study couldn't be built.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * Turns the study into layers: one per band the plan inks, darkest on top.
+   *
+   * The source stays visible and untouched. Shading you cannot compare against
+   * the thing it came from is shading you cannot judge, and the layer panel is
+   * where it gets turned off once it has been judged.
+   */
+  async function applySeparation() {
+    if (!project || !preview) return;
+    setBusy(true);
+    try {
+      const { layers, marks } = shadingLayers(preview, plan, project.canvas.width, project.canvas.height);
+      if (!layers.length) {
+        setError("No band in this plan produces marks. Give a darker band a style and try again.");
+        return;
+      }
+      let next = project;
+      for (const layer of layers) next = addLayer(next, layer);
+      await commit(`Tone separation · ${layers.length} layer${layers.length === 1 ? "" : "s"}, ${marks} marks`, next);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "The separation couldn't be applied.");
     } finally {
       setBusy(false);
     }
@@ -628,13 +828,25 @@ export function DesignEditor({
     }
   }
 
-  async function applyWrap() {
+  /**
+   * `compensate` is what you print — pre-distorted so it reads correctly once
+   * it is on the curve. `foreshorten` is the proof — what the flat artwork
+   * will actually look like there. Both come off the same map.
+   */
+  async function applyWrap(direction: "compensate" | "foreshorten") {
     if (!project || !preview) return;
+    const surface = findSurface(surfaceId);
+    if (!surface || surface.kind === "flat") {
+      setError("Pick the surface this is going on first.");
+      return;
+    }
     try {
-      const warped = wrapForSurface(preview, wrapAmount, wrapTaper);
+      const heightIn = wrapWidthIn * (project.canvas.height / project.canvas.width);
+      const warped = wrapForSurface(preview, surface, wrapWidthIn, heightIn, direction);
       const hidden = { ...project, layers: project.layers.map((layer) => ({ ...layer, visible: false })) };
-      const result = await addRasterAsset(hidden, warped, "Surface wrap proof");
-      await commit("Surface wrap", result.project);
+      const label = direction === "compensate" ? "Compensated for" : "Proof on";
+      const result = await addRasterAsset(hidden, warped, `${label} ${surface.label.toLowerCase()}`);
+      await commit(`${label} ${surface.label.toLowerCase()}`, result.project);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't build the surface wrap.");
     }
@@ -701,6 +913,17 @@ export function DesignEditor({
     await shareUri(file.uri);
   }
 
+  /**
+   * Full-screen drawing. Entering from a tool that has nothing to do with the
+   * brush would hand over the whole screen and then offer no way to mark it,
+   * so anything non-drawing lands on the brush.
+   */
+  function enterImmersive() {
+    if (tool !== "draw" && tool !== "erase") setTool("draw");
+    setImmersive(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  }
+
   function confirmClose() {
     if (!dirty) return onClose();
     Alert.alert("Leave the editor?", "Your project is autosaved. The library preview changes only when you tap Replace.", [
@@ -712,11 +935,16 @@ export function DesignEditor({
   // Preview every path the commit will produce, so the fold is visible while
   // the finger is still down rather than only after lifting.
   const overlayPaths = useMemo(() => {
-    if (!project || !currentStroke.length) return [];
-    return replicateStroke(currentStroke, symmetry, project.canvas).map((points) =>
-      points.map((point, index) => `${index ? "L" : "M"}${point.x * scale} ${point.y * scale}`).join(" ")
+    if (!project || !currentSamples.length) return [];
+    const nominal = brush / scale;
+    const drawn = conditionStroke(currentSamples, nominal, pen);
+    // The preview goes through the same renderer the commit will, so the
+    // taper and pressure are visible while the pen is still down rather than
+    // appearing only after it lifts.
+    return replicateStroke(drawn, symmetry, project.canvas).map((points) =>
+      renderStroke(points, nominal, scale)
     );
-  }, [project, currentStroke, symmetry, scale]);
+  }, [project, currentSamples, symmetry, scale, brush, pen]);
 
   // Node handles: the layer being dragged (draft) or the selected stroke
   // layer. Dense traces stay legible by capping how many handles render.
@@ -743,6 +971,7 @@ export function DesignEditor({
     <Modal visible animationType="slide" presentationStyle="fullScreen" onRequestClose={confirmClose}>
       <GestureHandlerRootView style={styles.root}>
         <SafeAreaView style={[styles.screen, { backgroundColor: theme.background }]}>
+          {!immersive && (
           <View style={styles.topbar}>
             <Pressable onPress={confirmClose} accessibilityRole="button" accessibilityLabel="Close editor" style={[styles.iconButton, { backgroundColor: theme.surfaceAlt }]}>
               <Icon name="chevronDown" size={TYPE.heading.fontSize} color={theme.foreground} />
@@ -758,8 +987,10 @@ export function DesignEditor({
               <Icon name="redo" size={TYPE.body.fontSize + SPACE.xs / 2} color={theme.foreground} />
             </Pressable>
           </View>
+          )}
 
-          <View style={[styles.workspace, brand.id === "ink" ? glow(theme, "sm") : lift("sm"), { backgroundColor: theme.surface, borderColor: theme.line }]}>
+          <View style={[styles.workspace, immersive ? styles.workspaceImmersive : (brand.id === "ink" ? glow(theme, "sm") : lift("sm")), { backgroundColor: immersive ? theme.background : theme.surface, borderColor: immersive ? "transparent" : theme.line }]}>
+            {!immersive && (
             <View style={styles.workspaceMeta}>
               <View style={[styles.livePill, { backgroundColor: `${theme.accent}18` }]}>
                 <View style={[styles.liveDot, { backgroundColor: theme.accent }]} />
@@ -769,6 +1000,12 @@ export function DesignEditor({
                 <Icon name="layers" size={TYPE.caption.fontSize} color={theme.muted} />
                 <Text style={[TYPE.micro, { color: theme.muted, fontFamily: theme.fontBodyMedium }]}>{showOriginal ? "EDITED" : "ORIGINAL"}</Text>
               </Pressable>
+              {tool === "tone" && !!study && !showOriginal && (
+                <View style={[styles.livePill, { backgroundColor: `${theme.accent}18` }]}>
+                  <Icon name="contrast" size={TYPE.caption.fontSize} color={theme.accent} />
+                  <Text style={[styles.liveText, { color: theme.accent, fontFamily: theme.fontBodyMedium }]}>VALUE STUDY</Text>
+                </View>
+              )}
               {!!healed && !showOriginal && (
                 <View style={[styles.livePill, { backgroundColor: `${theme.accent}18` }]}>
                   <Icon name="history" size={TYPE.caption.fontSize} color={theme.accent} />
@@ -779,7 +1016,17 @@ export function DesignEditor({
                 <Icon name="sheet" size={TYPE.caption.fontSize} color={showGrid ? theme.accent : theme.muted} />
                 <Text style={[TYPE.micro, { color: showGrid ? theme.accent : theme.muted, fontFamily: theme.fontBodyMedium }]}>GRID</Text>
               </Pressable>
+              <Pressable
+                onPress={enterImmersive}
+                accessibilityRole="button"
+                accessibilityLabel="Draw full screen"
+                style={[styles.compare, { borderColor: theme.line }]}
+              >
+                <Icon name="expand" size={TYPE.caption.fontSize} color={theme.muted} />
+                <Text style={[TYPE.micro, { color: theme.muted, fontFamily: theme.fontBodyMedium }]}>FULL SCREEN</Text>
+              </Pressable>
             </View>
+            )}
 
             <GestureDetector gesture={stageGesture}>
               <View style={[styles.stage, { width: stageW, height: stageH }]}>
@@ -788,9 +1035,19 @@ export function DesignEditor({
                   intensity={0.5}
                   style={{ backgroundColor: project?.canvas.background ?? theme.stock }}
                 />
-                {(showOriginal ? originalPreview : healed ?? preview) && (
-                  <Image source={{ uri: (showOriginal ? originalPreview : healed ?? preview)! }} style={StyleSheet.absoluteFill} contentFit="fill" alt={project?.title ?? design.title} />
-                )}
+                {(() => {
+                  // The value study replaces the preview while the tone tool is
+                  // open, because the only way to judge a separation is to look
+                  // at it in place of the picture it came from.
+                  const shown = showOriginal
+                    ? originalPreview
+                    : tool === "tone" && study
+                      ? study.dataUrl
+                      : healed ?? preview;
+                  return shown ? (
+                    <Image source={{ uri: shown }} style={StyleSheet.absoluteFill} contentFit="fill" alt={project?.title ?? design.title} />
+                  ) : null;
+                })()}
                 {showGrid && <View pointerEvents="none" style={StyleSheet.absoluteFill}>{[1, 2, 3].map(index => <View key={`v${index}`} style={[styles.gridLine, { left: `${index * 25}%`, top: 0, bottom: 0, width: StyleSheet.hairlineWidth, backgroundColor: theme.accent }]} />)}{[1, 2, 3].map(index => <View key={`h${index}`} style={[styles.gridLine, { top: `${index * 25}%`, left: 0, right: 0, height: StyleSheet.hairlineWidth, backgroundColor: theme.accent }]} />)}</View>}
                 {!!selected && tool === "select" && !showOriginal && (
                   <View
@@ -819,9 +1076,14 @@ export function DesignEditor({
                     {nodeHandles.map((handle, index) => (
                       <SvgCircle key={`node-${index}`} cx={handle.x * scale} cy={handle.y * scale} r={4.5} fill={theme.surface} stroke={theme.accent} strokeWidth={1.5} />
                     ))}
-                    {overlayPaths.map((path, index) => (
-                      <SvgPath key={`stroke-${index}`} d={path} fill="none" stroke={tool === "erase" ? project?.canvas.background ?? "white" : brushColor} strokeWidth={brush} strokeLinecap="round" strokeLinejoin="round" opacity={index ? 0.75 : 1} />
-                    ))}
+                    {overlayPaths.map((path, index) => {
+                      const ink = tool === "erase" ? project?.canvas.background ?? "white" : brushColor;
+                      return path.fill ? (
+                        <SvgPath key={`stroke-${index}`} d={path.d} fill={ink} stroke="none" opacity={index ? 0.75 : 1} />
+                      ) : (
+                        <SvgPath key={`stroke-${index}`} d={path.d} fill="none" stroke={ink} strokeWidth={path.width} strokeLinecap="round" strokeLinejoin="round" opacity={index ? 0.75 : 1} />
+                      );
+                    })}
                   </Svg>
                 )}
                 {busy && <View style={[styles.loading, { backgroundColor: `${theme.background}aa` }]}><ActivityIndicator color={theme.accent} /><Text style={[TYPE.caption, { color: theme.foreground, fontFamily: theme.fontBodyMedium }]}>RENDERING FULL RESOLUTION</Text></View>}
@@ -829,8 +1091,26 @@ export function DesignEditor({
             </GestureDetector>
           </View>
 
-          {error && <Notice>{error}</Notice>}
+          {error && !immersive && <Notice>{error}</Notice>}
 
+          {immersive && (
+            <ImmersiveBar
+              theme={theme}
+              tool={tool}
+              onTool={setTool}
+              brush={brush}
+              onBrush={rememberBrush}
+              pencilOnly={pencilOnly}
+              onPencilOnly={setPencilOnly}
+              canUndo={!!past.length && !busy}
+              canRedo={!!future.length && !busy}
+              onUndo={undo}
+              onRedo={redo}
+              onExit={() => setImmersive(false)}
+            />
+          )}
+
+          {!immersive && (
           <GlassSurface style={styles.toolSurface}>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.toolDock} style={styles.toolScroll}>
               {TOOLS.map((item) => {
@@ -844,7 +1124,9 @@ export function DesignEditor({
               })}
             </ScrollView>
           </GlassSurface>
+          )}
 
+          {!immersive && (
           <GlassSurface style={styles.inspectorSurface}>
             <ScrollView style={styles.inspector} contentContainerStyle={{ padding: SPACE.sm, paddingBottom: SPACE.sm }} keyboardShouldPersistTaps="handled">
               <Inspector
@@ -866,6 +1148,15 @@ export function DesignEditor({
               onAddLettering={addLettering}
               onBrush={rememberBrush}
               onBrushColor={rememberBrushColor}
+              pen={pen}
+              onPen={rememberPen}
+              plan={plan}
+              study={study}
+              onPlan={setPlan}
+              onStudy={runToneStudy}
+              onSeparate={applySeparation}
+              pencilOnly={pencilOnly}
+              onPencilOnly={setPencilOnly}
               onThreshold={setThreshold}
               onLineWeight={setLineWeight}
               onProject={(label, next) => commit(label, next)}
@@ -878,11 +1169,11 @@ export function DesignEditor({
               onCleanup={cleanUpStrokes}
               nodeMode={nodeMode}
               onNodeMode={setNodeMode}
-              wrapAmount={wrapAmount}
-              wrapTaper={wrapTaper}
+              surfaceId={surfaceId}
+              wrapWidthIn={wrapWidthIn}
               findings={findings}
-              onWrapAmount={setWrapAmount}
-              onWrapTaper={setWrapTaper}
+              onSurface={setSurfaceId}
+              onWrapWidth={setWrapWidthIn}
               onApplyWrap={applyWrap}
               onInspect={runProductionCheck}
               healAge={healAge}
@@ -893,11 +1184,14 @@ export function DesignEditor({
               />
             </ScrollView>
           </GlassSurface>
+          )}
 
+          {!immersive && (
           <View style={styles.savebar}>
             <Button label="Save copy" icon="duplicate-outline" disabled={!project || !preview || busy} onPress={() => save(false)} style={{ flex: 1 }} />
             <Button label="Replace design" icon="checkmark" variant="primary" disabled={!project || !preview || busy} onPress={() => save(true)} style={{ flex: 1.25 }} />
           </View>
+          )}
         </SafeAreaView>
 
         {cropping && project && preview && (
@@ -927,6 +1221,15 @@ function Inspector({
   onAddLettering,
   onBrush,
   onBrushColor,
+  pen,
+  onPen,
+  plan,
+  study,
+  onPlan,
+  onStudy,
+  onSeparate,
+  pencilOnly,
+  onPencilOnly,
   onThreshold,
   onLineWeight,
   onProject,
@@ -939,11 +1242,11 @@ function Inspector({
   onCleanup,
   nodeMode,
   onNodeMode,
-  wrapAmount,
-  wrapTaper,
+  surfaceId,
+  wrapWidthIn,
   findings,
-  onWrapAmount,
-  onWrapTaper,
+  onSurface,
+  onWrapWidth,
   onApplyWrap,
   onInspect,
   healAge,
@@ -972,6 +1275,15 @@ function Inspector({
   onBrushColor: (value: string) => void;
   onThreshold: (value: number) => void;
   onLineWeight: (value: number) => void;
+  pen: PenSettings;
+  onPen: (patch: Partial<PenSettings>) => void;
+  plan: SeparationPlan;
+  study: ToneStudy | null;
+  onPlan: (plan: SeparationPlan) => void;
+  onStudy: (plan: SeparationPlan) => void;
+  onSeparate: () => void;
+  pencilOnly: boolean;
+  onPencilOnly: (value: boolean) => void;
   onProject: (label: string, project: EditableDesignProject) => void;
   onTransform: (patch: Partial<DesignLayer["transform"]>, label: string) => void;
   onCrop: () => void;
@@ -982,12 +1294,12 @@ function Inspector({
   onCleanup: () => void;
   nodeMode: "move" | "delete" | "insert";
   onNodeMode: (mode: "move" | "delete" | "insert") => void;
-  wrapAmount: number;
-  wrapTaper: number;
+  surfaceId: string;
+  wrapWidthIn: number;
   findings: ProductionFinding[];
-  onWrapAmount: (value: number) => void;
-  onWrapTaper: (value: number) => void;
-  onApplyWrap: () => void;
+  onSurface: (id: string) => void;
+  onWrapWidth: (value: number) => void;
+  onApplyWrap: (direction: "compensate" | "foreshorten") => void;
   onInspect: () => void;
   healAge: HealAge;
   onHealAge: (age: HealAge) => void;
@@ -1007,6 +1319,7 @@ function Inspector({
             <Pressable key={color} onPress={() => onBrushColor(color)} accessibilityLabel={`Brush color ${color}`} style={[styles.swatch, { backgroundColor: color, borderColor: color === brushColor ? theme.accent : theme.line }]} />
           ))}
         </View>
+        <PenControls pen={pen} onPen={onPen} pencilOnly={pencilOnly} onPencilOnly={onPencilOnly} />
         <SymmetryControls symmetry={symmetry} onSymmetry={onSymmetry} />
       </PanelTitle>
     );
@@ -1153,6 +1466,157 @@ function Inspector({
     return <PanelTitle icon="crop-outline" title="Crop the project" subtitle="The canvas changes, but source layers remain intact and movable."><Button label="Choose crop" icon="crop-outline" variant="primary" onPress={onCrop} /></PanelTitle>;
   }
 
+  if (tool === "tone") {
+    const inked = plan.passes.filter((pass) => pass.shading).length;
+    return (
+      <PanelTitle
+        icon="contrast-outline"
+        title="Value study"
+        subtitle="Decide which greys become ink before any line exists. This is the step that separates a stencil from a filter."
+      >
+        <SliderRow
+          label="Values"
+          value={plan.bands}
+          min={MIN_BANDS}
+          max={MAX_BANDS}
+          step={1}
+          display={`${plan.bands}`}
+          onChange={(value) => onPlan(resizePlan(plan, value))}
+        />
+        <View style={styles.segmentRow}>
+          {(
+            [
+              { id: "balanced" as BandStrategy, label: "Balanced" },
+              { id: "even" as BandStrategy, label: "Even" },
+            ]
+          ).map((item) => {
+            const active = plan.strategy === item.id;
+            return (
+              <Pressable
+                key={item.id}
+                onPress={() => {
+                  onPlan({ ...plan, strategy: item.id });
+                  Haptics.selectionAsync();
+                }}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                style={[styles.symmetryChip, { backgroundColor: active ? theme.accent : theme.surfaceAlt, borderColor: active ? theme.accent : theme.line }]}
+              >
+                <Text style={[TYPE.micro, { color: active ? theme.accentText : theme.muted, fontFamily: theme.fontBodyMedium }]}>
+                  {item.label.toUpperCase()}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        <Text style={[TYPE.caption, { color: theme.muted, fontFamily: theme.fontBody }]}>
+          {plan.strategy === "balanced"
+            ? "Each value holds about the same amount of the picture. Separates a photo shot in flat light, which even bands cannot."
+            : "The 0–255 range split into equal slices. Right when the photo already uses its whole range."}
+        </Text>
+
+        {plan.passes.map((pass, band) => (
+          <View key={band} style={styles.symmetryBlock}>
+            <View style={styles.toneHeader}>
+              <View
+                style={[
+                  styles.toneSwatch,
+                  {
+                    backgroundColor: `rgb(${study?.tones[band] ?? 255},${study?.tones[band] ?? 255},${study?.tones[band] ?? 255})`,
+                    borderColor: theme.line,
+                  },
+                ]}
+              />
+              <Text style={[TYPE.caption, { flex: 1, color: theme.foreground, fontFamily: theme.fontBodyMedium }]}>
+                {BAND_LABELS[band] ?? `Value ${band + 1}`}
+              </Text>
+              {!!study && (
+                <Text style={[TYPE.micro, { color: theme.muted, fontFamily: theme.fontBody }]}>
+                  {Math.round((study.coverage[band] ?? 0) * 100)}%
+                </Text>
+              )}
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.segmentRow}>
+              <Pressable
+                onPress={() => onPlan(setPass(plan, band, null))}
+                accessibilityRole="button"
+                accessibilityState={{ selected: !pass.shading }}
+                style={[styles.symmetryChip, { backgroundColor: !pass.shading ? theme.accent : theme.surfaceAlt, borderColor: !pass.shading ? theme.accent : theme.line }]}
+              >
+                <Text style={[TYPE.micro, { color: !pass.shading ? theme.accentText : theme.muted, fontFamily: theme.fontBodyMedium }]}>PAPER</Text>
+              </Pressable>
+              {SHADING_STYLES.map((item) => {
+                const active = pass.shading?.style === item.id;
+                return (
+                  <Pressable
+                    key={item.id}
+                    onPress={() => {
+                      onPlan(setPass(plan, band, item.id));
+                      Haptics.selectionAsync();
+                    }}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                    style={[styles.symmetryChip, { backgroundColor: active ? theme.accent : theme.surfaceAlt, borderColor: active ? theme.accent : theme.line }]}
+                  >
+                    <Text style={[TYPE.micro, { color: active ? theme.accentText : theme.muted, fontFamily: theme.fontBodyMedium }]}>
+                      {item.label.toUpperCase()}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+            {!!pass.shading && (
+              <>
+                <Text style={[TYPE.micro, { color: theme.muted, fontFamily: theme.fontBody }]}>
+                  {SHADING_STYLES.find((item) => item.id === pass.shading?.style)?.caption}
+                </Text>
+                <SliderRow
+                  label="Density"
+                  value={pass.shading.density}
+                  min={0.05}
+                  max={1}
+                  step={0.05}
+                  display={`${Math.round(pass.shading.density * 100)}%`}
+                  onChange={(value) => onPlan(patchPass(plan, band, { density: value }))}
+                />
+                <SliderRow
+                  label="Angle"
+                  value={pass.shading.angle}
+                  min={0}
+                  max={180}
+                  step={5}
+                  display={`${Math.round(pass.shading.angle)}°`}
+                  onChange={(value) => onPlan(patchPass(plan, band, { angle: value }))}
+                />
+                <SliderRow
+                  label="Mark weight"
+                  value={pass.shading.weight}
+                  min={0.5}
+                  max={8}
+                  step={0.5}
+                  display={`${pass.shading.weight} px`}
+                  onChange={(value) => onPlan(patchPass(plan, band, { weight: value }))}
+                />
+              </>
+            )}
+          </View>
+        ))}
+
+        <Button label={study ? "Rebuild the study" : "Build the value study"} icon="contrast-outline" onPress={() => onStudy(plan)} />
+        <Button
+          label={`Shade ${inked} value${inked === 1 ? "" : "s"} into layers`}
+          icon="layers-outline"
+          variant="primary"
+          disabled={!inked}
+          onPress={onSeparate}
+        />
+        <Text style={[TYPE.caption, { color: theme.muted, fontFamily: theme.fontBody }]}>
+          Each value becomes its own editable layer, darkest on top. Print the outline alone and keep the shading as reference, or transfer both.
+        </Text>
+      </PanelTitle>
+    );
+  }
+
   if (tool === "layers") {
     return (
       <PanelTitle icon="layers-outline" title={`${project.layers.length} editable layer${project.layers.length === 1 ? "" : "s"}`} subtitle="Top layers appear in front. Lock production-critical artwork before arranging.">
@@ -1170,6 +1634,25 @@ function Inspector({
             <Icon name={layer.locked ? "lock" : "unlock"} size={TYPE.caption.fontSize} color={layer.locked ? theme.accent : theme.muted} />
           </Pressable>
         ))}
+        {selected?.kind === "raster" && (
+          <Button
+            label={isUnderlay(selected) ? "Bring reference back to full strength" : "Use as tracing reference"}
+            icon="layers-outline"
+            onPress={() =>
+              onProject(
+                isUnderlay(selected) ? "Reference at full strength" : "Trace over reference",
+                updateLayer(project, selected.id, (layer) =>
+                  isUnderlay(layer)
+                    ? { ...layer, opacity: 1, locked: false }
+                    : // Dimmed so your own linework reads over it, and locked so
+                      // a stray drag moves the drawing rather than the thing you
+                      // are drawing from.
+                      { ...layer, opacity: UNDERLAY_OPACITY, locked: true }
+                )
+              )
+            }
+          />
+        )}
         <Button label="Flatten visible into new layer" icon="copy-outline" onPress={onFlatten} />
       </PanelTitle>
     );
@@ -1178,8 +1661,13 @@ function Inspector({
   if (tool === "production") {
     return (
       <PanelTitle icon="shield-checkmark-outline" title="Production desk" subtitle="Preflight, compensate for curved placement, compare a capture, and prepare a client proof.">
-        <SliderRow label="Surface curvature" value={wrapAmount} min={0} max={1} step={0.05} display={`${Math.round(wrapAmount * 100)}%`} onChange={onWrapAmount} />
-        <SliderRow label="Edge taper" value={wrapTaper} min={0} max={1} step={0.05} display={`${Math.round(wrapTaper * 100)}%`} onChange={onWrapTaper} />
+        <SurfaceControls
+          surfaceId={surfaceId}
+          widthIn={wrapWidthIn}
+          onSurface={onSurface}
+          onWidth={onWrapWidth}
+          onApply={onApplyWrap}
+        />
         <View style={styles.symmetryBlock}>
           <Text style={[TYPE.micro, { color: theme.muted, fontFamily: theme.fontBodyMedium }]}>HOW IT WILL HEAL</Text>
           <View style={styles.segmentRow}>
@@ -1203,7 +1691,6 @@ function Inspector({
           </Text>
         </View>
         <View style={styles.actionRow}>
-          <MiniAction icon="body-outline" label="Apply wrap" onPress={onApplyWrap} />
           <MiniAction icon="shield-checkmark-outline" label="Preflight" onPress={onInspect} />
           <MiniAction icon="camera-outline" label="Check photo" onPress={onCheckCapture} />
           <MiniAction icon="send-outline" label="Review" onPress={onShareReview} />
@@ -1234,6 +1721,307 @@ function Inspector({
 function PanelTitle({ icon, title, subtitle, children }: { icon: keyof typeof Ionicons.glyphMap; title: string; subtitle: string; children?: React.ReactNode }) {
   const { theme } = useBrand();
   return <View style={[styles.panel, { backgroundColor: theme.surface, borderColor: theme.line }]}><View style={styles.panelHead}><View style={[styles.panelIcon, { backgroundColor: `${theme.accent}18` }]}><Icon name={iconNameFor(icon)} size={TYPE.body.fontSize + SPACE.xs / 3} color={theme.accent} /></View><View style={{ flex: 1 }}><Text style={[TYPE.body, { color: theme.foreground, fontFamily: theme.fontBodyMedium }]}>{title}</Text><Text style={[TYPE.caption, { color: theme.muted, fontFamily: theme.fontBody }]}>{subtitle}</Text></View></View>{children && <View style={{ marginTop: SPACE.sm }}>{children}</View>}</View>;
+}
+
+/**
+ * The only chrome that survives full-screen mode.
+ *
+ * Deliberately small: the reason to go full screen is that the canvas was
+ * competing with a tool dock, an inspector and a save bar for a phone-sized
+ * screen. What is left is what you cannot draw without — which tool, how big,
+ * whether a palm counts, and a way back.
+ */
+function ImmersiveBar({
+  theme,
+  tool,
+  onTool,
+  brush,
+  onBrush,
+  pencilOnly,
+  onPencilOnly,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
+  onExit,
+}: {
+  theme: Theme;
+  tool: EditorTool;
+  onTool: (tool: EditorTool) => void;
+  brush: number;
+  onBrush: (value: number) => void;
+  pencilOnly: boolean;
+  onPencilOnly: (value: boolean) => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  onUndo: () => void;
+  onRedo: () => void;
+  onExit: () => void;
+}) {
+  return (
+    <GlassSurface style={styles.immersiveBar}>
+      <View style={styles.immersiveRow}>
+        <Pressable
+          onPress={onExit}
+          accessibilityRole="button"
+          accessibilityLabel="Leave full screen"
+          style={[styles.immersiveButton, { backgroundColor: theme.surfaceAlt }]}
+        >
+          <Icon name="collapse" size={TYPE.body.fontSize + SPACE.xs / 2} color={theme.foreground} />
+        </Pressable>
+
+        {(["draw", "erase"] as const).map((id) => {
+          const active = tool === id;
+          return (
+            <Pressable
+              key={id}
+              onPress={() => {
+                onTool(id);
+                Haptics.selectionAsync();
+              }}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+              accessibilityLabel={id === "draw" ? "Draw" : "Mask"}
+              style={[styles.immersiveButton, { backgroundColor: active ? theme.accent : theme.surfaceAlt }]}
+            >
+              <Icon
+                name={id === "draw" ? "brush" : "mask"}
+                size={TYPE.body.fontSize + SPACE.xs / 2}
+                color={active ? theme.accentText : theme.foreground}
+              />
+            </Pressable>
+          );
+        })}
+
+        <Pressable
+          onPress={() => {
+            onPencilOnly(!pencilOnly);
+            Haptics.selectionAsync();
+          }}
+          accessibilityRole="switch"
+          accessibilityState={{ checked: pencilOnly }}
+          accessibilityLabel="Pencil only"
+          style={[styles.immersiveButton, { backgroundColor: pencilOnly ? theme.accent : theme.surfaceAlt }]}
+        >
+          <Icon name="edit" size={TYPE.body.fontSize + SPACE.xs / 2} color={pencilOnly ? theme.accentText : theme.foreground} />
+        </Pressable>
+
+        <View style={{ flex: 1 }} />
+
+        <Pressable
+          onPress={onUndo}
+          disabled={!canUndo}
+          accessibilityRole="button"
+          accessibilityLabel="Undo"
+          style={[styles.immersiveButton, { backgroundColor: theme.surfaceAlt, opacity: canUndo ? 1 : 0.35 }]}
+        >
+          <Icon name="undo" size={TYPE.body.fontSize + SPACE.xs / 2} color={theme.foreground} />
+        </Pressable>
+        <Pressable
+          onPress={onRedo}
+          disabled={!canRedo}
+          accessibilityRole="button"
+          accessibilityLabel="Redo"
+          style={[styles.immersiveButton, { backgroundColor: theme.surfaceAlt, opacity: canRedo ? 1 : 0.35 }]}
+        >
+          <Icon name="redo" size={TYPE.body.fontSize + SPACE.xs / 2} color={theme.foreground} />
+        </Pressable>
+      </View>
+
+      <View style={styles.immersiveRow}>
+        <Text style={[TYPE.micro, { color: theme.muted, fontFamily: theme.fontBodyMedium, width: 52 }]}>
+          {Math.round(brush)}PX
+        </Text>
+        <Slider
+          style={{ flex: 1 }}
+          minimumValue={2}
+          maximumValue={72}
+          step={1}
+          value={brush}
+          onValueChange={onBrush}
+          minimumTrackTintColor={theme.accent}
+          maximumTrackTintColor={theme.line}
+          thumbTintColor={theme.accent}
+        />
+      </View>
+    </GlassSurface>
+  );
+}
+
+/**
+ * How the brush responds to the hand holding it.
+ *
+ * Stabilization is first because it is the one that changes the most for the
+ * most people: a hand steady enough for paper is not steady enough for glass,
+ * and this is the difference between shaky linework and confident linework.
+ * The rest only do anything with a stylus, so they say so instead of appearing
+ * broken to someone drawing with a finger.
+ */
+function PenControls({
+  pen,
+  onPen,
+  pencilOnly,
+  onPencilOnly,
+}: {
+  pen: PenSettings;
+  onPen: (patch: Partial<PenSettings>) => void;
+  pencilOnly: boolean;
+  onPencilOnly: (value: boolean) => void;
+}) {
+  const { theme } = useBrand();
+  return (
+    <View style={styles.symmetryBlock}>
+      <Text style={[TYPE.micro, { color: theme.muted, fontFamily: theme.fontBodyMedium }]}>PEN FEEL</Text>
+      <SliderRow
+        label="Steady hand"
+        value={pen.stabilization}
+        min={0}
+        max={1}
+        step={0.05}
+        display={pen.stabilization < 0.05 ? "Off" : `${Math.round(pen.stabilization * 100)}%`}
+        onChange={(value) => onPen({ stabilization: value })}
+      />
+      <SliderRow
+        label="Pressure"
+        value={pen.pressure ? pen.pressureDepth : 0}
+        min={0}
+        max={1}
+        step={0.05}
+        display={pen.pressure && pen.pressureDepth > 0 ? `${Math.round(pen.pressureDepth * 100)}%` : "Off"}
+        onChange={(value) => onPen({ pressure: value > 0, pressureDepth: value })}
+      />
+      <SliderRow
+        label="Tilt shading"
+        value={pen.tiltGain}
+        min={0}
+        max={1.5}
+        step={0.05}
+        display={pen.tiltGain < 0.05 ? "Off" : `${Math.round(pen.tiltGain * 100)}%`}
+        onChange={(value) => onPen({ tiltGain: value })}
+      />
+      <SliderRow
+        label="Speed taper"
+        value={pen.velocityTaper}
+        min={0}
+        max={1}
+        step={0.05}
+        display={pen.velocityTaper < 0.05 ? "Off" : `${Math.round(pen.velocityTaper * 100)}%`}
+        onChange={(value) => onPen({ velocityTaper: value })}
+      />
+      <SliderRow
+        label="End taper"
+        value={pen.taperLength}
+        min={0}
+        max={60}
+        step={1}
+        display={pen.taperLength < 1 ? "Off" : `${Math.round(pen.taperLength)} px`}
+        onChange={(value) => onPen({ taperLength: value })}
+      />
+      <Pressable
+        onPress={() => {
+          onPencilOnly(!pencilOnly);
+          Haptics.selectionAsync();
+        }}
+        accessibilityRole="switch"
+        accessibilityState={{ checked: pencilOnly }}
+        style={[styles.symmetryChip, { alignSelf: "flex-start", backgroundColor: pencilOnly ? theme.accent : theme.surfaceAlt, borderColor: pencilOnly ? theme.accent : theme.line }]}
+      >
+        <Text style={[TYPE.micro, { color: pencilOnly ? theme.accentText : theme.muted, fontFamily: theme.fontBodyMedium }]}>
+          PENCIL ONLY
+        </Text>
+      </Pressable>
+      <Text style={[TYPE.caption, { color: theme.muted, fontFamily: theme.fontBody }]}>
+        {pencilOnly
+          ? "Fingers pan and pinch; only the Pencil leaves a mark, so you can rest your hand on the glass."
+          : "Pressure and tilt need a stylus. A finger draws at the nominal width, with steadying and taper still applied."}
+      </Text>
+    </View>
+  );
+}
+
+/**
+ * What the artwork is going onto, and how big it will read once it is there.
+ *
+ * Both numbers are real measurements — the circumference of the thing and the
+ * width the piece should appear — rather than an abstract "curvature" that
+ * cannot be checked against a tape measure. The correction follows from them.
+ */
+function SurfaceControls({
+  surfaceId,
+  widthIn,
+  onSurface,
+  onWidth,
+  onApply,
+}: {
+  surfaceId: string;
+  widthIn: number;
+  onSurface: (id: string) => void;
+  onWidth: (value: number) => void;
+  onApply: (direction: "compensate" | "foreshorten") => void;
+}) {
+  const { brand, theme } = useBrand();
+  const surfaces = surfacesFor(brand.id);
+  const surface = findSurface(surfaceId) ?? surfaces[0];
+  const curved = surface.kind !== "flat";
+  const limit = maxApparentWidthIn(surface);
+  const overSized = curved && widthIn > limit;
+  const scale = printScale(surface, widthIn);
+
+  return (
+    <View style={styles.symmetryBlock}>
+      <Text style={[TYPE.micro, { color: theme.muted, fontFamily: theme.fontBodyMedium }]}>GOING ONTO</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.segmentRow}>
+        {surfaces.map((item) => {
+          const active = item.id === surface.id;
+          return (
+            <Pressable
+              key={item.id}
+              onPress={() => {
+                onSurface(item.id);
+                Haptics.selectionAsync();
+              }}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+              style={[styles.symmetryChip, { backgroundColor: active ? theme.accent : theme.surfaceAlt, borderColor: active ? theme.accent : theme.line }]}
+            >
+              <Text style={[TYPE.micro, { color: active ? theme.accentText : theme.muted, fontFamily: theme.fontBodyMedium }]}>
+                {item.label.toUpperCase()}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+      <Text style={[TYPE.caption, { color: theme.muted, fontFamily: theme.fontBody }]}>{surface.caption}</Text>
+
+      {curved && (
+        <>
+          <SliderRow
+            label="Reads as"
+            value={widthIn}
+            min={0.5}
+            max={8}
+            step={0.25}
+            display={`${widthIn.toFixed(2)} in wide`}
+            onChange={onWidth}
+          />
+          <Text style={[TYPE.caption, { color: overSized ? theme.accent : theme.muted, fontFamily: theme.fontBody }]}>
+            {overSized
+              ? `${widthIn.toFixed(2)}in is more curve than one flat piece can cover on a ${surface.label.toLowerCase()}. It will be fitted to ${limit.toFixed(2)}in — split it into pieces if you need it bigger.`
+              : `Print it ${(widthIn * scale).toFixed(2)}in wide (${Math.round((scale - 1) * 100)}% wider) and it will read as ${widthIn.toFixed(2)}in once it is on.`}
+          </Text>
+          {surface.kind === "sphere" && (
+            <Text style={[TYPE.caption, { color: theme.muted, fontFamily: theme.fontBody }]}>
+              A ball cannot be wrapped by flat paper without some distortion. This is the best single piece: true at the centre, approximate at the edge.
+            </Text>
+          )}
+          <View style={styles.actionRow}>
+            <MiniAction icon="body-outline" label="Compensate" onPress={() => onApply("compensate")} />
+            <MiniAction icon="eye-outline" label="Proof it" onPress={() => onApply("foreshorten")} />
+          </View>
+        </>
+      )}
+    </View>
+  );
 }
 
 function SliderRow({ label, value, min, max, step, display, onChange }: { label: string; value: number; min: number; max: number; step?: number; display: string; onChange: (value: number) => void }) {
@@ -1352,7 +2140,14 @@ const styles = StyleSheet.create({
   eyebrow: { ...TYPE.micro },
   title: { ...TYPE.heading },
   workspace: { borderWidth: 1, borderRadius: RADIUS.lg, padding: SPACE.sm, overflow: "hidden" },
-  workspaceMeta: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: SPACE.xs },
+  // Full-bleed: the point of full screen is that nothing frames the canvas.
+  workspaceImmersive: { flex: 1, justifyContent: "center", borderWidth: 0, padding: 0 },
+  workspaceMeta: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: SPACE.xs, marginBottom: SPACE.xs },
+  immersiveBar: { position: "absolute", left: SPACE.sm, right: SPACE.sm, bottom: SPACE.sm, borderRadius: RADIUS.lg, padding: SPACE.sm, gap: SPACE.xs },
+  immersiveRow: { flexDirection: "row", alignItems: "center", gap: SPACE.xs },
+  toneHeader: { flexDirection: "row", alignItems: "center", gap: SPACE.xs },
+  toneSwatch: { width: 20, height: 20, borderRadius: RADIUS.sm, borderWidth: 1 },
+  immersiveButton: { width: 42, height: 42, borderRadius: RADIUS.pill, alignItems: "center", justifyContent: "center" },
   livePill: { flexDirection: "row", alignItems: "center", gap: 6, borderRadius: RADIUS.pill, paddingHorizontal: 9, paddingVertical: 5 },
   liveDot: { width: 6, height: 6, borderRadius: 3 },
   liveText: { ...TYPE.micro },

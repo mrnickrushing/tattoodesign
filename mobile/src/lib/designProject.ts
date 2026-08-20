@@ -2,10 +2,21 @@ import { Directory, File, Paths } from "expo-file-system";
 import type { BrandId } from "./brands";
 import type { LibraryDesign } from "./designLibrary";
 import { generateId } from "./id";
+import { renderStroke } from "./ribbon";
 
 export const PROJECT_SCHEMA_VERSION = 1;
 
-export type Point = { x: number; y: number };
+export type Point = {
+  x: number;
+  y: number;
+  /**
+   * Width of the mark at this point, in layer units. Written by the pen
+   * pipeline from pressure, tilt and speed; absent on points that came from
+   * anywhere else (traced masks, imported paths, generated geometry), which
+   * fall back to the stroke's nominal width. See lib/penInput.ts.
+   */
+  w?: number;
+};
 
 export type LayerTransform = {
   x: number;
@@ -375,8 +386,13 @@ export function projectToSvg(project: EditableDesignProject): string {
       if (layer.kind === "stroke") {
         return layer.strokes
           .map((stroke) => {
-            const d = stroke.points.map((p, i) => `${i ? "L" : "M"}${p.x} ${p.y}`).join(" ");
-            return `<path d="${d}" fill="none" stroke="${escape(stroke.mode === "erase" ? project.canvas.background : stroke.color)}" stroke-width="${stroke.width}" stroke-linecap="round" stroke-linejoin="round" opacity="${stroke.opacity * layer.opacity}"/>`;
+            const ink = escape(stroke.mode === "erase" ? project.canvas.background : stroke.color);
+            const rendered = renderStroke(stroke.points, stroke.width);
+            if (!rendered.d) return "";
+            const paint = rendered.fill
+              ? `fill="${ink}" stroke="none"`
+              : `fill="none" stroke="${ink}" stroke-width="${rendered.width}" stroke-linecap="round" stroke-linejoin="round"`;
+            return `<path d="${rendered.d}" ${paint} opacity="${stroke.opacity * layer.opacity}"/>`;
           })
           .join("");
       }

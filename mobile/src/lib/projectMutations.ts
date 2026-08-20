@@ -1,4 +1,5 @@
 import { generateId } from "./id";
+import { renderStroke } from "./ribbon";
 import type {
   DesignLayer,
   EditableDesignProject,
@@ -117,8 +118,13 @@ export function projectToSvg(
     }
     const transform = `translate(${t.x + t.width / 2} ${t.y + t.height / 2}) rotate(${t.rotation}) scale(${t.scaleX} ${t.scaleY}) translate(${-t.width / 2} ${-t.height / 2})`;
     if (layer.kind === "stroke") return layer.strokes.map((stroke) => {
-      const d = stroke.points.map((point, index) => `${index ? "L" : "M"}${point.x} ${point.y}`).join(" ");
-      return `<path d="${d}" fill="none" stroke="${escape(stroke.mode === "erase" ? project.canvas.background : stroke.color)}" stroke-width="${stroke.width}" stroke-linecap="round" stroke-linejoin="round" opacity="${stroke.opacity * layer.opacity}" transform="${transform}"/>`;
+      const ink = escape(stroke.mode === "erase" ? project.canvas.background : stroke.color);
+      const rendered = renderStroke(stroke.points, stroke.width);
+      if (!rendered.d) return "";
+      const paint = rendered.fill
+        ? `fill="${ink}" stroke="none"`
+        : `fill="none" stroke="${ink}" stroke-width="${rendered.width}" stroke-linecap="round" stroke-linejoin="round"`;
+      return `<path d="${rendered.d}" ${paint} opacity="${stroke.opacity * layer.opacity}" transform="${transform}"/>`;
     }).join("");
     if (layer.kind === "text") return `<text x="${t.width / 2}" y="${t.height / 2}" text-anchor="middle" dominant-baseline="middle" fill="${escape(layer.color)}" font-size="${layer.fontSize}" opacity="${layer.opacity}" transform="${transform}">${escape(layer.text)}</text>`;
     if (layer.shape === "ellipse") return `<ellipse cx="${t.width / 2}" cy="${t.height / 2}" rx="${t.width / 2}" ry="${t.height / 2}" fill="${layer.fill ?? "none"}" stroke="${escape(layer.stroke)}" stroke-width="${layer.strokeWidth}" opacity="${layer.opacity}" transform="${transform}"/>`;
@@ -148,11 +154,19 @@ export function strokePathsInCanvasSpace(project: EditableDesignProject): Point[
     const originY = t.y + t.height / 2;
     for (const stroke of layer.strokes) {
       if (stroke.mode === "erase" || stroke.points.length < 2) continue;
+      // Widths scale with the layer, so blowout analysis downstream sees the
+      // line thickness that will actually be printed rather than the one it
+      // was drawn at.
+      const widthScale = (Math.abs(t.scaleX) + Math.abs(t.scaleY)) / 2;
       paths.push(
         stroke.points.map((point) => {
           const sx = (point.x - t.width / 2) * t.scaleX;
           const sy = (point.y - t.height / 2) * t.scaleY;
-          return { x: originX + sx * cos - sy * sin, y: originY + sx * sin + sy * cos };
+          return {
+            x: originX + sx * cos - sy * sin,
+            y: originY + sx * sin + sy * cos,
+            w: (point.w ?? stroke.width) * widthScale,
+          };
         })
       );
     }
