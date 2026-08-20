@@ -56,6 +56,7 @@ import { NamePrompt } from "@/components/NamePrompt";
 import { IcingPreview } from "@/components/IcingPreview";
 import { SubstrateMockup } from "@/components/SubstrateMockup";
 import { OrderPlanner } from "@/components/OrderPlanner";
+import { describeAge, getPrintLog, printsOf, recordPrint, summarisePrints, type PrintRecord } from "@/lib/printLog";
 import { PlacementPreview } from "@/components/PlacementPreview";
 import { DesignActions, type DesignAction } from "@/components/DesignActions";
 import { allTags, filterDesigns, normalizeTags, type SourceFilter } from "@/lib/libraryFilter";
@@ -156,6 +157,7 @@ export default function BuilderScreen() {
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [icing, setIcing] = useState<LibraryDesign | null>(null);
   const [mockup, setMockup] = useState<LibraryDesign | null>(null);
+  const [printLog, setPrintLog] = useState<PrintRecord[]>([]);
   const [menu, setMenu] = useState<LibraryDesign | null>(null);
   const [placing, setPlacing] = useState<LibraryDesign | null>(null);
   const [placingWidthIn, setPlacingWidthIn] = useState(3);
@@ -252,6 +254,7 @@ export default function BuilderScreen() {
   }
 
   function refreshLibrary() {
+    void getPrintLog(brand.id).then(setPrintLog);
     getLibrary(brand.id).then(setLibrary);
   }
 
@@ -869,6 +872,30 @@ export default function BuilderScreen() {
         icon: "brush",
         onPress: () => setEditing(design),
       },
+      ...(summarisePrints(printLog, design.id)
+        ? [
+            {
+              key: "printed" as const,
+              label: "Print history",
+              hint: summarisePrints(printLog, design.id) ?? undefined,
+              icon: "sheet" as const,
+              onPress: () =>
+                Alert.alert(
+                  design.title,
+                  printsOf(printLog, design.id)
+                    .slice(0, 8)
+                    .map(
+                      (entry) =>
+                        `${entry.widthIn ? `${entry.widthIn.toFixed(2)}in` : "size unrecorded"}` +
+                        `${entry.profile ? ` · ${entry.profile}` : ""}` +
+                        `${entry.mirrored ? " · mirrored" : ""}` +
+                        ` · ${describeAge(Date.now() - entry.at)}`
+                    )
+                    .join("\n")
+                ),
+            },
+          ]
+        : []),
       {
         key: "view",
         label: "View full screen",
@@ -1073,6 +1100,22 @@ export default function BuilderScreen() {
         `img { width:${template.widthIn}in; height:${template.heightIn}in; display:block;${active.mirrored ? "transform:scaleX(-1);" : ""} }` +
         `</style></head><body><img src="${dataUrl}" /></body></html>`;
       await printHtml(html, { width: widthPx, height: heightPx });
+      // Recorded after the print, not before: the useful fact is "this is the
+      // one that worked", and a print that failed is not one to reproduce.
+      // A single-design sheet is attributed to that design so its history
+      // shows up where it is looked for.
+      await recordPrint(brand.id, {
+        designId: items.length === 1 ? items[0].designId : undefined,
+        label:
+          items.length === 1
+            ? items[0].title
+            : `${items.length} designs · ${template.label}`,
+        widthIn: items.length === 1 ? items[0].wIn : template.widthIn,
+        heightIn: items.length === 1 ? items[0].hIn : template.heightIn,
+        profile: active.name,
+        scaleCorrection: active.scaleCorrection,
+        mirrored: active.mirrored,
+      });
     } catch (e) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       Alert.alert("Couldn't print", e instanceof Error ? e.message : "Try again.");
