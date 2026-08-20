@@ -126,7 +126,7 @@ const TOOLS: { id: EditorTool; label: string; icon: IconName }[] = [
   { id: "nodes", label: "Nodes", icon: "nodes" },
   { id: "insert", label: "Add", icon: "add" },
   { id: "refine", label: "Lines", icon: "branch" },
-  { id: "tone", label: "Tone", icon: "tone" },
+  { id: "tone", label: "Tone", icon: "contrast" },
   { id: "crop", label: "Crop", icon: "crop" },
   { id: "layers", label: "Layers", icon: "layers" },
   { id: "production", label: "Pro", icon: "production" },
@@ -989,7 +989,7 @@ export function DesignEditor({
               </Pressable>
               {tool === "tone" && !!study && !showOriginal && (
                 <View style={[styles.livePill, { backgroundColor: `${theme.accent}18` }]}>
-                  <Icon name="tone" size={TYPE.caption.fontSize} color={theme.accent} />
+                  <Icon name="contrast" size={TYPE.caption.fontSize} color={theme.accent} />
                   <Text style={[styles.liveText, { color: theme.accent, fontFamily: theme.fontBodyMedium }]}>VALUE STUDY</Text>
                 </View>
               )}
