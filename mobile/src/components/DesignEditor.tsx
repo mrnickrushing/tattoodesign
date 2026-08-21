@@ -23,6 +23,7 @@ import Svg, { Circle as SvgCircle, Line as SvgLine, Path as SvgPath } from "reac
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useBrand } from "@/context/BrandContext";
 import { Button } from "@/components/Button";
+import { ChoicePrompt, type Choice } from "@/components/ChoicePrompt";
 import { CropTool } from "@/components/CropTool";
 import { GlassSurface } from "@/components/GlassSurface";
 import { Icon } from "@/components/Icon";
@@ -266,6 +267,17 @@ export function DesignEditor({
   const [letteringText, setLetteringText] = useState("");
   const [letteringStyleId, setLetteringStyleId] = useState<LetteringStyleId>("script");
   const [letteringCurve, setLetteringCurve] = useState(0);
+  /**
+   * The open choice list, if any. Held here rather than passed through an
+   * alert because Android alerts cap at three buttons and silently drop the
+   * rest — see ChoicePrompt.
+   */
+  const [choosing, setChoosing] = useState<{
+    title: string;
+    subtitle?: string;
+    choices: Choice[];
+    onPick: (value: number) => void;
+  } | null>(null);
   const [nodeMode, setNodeMode] = useState<"move" | "delete" | "insert">("move");
   const [nodeDraft, setNodeDraft] = useState<StrokeLayer | null>(null);
   // State, not a ref: the gesture rebuilds each render, so the onEnd closure
@@ -729,33 +741,35 @@ export function DesignEditor({
       return;
     }
 
+    // The whole table rather than three of it: a list has room for every tool
+    // and for what each one is, where an alert had room for neither.
     const tools = toolsFor(brand.id);
-    const offered = [tools[1], tools[3], tools[tools.length - 1]].filter(Boolean);
-    Alert.alert(
-      brand.id === "sugar" ? "Which tip?" : "Which grouping?",
-      "The linework is redrawn at the width this tool really lays down, thickening where the hand slowed.",
-      [
-        { text: "Cancel", style: "cancel" },
-        ...offered.map((tool) => ({
-          text: `${tool.label} — ${tool.widthMm}mm`,
-          onPress: () => {
-            const pxPerMm = pxPerMmFromDpi(PRINT_DPI);
-            const next = {
-              ...layer,
-              strokes: layer.strokes.map((stroke) =>
-                stroke.mode === "draw"
-                  ? { ...stroke, points: layDown(stroke.points, tool.widthMm, pxPerMm), width: tool.widthMm * pxPerMm }
-                  : stroke
-              ),
-            };
-            void commit(`Lay down \u00b7 ${tool.label}`, {
-              ...project,
-              layers: project.layers.map((item) => (item.id === layer.id ? next : item)),
-            });
-          },
-        })),
-      ]
-    );
+    setChoosing({
+      title: brand.id === "sugar" ? "Which tip?" : "Which grouping?",
+      subtitle: "The linework is redrawn at the width this tool really lays down, thickening where the hand slowed.",
+      choices: tools.map((tool, index) => ({
+        value: index,
+        label: `${tool.label} — ${tool.widthMm}mm`,
+        detail: tool.note,
+      })),
+      onPick: (index) => {
+        const tool = tools[index];
+        if (!tool) return;
+        const pxPerMm = pxPerMmFromDpi(PRINT_DPI);
+        const next = {
+          ...layer,
+          strokes: layer.strokes.map((stroke) =>
+            stroke.mode === "draw"
+              ? { ...stroke, points: layDown(stroke.points, tool.widthMm, pxPerMm), width: tool.widthMm * pxPerMm }
+              : stroke
+          ),
+        };
+        void commit(`Lay down \u00b7 ${tool.label}`, {
+          ...project,
+          layers: project.layers.map((item) => (item.id === layer.id ? next : item)),
+        });
+      },
+    });
   }
 
   async function cleanUpStrokes() {
@@ -1021,21 +1035,16 @@ export function DesignEditor({
    */
   function exportCastingTray() {
     if (!project || !preview) return;
-    Alert.alert(
-      "How thick are they?",
-      "The shapes stand this proud of the tray floor, so it is how deep the finished piece will be.",
-      [
-        { text: "Cancel", style: "cancel" },
-        ...[
-          { label: "Thin — 4mm", shapeMm: 4 },
-          { label: "Standard — 7mm", shapeMm: 7 },
-          { label: "Chunky — 12mm", shapeMm: 12 },
-        ].map((choice) => ({
-          text: choice.label,
-          onPress: () => askCavities(choice.shapeMm),
-        })),
-      ]
-    );
+    setChoosing({
+      title: "How thick are they?",
+      subtitle: "The shapes stand this proud of the tray floor, so it is how deep the finished piece will be.",
+      choices: [
+        { value: 4, label: "Thin — 4mm", detail: "A flat topper or a thin chocolate." },
+        { value: 7, label: "Standard — 7mm", detail: "A cookie you would recognise as a cookie." },
+        { value: 12, label: "Chunky — 12mm", detail: "A solid piece with real weight to it." },
+      ],
+      onPick: (shapeMm) => askCavities(shapeMm),
+    });
   }
 
   /**
@@ -1046,13 +1055,16 @@ export function DesignEditor({
    * tray ends up widest.
    */
   function askCavities(shapeMm: number) {
-    Alert.alert("How many at a time?", "Each cavity is one piece out of a single pour of silicone.", [
-      { text: "Cancel", style: "cancel" },
-      ...[1, 4, 6, 12].map((copies) => ({
-        text: copies === 1 ? "Just one" : `${copies}`,
-        onPress: () => void reviewCastingTray(shapeMm, true, copies),
+    setChoosing({
+      title: "How many at a time?",
+      subtitle: "Each cavity is one piece out of a single pour of silicone.",
+      choices: [1, 2, 4, 6, 9, 12, 18, 24].map((copies) => ({
+        value: copies,
+        label: copies === 1 ? "Just one" : `${copies}`,
+        detail: copies === 1 ? "One piece per pour." : undefined,
       })),
-    ]);
+      onPick: (copies) => void reviewCastingTray(shapeMm, true, copies),
+    });
   }
 
   /**
@@ -1444,6 +1456,17 @@ export function DesignEditor({
 
         {cropping && project && preview && (
           <CropTool uri={preview} imageWidth={project.canvas.width} imageHeight={project.canvas.height} onApply={applyCrop} onClose={() => setCropping(false)} />
+        )}
+
+        {choosing && (
+          <ChoicePrompt
+            visible
+            title={choosing.title}
+            subtitle={choosing.subtitle}
+            choices={choosing.choices}
+            onPick={choosing.onPick}
+            onClose={() => setChoosing(null)}
+          />
         )}
       </GestureHandlerRootView>
     </Modal>

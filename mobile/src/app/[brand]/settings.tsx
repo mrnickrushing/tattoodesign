@@ -126,7 +126,7 @@ export default function SettingsScreen() {
   function resetSessionDefaults() {
     Alert.alert(
       "Reset session defaults?",
-      "Trace settings, brush, and placement width go back to factory values for this studio.",
+      "Trace settings, brush, placement width, your rate and printer go back to factory values for this studio.",
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -135,6 +135,14 @@ export default function SettingsScreen() {
           onPress: async () => {
             await preferences.clear(brand.id);
             setPrefCount(0);
+            // The fields on this screen have to go back with them. Their
+            // loading effect only reruns when the studio changes, so leaving
+            // them alone shows a 0.8mm nozzle over a preference that is now
+            // 0.4mm — and the preflight guardrail quietly measures against a
+            // number nobody can see.
+            setHourlyRate("");
+            setNozzle("");
+            setBed("");
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           },
         },
@@ -459,7 +467,7 @@ export default function SettingsScreen() {
       <Card>
         <Text style={{ color: theme.foreground, fontFamily: theme.fontBody, fontSize: 13, lineHeight: 18 }}>
           {prefCount
-            ? `${prefCount} remembered setting${prefCount === 1 ? "" : "s"} for ${brand.name} — trace options, brush, placement width.`
+            ? `${prefCount} remembered setting${prefCount === 1 ? "" : "s"} for ${brand.name} — trace options, brush, placement width, and anything set above.`
             : `Nothing remembered yet — trace options, brush, and placement width save automatically as you work.`}
         </Text>
         {prefCount > 0 && (
