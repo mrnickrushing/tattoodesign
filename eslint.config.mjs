@@ -15,6 +15,9 @@ const eslintConfig = defineConfig([
     // mobile/ is an independent Expo/React Native project with its own
     // eslint config and tsconfig — lint it via `cd mobile && npx expo lint`.
     "mobile/**",
+    // public/ is the deployed Expo web export (minified bundle output),
+    // not source — see AGENTS.md.
+    "public/**",
   ]),
 ]);
 
