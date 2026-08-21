@@ -1,6 +1,6 @@
 # Casting trays — design to 3D printer
 
-## Status — spine complete, trays hold many cavities
+## Status — spine complete, trays hold many cavities and are filleted
 
 Allison's side of the app makes images; what she needs from them is a mold. The
 workflow is: 3D print a tray, pour silicone into it, and the cured silicone is
@@ -38,6 +38,12 @@ that becomes an object.
   function rather than a reuse.
 - **`lineWidth.ts`** — how fine the finest line actually is, shared with the
   skin-tone warning that needed the same measurement.
+- **Fillets.** `offsetPolygon` grows a loop by moving every vertex along its
+  bisector, miter-clamped so a needle-thin arm does not reach for infinity, and
+  `extrudeTapered` builds the skirt between the flared foot and the true
+  outline. The flare is a *maximum*: each shape is offered it, then half, then
+  half again, so line art about a millimetre across gets what it can take
+  rather than nothing.
 
 ## Three things that were only visible in the arithmetic
 
@@ -61,11 +67,25 @@ masks built and weighed — is the gate that matters.
 - **Two-part molds.** Cake pops and truffles are spheres; `substrate.ts` knows
   their real sizes. A sphere needs two halves with registration keys, which is
   a different solid entirely.
-- **Fillets.** See above — the one physical concern still unaddressed.
+- **Offsets that clip themselves.** The fillet refuses a *concave* corner where
+  two arms meet at a shallow angle, though filling that notch is exactly what a
+  fillet ought to do there. Telling it apart from a genuine self-intersection
+  needs the offset to clip itself rather than refuse — polygon booleans, a much
+  larger piece of geometry. Until then, detailed line art comes back
+  square-footed and is told so, which is at least true.
+
+## The offset trap
+
+Growing a polygon fails in a way that looks like success. A 4mm gap closed in by
+3mm from every side comes back as a tidy 2mm square: wound the same way, nothing
+crossing anything, and an area that has honestly shrunk. Every obvious check
+passes. What gives it away is that each *edge* now points the other way — the
+corners crossed the middle and came out the far side. Without that check the
+mesh still closes, around the wrong ground, and nothing downstream notices.
 
 ## Verified
 
-`npm test` (690), `tsc --noEmit`, `expo lint`, and `expo export --platform ios`
+`npm test` (711), `tsc --noEmit`, `expo lint`, and `expo export --platform ios`
 clean.
 
 A 2.5-inch snowflake, 7mm thick:

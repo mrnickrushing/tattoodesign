@@ -91,6 +91,136 @@ function wound(points: Point[], positive: boolean): Point[] {
 }
 
 /**
+ * Whether a loop crosses itself.
+ *
+ * Offsetting is the operation that breaks this. Grow a shape whose own parts
+ * are closer together than twice the offset and the new boundary passes through
+ * itself, which triangulates into a knot rather than failing — so the check has
+ * to be made rather than assumed.
+ */
+export function isSimplePolygon(points: Point[]): boolean {
+  if (points.length < 3) return false;
+  for (let i = 0; i < points.length; i++) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length];
+    for (let j = i + 1; j < points.length; j++) {
+      const c = points[j];
+      const d = points[(j + 1) % points.length];
+      // segmentsCross already ignores edges that merely share an endpoint,
+      // which is every adjacent pair.
+      if (segmentsCross(a, b, c, d)) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * How far a sharp corner may be pushed out before it is cut short.
+ *
+ * A spike offset properly runs away to a point far outside the shape — the
+ * distance goes as one over the sine of half the angle, so a needle-thin arm
+ * reaches for infinity. Four times the offset is the same limit SVG stroking
+ * uses, and stopping there loses a sliver of a corner nobody could print.
+ */
+const MITER_LIMIT = 4;
+
+/**
+ * Grows or shrinks a loop by moving every vertex along its own bisector.
+ *
+ * Positive grows the solid: the fill is on the right of travel everywhere in
+ * this file, so "out of the solid" is to the left, and a hole handed the same
+ * positive distance shrinks — which is what growing the solid around it means.
+ *
+ * The vertex count is preserved, deliberately. A proper offset would insert a
+ * bevel or an arc at every sharp corner, and then the result no longer
+ * corresponds vertex for vertex with the shape it came from — which is exactly
+ * what the tapered walls need it to do.
+ *
+ * Null when the loop has a fold in it that has no bisector to move along.
+ */
+export function offsetPolygon(points: Point[], distance: number): Point[] | null {
+  if (points.length < 3) return null;
+  if (distance === 0) return points.slice();
+
+  const out: Point[] = [];
+  for (let i = 0; i < points.length; i++) {
+    const previous = points[(i - 1 + points.length) % points.length];
+    const vertex = points[i];
+    const next = points[(i + 1) % points.length];
+
+    const inLength = Math.hypot(vertex.x - previous.x, vertex.y - previous.y);
+    const outLength = Math.hypot(next.x - vertex.x, next.y - vertex.y);
+    if (inLength < 1e-9 || outLength < 1e-9) return null;
+
+    // Outward normal of each edge: left of travel.
+    const n1 = { x: (vertex.y - previous.y) / inLength, y: -(vertex.x - previous.x) / inLength };
+    const n2 = { x: (next.y - vertex.y) / outLength, y: -(next.x - vertex.x) / outLength };
+
+    const bx = n1.x + n2.x;
+    const by = n1.y + n2.y;
+    const bisectorLength = Math.hypot(bx, by);
+    // The two edges double back on each other: the corner folds to nothing and
+    // there is no direction that is out of both.
+    if (bisectorLength < 1e-9) return null;
+
+    const ux = bx / bisectorLength;
+    const uy = by / bisectorLength;
+    const cosHalf = ux * n1.x + uy * n1.y;
+    if (Math.abs(cosHalf) < 1e-9) return null;
+
+    const reach = distance / cosHalf;
+    const limit = Math.abs(distance) * MITER_LIMIT;
+    const clamped = Math.max(-limit, Math.min(limit, reach));
+    out.push({ x: vertex.x + ux * clamped, y: vertex.y + uy * clamped });
+  }
+
+  // An offset that runs past the middle of the shape turns it inside out, and
+  // does so quietly: a 4mm gap closed in by 3 from every side comes back as a
+  // tidy 2mm square whose corners have swapped over, with the winding intact
+  // and no edge crossing anything. What gives it away is that the edge itself
+  // now points the other way. Nothing downstream would notice — the mesh would
+  // close, around the wrong ground.
+  for (let i = 0; i < points.length; i++) {
+    const next = (i + 1) % points.length;
+    const was = { x: points[next].x - points[i].x, y: points[next].y - points[i].y };
+    const now = { x: out[next].x - out[i].x, y: out[next].y - out[i].y };
+    if (was.x * now.x + was.y * now.y < 0) return null;
+  }
+  return out;
+}
+
+/**
+ * Grows a whole shape, holes and all, or reports that it cannot.
+ *
+ * Every way this can go wrong is a way that produces a *plausible* polygon
+ * rather than an obvious failure, so each is checked: the boundary must have
+ * grown rather than shrunk or turned inside out, every hole must have shrunk
+ * without inverting or closing up, and nothing may cross itself. A caller that
+ * gets null should carry on without the offset rather than with a knot.
+ */
+export function offsetOutline(outline: Outline, distance: number): Outline | null {
+  const outer = offsetPolygon(wound(outline.outer, true), distance);
+  if (!outer || !isSimplePolygon(outer)) return null;
+
+  const grown = signedArea(outer);
+  const before = Math.abs(signedArea(outline.outer));
+  if (grown <= 0 || grown <= before) return null;
+
+  const holes: Point[][] = [];
+  for (const hole of outline.holes) {
+    if (hole.length < 3) continue;
+    const shrunk = offsetPolygon(wound(hole, false), distance);
+    if (!shrunk || !isSimplePolygon(shrunk)) return null;
+    const area = signedArea(shrunk);
+    // Still a hole, still wound as one, and smaller than it was — a gap that
+    // grew, flipped, or vanished means the offset ate through it.
+    if (area >= 0 || Math.abs(area) >= Math.abs(signedArea(hole))) return null;
+    holes.push(shrunk);
+  }
+  return { outer, holes };
+}
+
+/**
  * Splices each hole into the outer loop along a bridge.
  *
  * Ear clipping only understands one loop, so a shape with holes has to become
@@ -270,33 +400,73 @@ function pushTriangle(
  * solid whose outsides face out rather than one that is inside out.
  */
 export function extrudePrism(outer: Point[], holes: Point[][], bottom: number, top: number): Mesh {
-  if (outer.length < 3 || top === bottom) return EMPTY_MESH;
+  return extrudeBetween({ outer, holes }, { outer, holes }, bottom, top);
+}
+
+/** One end of a solid: a boundary and the gaps in it, in the plane. */
+export type Outline = { outer: Point[]; holes: Point[][] };
+
+/**
+ * Extrudes between two outlines of the same shape at different sizes.
+ *
+ * The walls lean rather than standing vertical, which is what a fillet at the
+ * foot of a shape is: the same outline, flared at the bottom and true at the
+ * top. Vertex counts have to match loop for loop, because wall i runs from
+ * bottom vertex i to top vertex i and there is no sensible answer if there are
+ * different numbers of them.
+ */
+export function extrudeTapered(bottom: Outline, top: Outline, bottomZ: number, topZ: number): Mesh {
+  return extrudeBetween(bottom, top, bottomZ, topZ);
+}
+
+function extrudeBetween(bottom: Outline, top: Outline, bottomZ: number, topZ: number): Mesh {
+  if (bottom.outer.length < 3 || top.outer.length < 3 || bottomZ === topZ) return EMPTY_MESH;
 
   // Height is signed, and a caller who asks for a solid from 5 down to 2 means
-  // the same solid as 2 up to 5.
-  const low = Math.min(bottom, top);
-  const high = Math.max(bottom, top);
+  // the same solid as 2 up to 5 — so the outlines swap with it.
+  const flipped = bottomZ > topZ;
+  const low = flipped ? topZ : bottomZ;
+  const high = flipped ? bottomZ : topZ;
+  const lower = flipped ? top : bottom;
+  const upper = flipped ? bottom : top;
 
-  const shell = wound(outer, true);
-  const gaps = holes.filter((hole) => hole.length >= 3).map((hole) => wound(hole, false));
-  const cap = triangulate(shell, gaps);
-  if (!cap.length) return EMPTY_MESH;
+  const lowShell = wound(lower.outer, true);
+  const highShell = wound(upper.outer, true);
+  const lowGaps = lower.holes.filter((hole) => hole.length >= 3).map((hole) => wound(hole, false));
+  const highGaps = upper.holes.filter((hole) => hole.length >= 3).map((hole) => wound(hole, false));
+
+  // Walls pair vertex for vertex, so a mismatch is a caller error rather than
+  // something to paper over — a mesh built from a guess would close over the
+  // wrong ground and no check downstream would notice.
+  if (lowShell.length !== highShell.length || lowGaps.length !== highGaps.length) return EMPTY_MESH;
+  if (lowGaps.some((gap, i) => gap.length !== highGaps[i].length)) return EMPTY_MESH;
+
+  const lowCap = triangulate(lowShell, lowGaps);
+  const highCap = triangulate(highShell, highGaps);
+  if (!lowCap.length || !highCap.length) return EMPTY_MESH;
 
   const positions: number[] = [];
-  for (let i = 0; i < cap.length; i += 3) {
-    const [a, b, c] = [cap[i], cap[i + 1], cap[i + 2]];
-    // The top faces up, so it keeps the triangulation's winding; the bottom
-    // faces down and takes the reverse.
+  // The top faces up, so it keeps the triangulation's winding; the bottom
+  // faces down and takes the reverse.
+  for (let i = 0; i < highCap.length; i += 3) {
+    const [a, b, c] = [highCap[i], highCap[i + 1], highCap[i + 2]];
     pushTriangle(positions, [a.x, a.y, high], [b.x, b.y, high], [c.x, c.y, high]);
+  }
+  for (let i = 0; i < lowCap.length; i += 3) {
+    const [a, b, c] = [lowCap[i], lowCap[i + 1], lowCap[i + 2]];
     pushTriangle(positions, [c.x, c.y, low], [b.x, b.y, low], [a.x, a.y, low]);
   }
 
-  for (const loop of [shell, ...gaps]) {
-    for (let i = 0; i < loop.length; i++) {
-      const a = loop[i];
-      const b = loop[(i + 1) % loop.length];
-      pushTriangle(positions, [a.x, a.y, low], [b.x, b.y, low], [b.x, b.y, high]);
-      pushTriangle(positions, [a.x, a.y, low], [b.x, b.y, high], [a.x, a.y, high]);
+  const loops: [Point[], Point[]][] = [[lowShell, highShell], ...lowGaps.map((gap, i): [Point[], Point[]] => [gap, highGaps[i]])];
+  for (const [lowLoop, highLoop] of loops) {
+    for (let i = 0; i < lowLoop.length; i++) {
+      const next = (i + 1) % lowLoop.length;
+      const a = lowLoop[i];
+      const b = lowLoop[next];
+      const c = highLoop[next];
+      const d = highLoop[i];
+      pushTriangle(positions, [a.x, a.y, low], [b.x, b.y, low], [c.x, c.y, high]);
+      pushTriangle(positions, [a.x, a.y, low], [c.x, c.y, high], [d.x, d.y, high]);
     }
   }
 

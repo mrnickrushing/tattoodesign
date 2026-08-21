@@ -16,11 +16,14 @@ function oneShape(x0 = 30, y0 = 20, x1 = 90, y1 = 70): Uint8Array {
 
 const SPEC = { widthIn: 3, shapeMm: 6 };
 
-test("a tray is a floor, walls, and one solid per shape", () => {
+test("a tray is a floor, walls, and each shape with its skirt", () => {
   const tray = buildTray(oneShape(), W, H, SPEC)!;
   assert.ok(tray, "the tray builds");
   assert.equal(tray.shapes, 1);
-  assert.equal(tray.parts.length, 3, "floor, walls, one positive");
+  assert.equal(tray.parts.length, 4, "floor, walls, the shape, and the fillet under it");
+
+  const square = buildTray(oneShape(), W, H, { ...SPEC, filletMm: 0 })!;
+  assert.equal(square.parts.length, 3, "without a fillet it is one solid per shape");
 });
 
 test("every part of the tray is a closed solid", () => {
@@ -114,7 +117,7 @@ test("several shapes each get their own solid", () => {
 
   const tray = buildTray(mask, W, H, SPEC)!;
   assert.equal(tray.shapes, 3);
-  assert.equal(tray.parts.length, 5, "floor, walls, three positives");
+  assert.equal(tray.parts.length, 2 + 3 * 2, "floor, walls, three shapes each with a skirt");
   assert.equal(inspectMesh(tray.mesh).watertight, true);
 });
 
@@ -302,7 +305,7 @@ test("a tray holds the number of cavities it was asked for", () => {
   const six = buildTray(oneShape(), W, H, { ...SPEC, copies: 6 })!;
   assert.equal(six.cavities, 6);
   assert.equal(six.shapes, 6, "one shape in the artwork, six on the tray");
-  assert.equal(six.parts.length, 8, "floor, walls, six positives");
+  assert.equal(six.parts.length, 2 + 6 * 2, "floor, walls, six shapes each with a skirt");
   assert.equal(six.columns * six.rows >= 6, true);
   assert.equal(inspectMesh(six.mesh).watertight, true);
 });
@@ -351,4 +354,105 @@ test("cavity count never leaves a token unresolved", () => {
       assert.ok(!/\$\{|undefined|NaN/.test(finding.detail), `${copies}: ${finding.detail}`);
     });
   }
+});
+
+
+test("the shape is wider where it meets the floor than where it ends", () => {
+  // That flare is the whole point: the silicone gets a slope to peel off
+  // rather than a square notch to tear at.
+  const tray = buildTray(oneShape(), W, H, SPEC)!;
+  const skirt = tray.parts[3];
+  assert.ok(skirt.count > 0, "there is a skirt");
+
+  // Widest span at the floor against the span where the skirt meets the body.
+  let lowMinX = Infinity, lowMaxX = -Infinity, highMinX = Infinity, highMaxX = -Infinity;
+  for (let i = 0; i < skirt.count * 9; i += 3) {
+    const [x, , z] = [skirt.positions[i], skirt.positions[i + 1], skirt.positions[i + 2]];
+    if (z < 2) {
+      lowMinX = Math.min(lowMinX, x);
+      lowMaxX = Math.max(lowMaxX, x);
+    } else {
+      highMinX = Math.min(highMinX, x);
+      highMaxX = Math.max(highMaxX, x);
+    }
+  }
+  const flare = (lowMaxX - lowMinX) - (highMaxX - highMinX);
+  assert.ok(Math.abs(flare - 2 * 0.8) < 0.05, `expected a 0.8mm flare each side, got ${(flare / 2).toFixed(2)}mm`);
+});
+
+test("every part of a filleted tray is still a closed solid", () => {
+  const tray = buildTray(oneShape(), W, H, { ...SPEC, copies: 4 })!;
+  tray.parts.forEach((part, i) => {
+    const report = inspectMesh(part);
+    assert.equal(report.watertight, true, `part ${i}: unmatched ${report.unmatched}`);
+    assert.ok(meshVolume(part) > 0, `part ${i} faces inward`);
+  });
+  assert.equal(inspectMesh(tray.mesh).watertight, true);
+});
+
+test("a fillet is more plastic than no fillet", () => {
+  const square = buildTray(oneShape(), W, H, { ...SPEC, filletMm: 0 })!;
+  const flared = buildTray(oneShape(), W, H, SPEC)!;
+  assert.ok(flared.plasticCm3 > square.plasticCm3, "the skirt is material");
+  assert.ok(flared.siliconeMl <= square.siliconeMl, "and it displaces silicone rather than adding it");
+});
+
+test("a flare too big for the shape is tried smaller before it is given up on", () => {
+  // A narrow slot cut in from the edge: 1.27mm across at this resolution, so
+  // the asked-for 0.8mm each side would weld it shut — but half of that, or a
+  // quarter, goes through. All-or-nothing would leave the shape square.
+  const slotted = oneShape();
+  for (let y = 20; y < 50; y++) for (let x = 58; x < 60; x++) slotted[y * W + x] = 0;
+
+  const tray = buildTray(slotted, W, H, SPEC)!;
+  assert.equal(tray.filletsSkipped, 0, "something fitted");
+  assert.ok(tray.filletAppliedMm > 0 && tray.filletAppliedMm < 0.8, `backed off to ${tray.filletAppliedMm}mm`);
+  assert.equal(inspectMesh(tray.mesh).watertight, true);
+});
+
+test("a shape with nowhere to flare is left square and said so", () => {
+  // Two arms meeting at a shallow angle. The notch between them narrows to
+  // nothing at the apex, and no uniform outward offset can go there — not even
+  // the smallest one this printer could lay down.
+  const V = 600;
+  const VH = 400;
+  const vee = new Uint8Array(V * VH);
+  const stamp = (x: number, y: number, r: number) => {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (dx * dx + dy * dy > r * r) continue;
+        const px = Math.round(x + dx);
+        const py = Math.round(y + dy);
+        if (px >= 0 && py >= 0 && px < V && py < VH) vee[py * V + px] = 1;
+      }
+    }
+  };
+  for (const side of [-1, 1]) {
+    const angle = side * 0.22;
+    for (let t = 0; t < 420; t++) stamp(80 + Math.cos(angle) * t, 200 + Math.sin(angle) * t, 6);
+  }
+
+  const tray = buildTray(vee, V, VH, { widthIn: 2.5, shapeMm: 7 })!;
+  assert.ok(tray.filletsSkipped > 0, "the flare was refused rather than forced");
+  assert.equal(tray.filletAppliedMm, 0);
+  assert.equal(inspectMesh(tray.mesh).watertight, true, "and the tray is still sound");
+
+  const demolding = tray.findings.find((finding) => finding.title === "Demolding")!;
+  assert.equal(demolding.level, "warn");
+  assert.ok(demolding.detail.includes("pull it slowly"), demolding.detail);
+  assert.ok(demolding.detail.includes("0.20mm"), "and names the smallest this printer could manage");
+});
+
+test("a comfortable shape gets its fillet and is told so", () => {
+  const tray = buildTray(oneShape(), W, H, SPEC)!;
+  assert.equal(tray.filletsSkipped, 0);
+  const demolding = tray.findings.find((finding) => finding.title === "Demolding")!;
+  assert.equal(demolding.level, "pass");
+  assert.ok(demolding.detail.includes("0.80mm"));
+});
+
+test("turning the fillet off says nothing about demolding", () => {
+  const tray = buildTray(oneShape(), W, H, { ...SPEC, filletMm: 0 })!;
+  assert.equal(tray.findings.find((finding) => finding.title === "Demolding"), undefined);
+  assert.equal(tray.filletsSkipped, 0);
 });

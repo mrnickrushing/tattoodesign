@@ -20,7 +20,15 @@ import { fillEnclosed, groupContours, traceContours } from "./contour";
 import type { Point } from "./designProject";
 import { finestStrokeWidth } from "./lineWidth";
 import type { ProductionFinding } from "./productionTools";
-import { extrudePrism, mergeMeshes, meshVolume, type Mesh } from "./solid";
+import {
+  extrudePrism,
+  extrudeTapered,
+  mergeMeshes,
+  meshVolume,
+  offsetOutline,
+  type Mesh,
+  type Outline,
+} from "./solid";
 import { INCH_MM } from "./stl";
 
 export type TraySpec = {
@@ -38,6 +46,18 @@ export type TraySpec = {
   nozzleMm?: number;
   /** Print bed, for warning before rather than after. */
   bedMm?: number;
+  /**
+   * The largest flare to put where each shape meets the floor.
+   *
+   * The silicone gets a sloped corner instead of a square notch, and a square
+   * notch is where it tears first when the mold is peeled off.
+   *
+   * A maximum rather than a figure: fine linework cannot take a flare wider
+   * than the line itself, so each shape is offered this and then half of it,
+   * and half again, until one fits. All-or-nothing would mean typical line art
+   * — arms about a millimetre across — got nothing at all. Zero turns it off.
+   */
+  filletMm?: number;
   /**
    * How many cavities the tray should hold. One pour, this many pieces.
    */
@@ -63,6 +83,7 @@ const DEFAULTS = {
   bedMm: 220,
   copies: 1,
   webbingMm: 6,
+  filletMm: 0.8,
 };
 
 export type CavityGrid = {
@@ -148,6 +169,33 @@ const WELD_MM = 0.01;
 /** Two perimeters of extrusion is the least that stands up as a wall. */
 const MIN_WALL_NOZZLES = 2;
 
+/** How many times a flare may be halved before it is not worth having. */
+const FILLET_HALVINGS = 4;
+
+/**
+ * The largest flare this shape can take, and the outline that goes with it.
+ *
+ * offsetOutline refuses anything that would knot the boundary or close a gap,
+ * so this is a matter of asking for less until it stops refusing — down to
+ * `floorMm`, below which the flare is finer than the printer can lay down and
+ * claiming one would be a lie about a surface that came out square anyway.
+ *
+ * Known limit: a *concave* corner where two arms meet at a shallow angle gets
+ * refused, though filling that notch is exactly what a fillet ought to do
+ * there. Distinguishing it from a genuine self-intersection needs the offset to
+ * clip itself rather than refuse, which is a different and much larger piece of
+ * geometry. Until then, detailed line art comes back square-footed and is told
+ * so, which is at least true.
+ */
+function flareFor(outline: Outline, largestMm: number, floorMm: number): { outline: Outline; mm: number } | null {
+  for (let mm = largestMm, step = 0; step <= FILLET_HALVINGS; mm /= 2, step++) {
+    if (mm < floorMm) break;
+    const flared = offsetOutline(outline, mm);
+    if (flared) return { outline: flared, mm };
+  }
+  return null;
+}
+
 export type Tray = {
   /** Every part, in millimetres, ready to encode. */
   mesh: Mesh;
@@ -162,6 +210,10 @@ export type Tray = {
   siliconeMl: number;
   /** Shapes standing on the floor, across every cavity. */
   shapes: number;
+  /** Shapes too fine for even the smallest flare, left square-footed instead. */
+  filletsSkipped: number;
+  /** The smallest flare actually applied, in millimetres. Zero when none was. */
+  filletAppliedMm: number;
   /** Cavities on the tray, and how they were arranged. */
   cavities: number;
   columns: number;
@@ -205,6 +257,7 @@ export function buildTray(
   const nozzleMm = spec.nozzleMm ?? DEFAULTS.nozzleMm;
   const bedMm = spec.bedMm ?? DEFAULTS.bedMm;
   const copies = Math.max(1, Math.floor(spec.copies ?? DEFAULTS.copies));
+  const filletMm = Math.max(0, spec.filletMm ?? DEFAULTS.filletMm);
   const webbingMm = Math.max(0, spec.webbingMm ?? DEFAULTS.webbingMm);
 
   if (maskWidth <= 0 || maskHeight <= 0 || mask.length < maskWidth * maskHeight) return null;
@@ -269,15 +322,29 @@ export function buildTray(
 
   // One solid per shape per cavity: six cookies from one design is six
   // separate closed solids, not one shape repeated by the slicer.
+  let filletsSkipped = 0;
+  let smallestFlareMm = Infinity;
   const positives = grid.positions.flatMap((at) =>
-    shapes.map((shape) =>
-      extrudePrism(
-        shape.outer.points.map((point) => toMm(point, at)),
-        shape.holes.map((hole) => hole.points.map((point) => toMm(point, at))),
-        floorMm - WELD_MM,
-        floorMm + spec.shapeMm
-      )
-    )
+    shapes.flatMap((shape) => {
+      const outline = {
+        outer: shape.outer.points.map((point) => toMm(point, at)),
+        holes: shape.holes.map((hole) => hole.points.map((point) => toMm(point, at))),
+      };
+      const body = extrudePrism(outline.outer, outline.holes, floorMm - WELD_MM, floorMm + spec.shapeMm);
+      if (filletMm <= 0) return [body];
+
+      // The skirt is the same outline flared at the floor and true a flare's
+      // height above it. A shape too fine for even the smallest flare is better
+      // left square than left wrong.
+      const flare = flareFor(outline, filletMm, nozzleMm / 2);
+      if (!flare) {
+        filletsSkipped++;
+        return [body];
+      }
+      if (flare.mm < smallestFlareMm) smallestFlareMm = flare.mm;
+      const skirt = extrudeTapered(flare.outline, outline, floorMm - WELD_MM, floorMm + flare.mm);
+      return skirt.count ? [body, skirt] : [body];
+    })
   );
 
   const parts = [floor, walls, ...positives].filter((part) => part.count > 0);
@@ -297,7 +364,11 @@ export function buildTray(
     heightMm,
     plasticCm3: Math.max(0, plasticMm3) / 1000,
     siliconeMl: Math.max(0, cavityMm3) / 1000,
-    shapes: positives.length,
+    // Shapes, not solids: a shape with a fillet is a body and a skirt, and
+    // nobody counting the cookies on a tray means that.
+    shapes: grid.positions.length * shapes.length,
+    filletsSkipped,
+    filletAppliedMm: Number.isFinite(smallestFlareMm) ? smallestFlareMm : 0,
     cavities: grid.positions.length,
     columns: grid.columns,
     rows: grid.rows,
@@ -312,6 +383,9 @@ export function buildTray(
       unitDepthMm,
       webbingMm,
       marginMm,
+      filletMm,
+      filletsSkipped,
+      filletAppliedMm: Number.isFinite(smallestFlareMm) ? smallestFlareMm : 0,
     }),
   };
 }
@@ -357,6 +431,9 @@ function inspectTray(
     unitDepthMm: number;
     webbingMm: number;
     marginMm: number;
+    filletMm: number;
+    filletsSkipped: number;
+    filletAppliedMm: number;
   }
 ): ProductionFinding[] {
   const findings: ProductionFinding[] = [];
@@ -396,6 +473,26 @@ function inspectTray(
           detail: `${limits.widthMm.toFixed(0)} x ${limits.depthMm.toFixed(0)}mm will not fit a ${limits.bedMm}mm bed. ${describeFit(limits)}`,
         }
   );
+
+  if (limits.filletMm > 0) {
+    findings.push(
+      limits.filletsSkipped === 0
+        ? {
+            level: "pass",
+            title: "Demolding",
+            detail: `Every shape is flared at least ${limits.filletAppliedMm.toFixed(2)}mm where it meets the floor, so the silicone gets a slope to peel off rather than a square notch to tear at.`,
+          }
+        : {
+            level: "warn",
+            title: "Demolding",
+            // Not a failure to fix so much as a consequence to know about: the
+            // shape is too fine to grow by this much without welding its own
+            // parts together, so it stands square-footed and the silicone will
+            // want more care coming off it.
+            detail: `${limits.filletsSkipped} shape${limits.filletsSkipped === 1 ? " has" : "s have"} detail too close together to flare at all — the smallest flare this printer can lay down, ${(limits.nozzleMm / 2).toFixed(2)}mm, would still weld neighbouring parts together — so ${limits.filletsSkipped === 1 ? "it stands" : "they stand"} square on the floor. The silicone will come off, but pull it slowly: a square corner is where it tears.`,
+          }
+    );
+  }
 
   findings.push({
     level: "pass",

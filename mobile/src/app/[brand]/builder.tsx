@@ -55,6 +55,7 @@ import { ImageViewer } from "@/components/ImageViewer";
 import { NamePrompt } from "@/components/NamePrompt";
 import { IcingPreview } from "@/components/IcingPreview";
 import { SubstrateMockup } from "@/components/SubstrateMockup";
+import { ChoicePrompt, type Choice } from "@/components/ChoicePrompt";
 import { OrderPlanner } from "@/components/OrderPlanner";
 import { HealedTimeline } from "@/components/HealedTimeline";
 import { VersionHistory } from "@/components/VersionHistory";
@@ -182,6 +183,13 @@ export default function BuilderScreen() {
    *  — being able to take back the drag that just wrecked an even row is. */
   const [history, setHistory] = useState<SheetItem[][]>([]);
   const [snapEnabled, setSnapEnabled] = useState(true);
+  /** The open choice list, if any. See ChoicePrompt for why this is not an alert. */
+  const [choosing, setChoosing] = useState<{
+    title: string;
+    subtitle?: string;
+    choices: Choice[];
+    onPick: (value: number) => void;
+  } | null>(null);
   const [guidesVisible, setGuidesVisible] = useState(true);
   const [printerOpen, setPrinterOpen] = useState(false);
   const [printerProfile, setPrinterProfile] = useState<PrinterProfile | null>(null);
@@ -1150,12 +1158,26 @@ export default function BuilderScreen() {
 
   function chooseTiledPrint() {
     if (!selected) return Alert.alert("Choose a design", "Select one design to print oversized.");
-    Alert.alert("Oversized tiled print", "Inkline adds ¼-inch overlap, alignment marks, and page numbers.", [
-      { text: "2× on Letter", onPress: () => printTiled(2, "letter") },
-      { text: "4× on Letter", onPress: () => printTiled(4, "letter") },
-      { text: "3× on A4", onPress: () => printTiled(3, "a4") },
-      { text: "Cancel", style: "cancel" },
-    ]);
+    // Four buttons is one more than an Android alert shows, so the last choice
+    // was unreachable there. See ChoicePrompt.
+    setChoosing({
+      title: "Oversized tiled print",
+      subtitle: "Inkline adds ¼-inch overlap, alignment marks, and page numbers.",
+      choices: [
+        { value: 0, label: "2× on Letter", detail: "Two pages wide." },
+        { value: 1, label: "4× on Letter", detail: "Four pages wide." },
+        { value: 2, label: "3× on A4", detail: "Three pages wide." },
+      ],
+      onPick: (index) => {
+        const plan: [number, "letter" | "a4"][] = [
+          [2, "letter"],
+          [4, "letter"],
+          [3, "a4"],
+        ];
+        const chosen = plan[index];
+        if (chosen) void printTiled(chosen[0], chosen[1]);
+      },
+    });
   }
 
   async function printTiled(scale: number, paper: "letter" | "a4") {
@@ -1440,23 +1462,19 @@ export default function BuilderScreen() {
                   onPress={() => openSheet(s)}
                   onLongPress={() => {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                    Alert.alert(s.name, undefined, [
-                      {
-                        text: "Hand off",
-                        onPress: () => void handOffSheet(s),
+                    setChoosing({
+                      title: s.name,
+                      choices: [
+                        { value: 0, label: "Hand off", detail: "AirDrop it to the other studio." },
+                        { value: 1, label: "Rename" },
+                        { value: 2, label: "Delete" },
+                      ],
+                      onPick: (index) => {
+                        if (index === 0) void handOffSheet(s);
+                        else if (index === 1) openPrompt({ kind: "rename-sheet", id: s.id, initial: s.name });
+                        else confirmDeleteSheet(s);
                       },
-                      {
-                        text: "Rename",
-                        onPress: () =>
-                          openPrompt({ kind: "rename-sheet", id: s.id, initial: s.name }),
-                      },
-                      {
-                        text: "Delete",
-                        style: "destructive",
-                        onPress: () => confirmDeleteSheet(s),
-                      },
-                      { text: "Cancel", style: "cancel" },
-                    ]);
+                    });
                   }}
                   accessibilityRole="button"
                   accessibilityLabel={`Open ${s.name}`}
@@ -1738,6 +1756,17 @@ export default function BuilderScreen() {
 
       {mockup && (
         <SubstrateMockup uri={mockup.uri} title={mockup.title} onClose={() => setMockup(null)} />
+      )}
+
+      {choosing && (
+        <ChoicePrompt
+          visible
+          title={choosing.title}
+          subtitle={choosing.subtitle}
+          choices={choosing.choices}
+          onPick={choosing.onPick}
+          onClose={() => setChoosing(null)}
+        />
       )}
 
       {icing && (
