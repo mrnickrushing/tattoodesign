@@ -212,3 +212,17 @@ test("an outlined design stands up as the shape, not as its own outline", () => 
   // And the literal reading is still available and still closed.
   assert.equal(inspectMesh(literal.parts[2]).watertight, true);
 });
+
+test("the tray says whether the fill was a real choice", () => {
+  // A solid shape reads the same either way, so there is nothing to ask about.
+  assert.equal(buildTray(oneShape(), W, H, SPEC)!.outlinesFilled, false);
+
+  // An outline does not, so the caller has a genuine question to put.
+  const outline = new Uint8Array(W * H);
+  for (let y = 20; y < 70; y++) for (let x = 30; x < 90; x++) outline[y * W + x] = 1;
+  for (let y = 24; y < 66; y++) for (let x = 34; x < 86; x++) outline[y * W + x] = 0;
+  assert.equal(buildTray(outline, W, H, SPEC)!.outlinesFilled, true);
+
+  // And asking for the literal reading never reports a fill that did not happen.
+  assert.equal(buildTray(outline, W, H, { ...SPEC, fillOutlines: false })!.outlinesFilled, false);
+});

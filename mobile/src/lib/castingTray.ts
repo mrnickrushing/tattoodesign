@@ -82,6 +82,15 @@ export type Tray = {
   siliconeMl: number;
   /** Shapes standing on the floor. */
   shapes: number;
+  /**
+   * Whether filling enclosed regions actually changed the shape.
+   *
+   * False means the artwork was already a silhouette and the two readings are
+   * the same tray — so there is no choice worth putting to anyone. True means
+   * the drawing contains something that could be an inside or could be a hole,
+   * and only the person who drew it knows which.
+   */
+  outlinesFilled: boolean;
   findings: ProductionFinding[];
 };
 
@@ -117,6 +126,13 @@ export function buildTray(
 
   const mmPerPx = (spec.widthIn * INCH_MM) / maskWidth;
   const shape = spec.fillOutlines === false ? mask : fillEnclosed(mask, maskWidth, maskHeight);
+  let outlinesFilled = false;
+  for (let i = 0; i < maskWidth * maskHeight; i++) {
+    if (shape[i] !== mask[i]) {
+      outlinesFilled = true;
+      break;
+    }
+  }
 
   // Simplified to a tenth of a millimetre: finer than the printer resolves, so
   // the staircase goes without any of the shape going with it.
@@ -184,6 +200,7 @@ export function buildTray(
     plasticCm3: Math.max(0, plasticMm3) / 1000,
     siliconeMl: Math.max(0, cavityMm3) / 1000,
     shapes: positives.length,
+    outlinesFilled,
     findings: inspectTray(shape, maskWidth, maskHeight, mmPerPx, {
       widthMm,
       depthMm,
