@@ -305,6 +305,34 @@ export type BatchRun = {
   lines: QuoteLine[];
 };
 
+/**
+ * Splits an order across designs in their stated proportions, as whole pieces
+ * that add back up to the order.
+ *
+ * Rounding each design on its own does not add up: two designs of one each,
+ * scaled to an order of three, both round to two, and the run sheet then plans
+ * four pieces while the icing is mixed for three. Largest remainder hands each
+ * spare piece to whichever design came closest to earning it, so the total is
+ * exactly what was asked for.
+ */
+export function allocateCounts(counts: number[], quantity: number): number[] {
+  const stated = counts.reduce((sum, count) => sum + Math.max(0, count), 0);
+  if (stated <= 0) return counts.map(() => 0);
+  if (quantity <= 0) return counts.map((count) => Math.max(0, Math.round(count)));
+
+  const exact = counts.map((count) => (Math.max(0, count) * quantity) / stated);
+  const whole = exact.map((value) => Math.floor(value));
+  const order = exact
+    .map((value, index) => ({ index, fraction: value - Math.floor(value) }))
+    // Ties go to the design listed first, so the same order always allocates
+    // the same way.
+    .sort((a, b) => b.fraction - a.fraction || a.index - b.index);
+
+  let spare = quantity - whole.reduce((sum, value) => sum + value, 0);
+  for (let i = 0; spare > 0 && i < order.length; i++, spare--) whole[order[i].index]++;
+  return whole;
+}
+
 /** One colour on one piece: outline, flood, and the wait between. */
 const BASE_MINUTES_PER_PIECE = 2.5;
 const EXTRA_COLOUR_MINUTES = 1;
@@ -329,15 +357,23 @@ export function planBatch(input: BatchQuoteInput): BatchRun | null {
 
   const stated = designs.reduce((sum, design) => sum + Math.max(0, design.count), 0);
   if (stated <= 0) return null;
-  const scale = input.quantity > 0 ? input.quantity / stated : 1;
+
+  // Allocated once, up front, and everything downstream — sheets, hours,
+  // cookies, icing — is planned from these same whole numbers rather than from
+  // a fractional scale each step reapplies for itself.
+  const allocated = allocateCounts(
+    designs.map((design) => design.count),
+    input.quantity
+  );
+  const scaled = designs.map((design, i) => ({ ...design, count: allocated[i] }));
 
   const perDesign: BatchRun["perDesign"] = [];
   let sheets = 0;
   let decoratingMinutes = 0;
   let pieces = 0;
 
-  for (const design of designs) {
-    const count = Math.round(Math.max(0, design.count) * scale);
+  for (const design of scaled) {
+    const count = design.count;
     if (count <= 0) continue;
 
     const estimate = estimateYield({
@@ -362,7 +398,8 @@ export function planBatch(input: BatchQuoteInput): BatchRun | null {
 
   if (!perDesign.length) return null;
 
-  const icing = icingPlan(designs, input.quantity);
+  // Zero, because the counts are already the allocated ones.
+  const icing = icingPlan(scaled, 0);
   const setup = PRINT_SETUP_HOURS + COLOUR_SETUP_HOURS * icing.length;
   const hours = toBookable(decoratingMinutes / 60 + setup);
 

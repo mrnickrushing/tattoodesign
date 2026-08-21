@@ -15,6 +15,7 @@
 
 import { Skia, ColorType, AlphaType, ImageFormat } from "@shopify/react-native-skia";
 import { stripDataUrlPrefix } from "./files";
+import { distanceTransform } from "./lineWidth";
 
 export type CutLineOptions = {
   /** Printed width of the design, which is what turns inches into pixels. */
@@ -38,9 +39,6 @@ export const DEFAULT_CUT_LINE: CutLineOptions = {
 
 /** Anything darker than this counts as artwork rather than background. */
 const INK_THRESHOLD = 160;
-/** Chamfer weights: 1 for orthogonal steps, ~√2 for diagonals. */
-const ORTHOGONAL = 1;
-const DIAGONAL = 1.4142;
 
 function rgb(hex: string): [number, number, number] {
   const h = hex.replace("#", "");
@@ -50,43 +48,6 @@ function rgb(hex: string): [number, number, number] {
     parseInt(full.slice(2, 4), 16),
     parseInt(full.slice(4, 6), 16),
   ];
-}
-
-/** Distance from each pixel to the nearest set pixel in `mask`, in pixels. */
-function distanceTransform(mask: Uint8Array, width: number, height: number): Float32Array {
-  const far = width + height;
-  const dist = new Float32Array(mask.length);
-  for (let i = 0; i < mask.length; i++) dist[i] = mask[i] ? 0 : far;
-
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const i = y * width + x;
-      let best = dist[i];
-      if (y > 0) {
-        best = Math.min(best, dist[i - width] + ORTHOGONAL);
-        if (x > 0) best = Math.min(best, dist[i - width - 1] + DIAGONAL);
-        if (x < width - 1) best = Math.min(best, dist[i - width + 1] + DIAGONAL);
-      }
-      if (x > 0) best = Math.min(best, dist[i - 1] + ORTHOGONAL);
-      dist[i] = best;
-    }
-  }
-
-  for (let y = height - 1; y >= 0; y--) {
-    for (let x = width - 1; x >= 0; x--) {
-      const i = y * width + x;
-      let best = dist[i];
-      if (y < height - 1) {
-        best = Math.min(best, dist[i + width] + ORTHOGONAL);
-        if (x > 0) best = Math.min(best, dist[i + width - 1] + DIAGONAL);
-        if (x < width - 1) best = Math.min(best, dist[i + width + 1] + DIAGONAL);
-      }
-      if (x < width - 1) best = Math.min(best, dist[i + 1] + ORTHOGONAL);
-      dist[i] = best;
-    }
-  }
-
-  return dist;
 }
 
 export async function addCutLine(src: string, options: CutLineOptions): Promise<string> {

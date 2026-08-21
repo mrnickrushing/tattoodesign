@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   PLACEMENTS,
+  allocateCounts,
   detailDensity,
   estimateHours,
   findPlacement,
@@ -353,4 +354,60 @@ test("a named colour still carries its recipe", () => {
   const [line] = icingPlan([{ ...COOKIE, colours: [{ hex: "#E86A9A", label: "Rose", weight: 1 }] }], 40);
   assert.equal(line.hex, "#e86a9a");
   assert.ok(line.recipe, "a real colour can be mixed from the gels on the shelf");
+});
+
+test("an order is split into whole pieces that add back up to it", () => {
+  // Two designs of one each, scaled to three: rounding both independently
+  // gives two apiece and plans a four-piece run for a three-piece order.
+  assert.deepEqual(allocateCounts([1, 1], 3), [2, 1]);
+  assert.deepEqual(allocateCounts([1, 1, 1], 7), [3, 2, 2]);
+  assert.deepEqual(allocateCounts([3, 1], 100), [75, 25]);
+
+  for (const quantity of [1, 3, 7, 13, 50, 199]) {
+    for (const shape of [[1, 1], [1, 1, 1], [3, 1], [5, 3, 2], [1, 2, 3, 4]]) {
+      const allocated = allocateCounts(shape, quantity);
+      assert.equal(
+        allocated.reduce((sum, count) => sum + count, 0),
+        quantity,
+        `${shape.join("/")} at ${quantity} did not add up`
+      );
+      assert.ok(allocated.every((count) => Number.isInteger(count) && count >= 0));
+    }
+  }
+});
+
+test("allocation is stable and leaves stated counts alone when nothing is asked for", () => {
+  assert.deepEqual(allocateCounts([1, 1], 3), allocateCounts([1, 1], 3), "ties break the same way twice");
+  assert.deepEqual(allocateCounts([4, 7], 0), [4, 7], "no order size means the counts stand");
+  assert.deepEqual(allocateCounts([0, 0], 10), [0, 0], "nothing to allocate across");
+  assert.deepEqual(allocateCounts([], 10), []);
+});
+
+test("the whole run is planned from one set of counts", () => {
+  // The reviewer's case: sheets, hours and cookies must not be planned for a
+  // different number of pieces than the icing is mixed for.
+  const one: BatchDesign = { ...COOKIE, id: "a", label: "A", count: 1 };
+  const two: BatchDesign = { ...COOKIE, id: "b", label: "B", count: 1 };
+  const run = planBatch({
+    designs: [one, two],
+    quantity: 3,
+    sheetWidthIn: 8,
+    sheetHeightIn: 10,
+    hourlyRate: 40,
+    perPieceCost: 2,
+  })!;
+
+  const planned = run.perDesign.reduce((sum, entry) => sum + entry.count, 0);
+  assert.equal(planned, 3, "the run plans exactly the order");
+
+  const cookies = run.lines.find((line) => line.label === "Cookies")!;
+  assert.equal(cookies.amount, 6, "three cookies at 2, not four");
+  assert.ok(cookies.detail.startsWith("3 "), `billed for the wrong count: ${cookies.detail}`);
+
+  // Icing for the same three pieces, whichever way it is asked.
+  const direct = icingPlan(
+    run.perDesign.map((entry) => ({ ...entry.design, count: entry.count })),
+    0
+  );
+  run.icing.forEach((line, i) => assert.ok(Math.abs(line.exactCups - direct[i].exactCups) < 1e-9));
 });

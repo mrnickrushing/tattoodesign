@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { View, Text, StyleSheet, Pressable, TextInput } from "react-native";
 import * as Haptics from "expo-haptics";
 import { useBrand } from "@/context/BrandContext";
+import { PREF_KEYS, preferences } from "@/lib/preferences";
 import { planBatch } from "@/lib/quote";
 import { estimateYield } from "@/lib/yield";
 import { RADIUS, SPACE, TYPE } from "@/lib/theme";
@@ -31,12 +32,33 @@ export function OrderPlanner({
   pieceWidthIn: number;
   pieceHeightIn: number;
 }) {
-  const { theme } = useBrand();
+  const { brand, theme } = useBrand();
   const [open, setOpen] = useState(false);
   const [quantity, setQuantity] = useState("24");
   const [coverage, setCoverage] = useState(0.8);
   const [colours, setColours] = useState(2);
+  /**
+   * Seeded from the rate saved in Settings — the same preference the tattoo
+   * side quotes against — so it does not have to be typed in again every time
+   * this panel mounts. Editing here saves back, so the two stay in step.
+   */
   const [rate, setRate] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    void preferences.get<number>(brand.id, PREF_KEYS.hourlyRate, 0).then((saved) => {
+      if (active && saved > 0) setRate(String(saved));
+    });
+    return () => {
+      active = false;
+    };
+  }, [brand.id]);
+
+  function updateRate(text: string) {
+    setRate(text);
+    const parsed = Number.parseFloat(text);
+    void preferences.set(brand.id, PREF_KEYS.hourlyRate, Number.isFinite(parsed) && parsed > 0 ? parsed : 0);
+  }
 
   const parsed = Number.parseInt(quantity, 10);
   const pieces = Number.isFinite(parsed) ? parsed : 0;
@@ -225,7 +247,7 @@ export function OrderPlanner({
             </Text>
             <TextInput
               value={rate}
-              onChangeText={setRate}
+              onChangeText={updateRate}
               keyboardType="decimal-pad"
               placeholder="per hour"
               placeholderTextColor={theme.muted}
