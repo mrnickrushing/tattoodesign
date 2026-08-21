@@ -1,6 +1,7 @@
 import { circle, dome, domeSegments, type DomeRelief } from "./dome";
 import type { Point } from "./designProject";
 import type { ProductionFinding } from "./productionTools";
+import { finestStrokeWidth } from "./lineWidth";
 import { extrudePrism, mergeMeshes, meshVolume, type Mesh } from "./solid";
 import { INCH_MM } from "./stl";
 
@@ -56,9 +57,6 @@ const DEFAULTS = {
 };
 
 const WELD_MM = 0.01;
-
-/** Two perimeters of extrusion is the least that stands up as a wall. */
-const MIN_WALL_NOZZLES = 2;
 
 /**
  * How far the registration pins stand, and how wide.
@@ -266,7 +264,13 @@ export function buildSphereMold(
 
   const diameterMm = spec.diameterIn * INCH_MM;
   const radiusMm = diameterMm / 2;
-  const segments = domeSegments(radiusMm, nozzleMm);
+
+  // The finest thing in the drawing, measured on the ball rather than on the
+  // page. The drawing's rim maps to the equator, so a mask pixel is worth this
+  // much arc — and the facets have to be finer than the detail they carry.
+  const drawnRadiusPx = Math.min(maskWidth, maskHeight) / 2;
+  const arcPerPixelMm = drawnRadiusPx > 0 ? ((Math.PI / 2) * radiusMm) / drawnRadiusPx : 0;
+  const finestMm = Math.max(nozzleMm, finestStrokeWidth(mask, maskWidth, maskHeight) * arcPerPixelMm);
 
   const pitchMm = diameterMm + webbingMm;
   const { centres, columns, rows } = layout(copies, pitchMm);
@@ -284,13 +288,19 @@ export function buildSphereMold(
   const relief: DomeRelief | undefined =
     reliefApplied > 0 ? { mask, width: maskWidth, height: maskHeight, mm: reliefApplied } : undefined;
 
+  // Only the half carrying a drawing pays for the facets to hold it. The smooth
+  // one is a plain ball and needs no more than roundness asks for, which on a
+  // cake pop is a fraction of the count — and it is half the file.
+  const segments = domeSegments(radiusMm, relief ? finestMm : 0);
+  const plainSegments = domeSegments(radiusMm);
+
   let shapesDropped = 0;
   const drop = () => {
     shapesDropped++;
   };
   const shared = { floorMm, coverMm, marginMm, nozzleMm };
   const designed = buildHalf(shared, radiusMm, placed, widthMm, depthMm, segments, sprueMm, false, relief, drop);
-  const plain = buildHalf(shared, radiusMm, placed, widthMm, depthMm, segments, sprueMm, true, undefined, drop);
+  const plain = buildHalf(shared, radiusMm, placed, widthMm, depthMm, plainSegments, sprueMm, true, undefined, drop);
 
   return {
     designed,
@@ -380,26 +390,21 @@ function inspect(limits: {
         }
   );
 
-  const facetMm = (Math.PI * limits.diameterMm) / limits.segments;
-  findings.push(
-    facetMm <= limits.nozzleMm * MIN_WALL_NOZZLES
-      ? {
-          level: "pass",
-          title: "Roundness",
-          detail: `The ball is built from ${limits.segments} facets round, about ${facetMm.toFixed(
-            2
-          )}mm each — under what this nozzle can resolve, so it prints round rather than faceted.`,
-        }
-      : {
-          level: "warn",
-          title: "Roundness",
-          // Capped on purpose rather than quietly: the alternative is a file of
-          // half a million triangles per tray.
-          detail: `The ball is built from ${limits.segments} facets round, about ${facetMm.toFixed(
-            2
-          )}mm each, which this nozzle can resolve — so the chocolate will show faceting. That is the cap on how fine the ball is allowed to get; a smoother one is a much larger file. Sand the print, or accept the facets.`,
-        }
-  );
+  // How far a flat facet strays from the ball it is drawn in — which is the
+  // question, rather than how long the facet is. A facet the length of a nozzle
+  // sounds like the bar to clear and is nothing of the kind: on a 1.5in ball it
+  // is an accuracy of one and a half microns, bought with thirty-three thousand
+  // triangles that no printer can express.
+  const strayMm = (limits.diameterMm / 2) * (1 - Math.cos(Math.PI / limits.segments));
+  findings.push({
+    level: "pass",
+    title: "Roundness",
+    detail: `The ball is ${limits.segments} facets round, straying ${(strayMm * 1000).toFixed(
+      0
+    )} microns from a true sphere at the worst of it — far under the ${(limits.nozzleMm / 2).toFixed(
+      2
+    )}mm layers this printer lays down, so the facets are gone before the plastic is.`,
+  });
 
   if (limits.reliefMm > 0) {
     findings.push(

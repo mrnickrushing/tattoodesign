@@ -101,9 +101,16 @@ that becomes an object.
 
   The drawing is pressed onto the dome from directly above, the way a round
   sticker goes onto a ball: the middle of the drawing lands on the pole
-  undistorted and its rim reaches the equator. Facets are chosen for the nozzle
-  and capped, because a ball at a tenth of a millimetre a facet is a file nobody
-  can open — and the finding says which it settled on.
+  undistorted and its rim reaches the equator.
+
+  How round the ball is built comes from **how far a flat facet strays from the
+  ball**, not how long the facet is. Facet length against the nozzle was the
+  first rule here and it is the wrong physics: it demands 256 facets and 33,000
+  triangles a ball to buy an accuracy of one and a half microns, on a printer
+  laying two-tenths of a millimetre. Chord deviation asks for 44, and the ball
+  is still inside a twentieth of a millimetre of true. Relief is the real reason
+  to go finer — the drawing is only as sharp as the facets under it — so only
+  the half that carries a drawing pays for them.
 
 - **An assumed printer, said out loud.** Nozzle and bed default to 0.4mm and
   220mm, and every limit in both files is measured against that nozzle. Until a

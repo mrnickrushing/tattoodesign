@@ -102,13 +102,47 @@ test("the drawing is pressed on from straight above the ball", () => {
   assert.ok(widest < 10.001, `the equator grew to ${widest} — the drawing reached the sides it does not cover`);
 });
 
-test("roundness is chosen for the printer, and capped", () => {
-  // Finer nozzle, more facets — up to a ceiling, because a ball at a tenth of a
-  // millimetre a facet is a file nobody can open.
-  assert.ok(domeSegments(19.05, 0.8) < domeSegments(19.05, 0.4), "a finer nozzle earns more facets");
-  assert.equal(domeSegments(19.05, 0.05), 256, "and stops at the cap");
-  assert.equal(domeSegments(1, 0.4), 48, "a tiny ball still gets enough to read as round");
-  assert.equal(domeSegments(19.05, 0.4) % 4, 0, "divisible into rings");
+test("roundness is judged by how far a facet strays, not how long it is", () => {
+  // The distinction the first version of this got wrong. A facet's *length*
+  // against the nozzle demands 256 facets on a cake pop to buy an accuracy of
+  // one and a half microns; what matters is how far the flat facet strays from
+  // the ball, and forty facets is already inside a twentieth of a millimetre.
+  const stray = (radius: number, segments: number) => radius * (1 - Math.cos(Math.PI / segments));
+
+  for (const radius of [19.05, 13.97, 5]) {
+    const segments = domeSegments(radius);
+    assert.ok(stray(radius, segments) <= 0.05, `r=${radius}: ${segments} facets stray ${stray(radius, segments)}`);
+    // And no further than it has to: four fewer would be outside the tolerance,
+    // or it is already at the floor.
+    assert.ok(
+      segments === 32 || stray(radius, segments - 4) > 0.05,
+      `r=${radius}: ${segments} facets is finer than the tolerance asks for`
+    );
+  }
+
+  // A bigger ball needs more facets to hold the same tolerance.
+  assert.ok(domeSegments(19.05) > domeSegments(5));
+});
+
+test("a drawing on the ball is what makes it worth going finer", () => {
+  const radius = 19.05;
+  const plain = domeSegments(radius);
+
+  // Detail to carry raises the count, and finer detail raises it further.
+  const coarse = domeSegments(radius, 4);
+  const fine = domeSegments(radius, 1);
+  assert.ok(coarse > plain, `${coarse} facets for 4mm detail against ${plain} plain`);
+  assert.ok(fine > coarse, `${fine} for 1mm detail against ${coarse} for 4mm`);
+
+  // Two facets across the finest feature is the demand, so the facet is about
+  // half of it — the coarsest a step can be and still read as an edge.
+  const facet = (2 * Math.PI * radius) / coarse;
+  assert.ok(facet <= 4 / 2 + 0.01, `a 4mm feature got ${facet.toFixed(2)}mm facets`);
+
+  // And it stops, because a ball here is one of several on two trays.
+  assert.equal(domeSegments(radius, 0.01), 192, "capped");
+  assert.equal(domeSegments(0.0001), 32, "and floored");
+  assert.equal(domeSegments(radius, 1) % 4, 0, "divisible into rings");
 });
 
 test("a circle is a closed outline that extrudes into a post", () => {

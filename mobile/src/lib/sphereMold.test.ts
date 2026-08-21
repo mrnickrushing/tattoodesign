@@ -26,10 +26,27 @@ function star(): Uint8Array {
 
 const CAKEPOP = { diameterIn: 1.5, stick: true } as const;
 
+/**
+ * The domes among the parts.
+ *
+ * By shape rather than by size: everything else on the tray is a prism, so it
+ * has its vertices at exactly two heights. A dome is curved and has one per
+ * ring. Counting triangles worked until the balls got cheaper to build, which
+ * is exactly the kind of thing a test should not be resting on.
+ */
+function domes(half: MoldHalf) {
+  return half.parts.filter((part) => {
+    const heights = new Set<number>();
+    for (let i = 0; i < part.count * 3 && heights.size < 4; i++) {
+      heights.add(Math.round(part.positions[i * 3 + 2] * 1e3));
+    }
+    return heights.size > 3;
+  });
+}
+
 /** Dome centres, taken off the mesh rather than trusted from the spec. */
 function domeCentres(half: MoldHalf): { x: number; y: number }[] {
-  return half.parts
-    .filter((part) => part.count > 2000)
+  return domes(half)
     .map((part) => {
       let x = 0;
       let y = 0;
@@ -93,10 +110,11 @@ test("one half has the pins and the other the hollows they sit in", () => {
 
   // Pins stand above the floor on the designed half; nothing does on the plain
   // one except the ball and the channel over it.
+  const balls = new Set(domes(mold.designed).concat(domes(mold.plain)));
   const standing = (half: MoldHalf) => {
     let above = 0;
     for (const part of half.parts) {
-      if (part.count > 2000) continue; // the ball itself
+      if (balls.has(part)) continue; // the ball itself
       let top = -Infinity;
       for (let i = 0; i < part.count * 3; i++) top = Math.max(top, part.positions[i * 3 + 2]);
       if (top > 2 + 0.5 && top < 2 + 19.05) above++;

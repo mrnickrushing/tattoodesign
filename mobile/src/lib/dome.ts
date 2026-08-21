@@ -44,17 +44,64 @@ function sample(relief: DomeRelief, theta: number, downFromPole: number): boolea
 }
 
 /**
- * How many facets to go round in, for a ball of this size on this printer.
+ * How smooth is smooth enough, as a distance rather than a facet count.
  *
- * Facets finer than the nozzle are detail the printer cannot lay down and file
- * size nobody wanted — a ball at half a millimetre a facet is already tens of
- * thousands of triangles, and a tray holds several. Coarser than about a
- * millimetre and the ball reads as faceted in the chocolate rather than round.
+ * A flat facet cuts a chord across the true curve, and what matters is how far
+ * the chord strays from it — not how long the facet is. Fifty microns is a
+ * quarter of a layer on a printer laying two-tenths, which is below anything it
+ * could express even if the mesh were perfect.
  */
-export function domeSegments(radiusMm: number, nozzleMm: number): number {
-  const wanted = Math.round((Math.PI * 2 * radiusMm) / Math.max(0.05, nozzleMm));
-  return Math.max(48, Math.min(256, wanted - (wanted % 4)));
+const SMOOTH_TOLERANCE_MM = 0.05;
+
+/**
+ * How many facets to go round in.
+ *
+ * Two separate demands, and the answer is whichever is greater.
+ *
+ * **Roundness** is the chord one: a facet strays from the ball by
+ * `r(1 - cos(pi / segments))`, and that has to stay under the tolerance above.
+ * It is a far weaker demand than it looks — a 1.5in ball at 48 facets is
+ * already within 40 microns of a true sphere, and at 128 within six.
+ *
+ * Judging a facet by its *length* against the nozzle instead, which is what
+ * this did first, asks for 256 facets and thirty-three thousand triangles a
+ * ball to buy an accuracy of one and a half microns. No printer can lay that
+ * down and no file wants to carry it.
+ *
+ * **Relief** is the real reason to go fine. A drawing raised on the dome is
+ * only as sharp as the facets under it, so the finest thing in the drawing has
+ * to span a facet or two. Passing its size in raises the count for that alone —
+ * and only the half that carries a drawing pays for it.
+ */
+export function domeSegments(radiusMm: number, reliefFeatureMm = 0): number {
+  if (!(radiusMm > 0)) return MIN_SEGMENTS;
+
+  // Smallest count whose chord stays inside the tolerance.
+  const ratio = Math.max(-1, Math.min(1, 1 - SMOOTH_TOLERANCE_MM / radiusMm));
+  const round = Math.ceil(Math.PI / Math.acos(ratio));
+
+  // And fine enough that the drawing's own detail survives being drawn on it:
+  // two facets across the finest feature, which is as coarse as a step can be
+  // and still read as an edge rather than a corner.
+  const detail =
+    reliefFeatureMm > 0 ? Math.ceil((2 * Math.PI * radiusMm) / (reliefFeatureMm / 2)) : 0;
+
+  const wanted = Math.max(round, detail, MIN_SEGMENTS);
+  const capped = Math.min(MAX_SEGMENTS, wanted);
+  return capped + ((4 - (capped % 4)) % 4);
 }
+
+/** Enough to read as round at all, whatever the arithmetic says. */
+const MIN_SEGMENTS = 32;
+
+/**
+ * The ceiling, and it is a real one.
+ *
+ * A ball here is one of several on a tray and there are two trays, so the count
+ * is paid for many times over. Past this, a mold stops being a file a phone can
+ * build and share.
+ */
+const MAX_SEGMENTS = 192;
 
 /**
  * A closed dome: flat side down, sunk into the floor by `weldMm`.

@@ -62,10 +62,10 @@ import { layDown, toolsFor } from "@/lib/material";
 import { consolidateWithin } from "@/lib/sketch";
 import { DEFAULT_TRACE, polylinesToStrokeLayer, skeletonize, tracePolylines } from "@/lib/vectorize";
 import { addCutLine, DEFAULT_CUT_LINE } from "@/lib/cutline";
-import { shareDataUrl, shareUri } from "@/lib/files";
+import { shareBytes, shareUri } from "@/lib/files";
 import { assessCoverup, compareCapture, inspectProduction, moldFromDesign, simulateHealing, trayFromDesign, wrapForSurface, type ProductionFinding } from "@/lib/productionTools";
 import { ballFor, type Substrate } from "@/lib/substrate";
-import { encodeStl, toBase64 } from "@/lib/stl";
+import { encodeStl } from "@/lib/stl";
 import { HEAL_AGES, type HealAge } from "@/lib/healing";
 import { MIN_LINE_GAP_MM, checkLineSpacing, pxPerMmFromDpi, spacingFinding } from "@/lib/spacing";
 import { PREF_KEYS, isFiniteNumber, preferences } from "@/lib/preferences";
@@ -1269,7 +1269,7 @@ export function DesignEditor({
     try {
       const bytes = encodeStl(half.mesh, `${project.title} mold ${which}`);
       const name = project.title.replace(/[^a-z0-9]+/gi, "-").toLowerCase() || "mold";
-      await shareDataUrl(`data:model/stl;base64,${toBase64(bytes)}`, `${name}-mold-${which}.stl`);
+      await shareBytes(bytes, `${name}-mold-${which}.stl`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't share the mold half.");
     } finally {
@@ -1283,7 +1283,7 @@ export function DesignEditor({
     try {
       const bytes = encodeStl(tray.mesh, `${project.title} casting tray`);
       const name = project.title.replace(/[^a-z0-9]+/gi, "-").toLowerCase() || "tray";
-      await shareDataUrl(`data:model/stl;base64,${toBase64(bytes)}`, `${name}-tray.stl`);
+      await shareBytes(bytes, `${name}-tray.stl`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't share the casting tray.");
     } finally {
