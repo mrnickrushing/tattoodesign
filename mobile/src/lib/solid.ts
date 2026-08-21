@@ -145,6 +145,17 @@ export function isSimplePolygon(points: Point[]): boolean {
 const MITER_LIMIT = 4;
 
 /**
+ * How many times the flare may give way at a vertex before the offset is
+ * abandoned. Each pass can only take fractions down, so this terminates; the
+ * cap is there because a shape can always be pathological enough to keep it
+ * shuffling, and a fillet is not worth an unbounded loop on a phone.
+ */
+const OFFSET_PASSES = 6;
+
+/** How much of its own length an edge has to keep pointing the way it came. */
+const EDGE_KEEP = 0.1;
+
+/**
  * Grows or shrinks a loop by moving every vertex along its own bisector.
  *
  * Positive grows the solid: the fill is on the right of travel everywhere in
@@ -162,7 +173,8 @@ export function offsetPolygon(points: Point[], distance: number): Point[] | null
   if (points.length < 3) return null;
   if (distance === 0) return points.slice();
 
-  const out: Point[] = [];
+  // Where each vertex would land at the full distance, as a vector from it.
+  const reach: Point[] = [];
   for (let i = 0; i < points.length; i++) {
     const previous = points[(i - 1 + points.length) % points.length];
     const vertex = points[i];
@@ -188,11 +200,69 @@ export function offsetPolygon(points: Point[], distance: number): Point[] | null
     const cosHalf = ux * n1.x + uy * n1.y;
     if (Math.abs(cosHalf) < 1e-9) return null;
 
-    const reach = distance / cosHalf;
+    const full = distance / cosHalf;
     const limit = Math.abs(distance) * MITER_LIMIT;
-    const clamped = Math.max(-limit, Math.min(limit, reach));
-    out.push({ x: vertex.x + ux * clamped, y: vertex.y + uy * clamped });
+    const clamped = Math.max(-limit, Math.min(limit, full));
+    reach.push({ x: ux * clamped, y: uy * clamped });
   }
+
+  // Each vertex takes what it can rather than the shape taking nothing.
+  //
+  // Inside a notch narrower than twice the distance, the two walls run past
+  // each other and the edges between them come out pointing backwards. That
+  // used to fail the whole offset — on real line art it is a few dozen edges in
+  // fourteen hundred, and the other ninety-six per cent were thrown away with
+  // them. So the vertices on a reversed edge give way, together, to the most
+  // they can both take, and everywhere else keeps the full distance.
+  //
+  // Giving way rather than closing the notch over is the deliberate choice. An
+  // offset that clipped itself would fill the gap between two arms of a
+  // snowflake with solid plastic, welding them together at the base — the same
+  // failure the tray already guards against between neighbouring shapes, and no
+  // more welcome for happening inside one shape.
+  //
+  // Only ever when the loop is *expanding*. Contracting is the opposite case:
+  // a 4mm square closed in by 3 from every side has no inside left, and a loop
+  // with no inside left has to be refused rather than talked down to a smaller
+  // one that was never there. Which of the two is happening is the sign of the
+  // distance against the sign of the winding, not the distance alone — a hole
+  // handed a positive distance is contracting, because that is what growing the
+  // solid around it means.
+  const expanding = distance * signedArea(points) > 0;
+  const fraction = new Array<number>(points.length).fill(1);
+  for (let pass = 0; expanding && pass < OFFSET_PASSES; pass++) {
+    let gaveWay = false;
+    for (let i = 0; i < points.length; i++) {
+      const next = (i + 1) % points.length;
+      const ex = points[next].x - points[i].x;
+      const ey = points[next].y - points[i].y;
+      const lengthSquared = ex * ex + ey * ey;
+
+      const ahead = ex * reach[next].x + ey * reach[next].y;
+      const behind = ex * reach[i].x + ey * reach[i].y;
+      if (lengthSquared + fraction[next] * ahead - fraction[i] * behind >= EDGE_KEEP * lengthSquared) continue;
+
+      // Scaled together, the edge keeps EDGE_KEEP of its length at exactly this
+      // fraction, so it is the most the pair of them can have.
+      const swing = behind - ahead;
+      const room = swing > 1e-12 ? ((1 - EDGE_KEEP) * lengthSquared) / swing : 0;
+      const share = Math.max(0, Math.min(fraction[i], fraction[next], room));
+      if (share < fraction[i]) {
+        fraction[i] = share;
+        gaveWay = true;
+      }
+      if (share < fraction[next]) {
+        fraction[next] = share;
+        gaveWay = true;
+      }
+    }
+    if (!gaveWay) break;
+  }
+
+  const out = points.map((vertex, i) => ({
+    x: vertex.x + reach[i].x * fraction[i],
+    y: vertex.y + reach[i].y * fraction[i],
+  }));
 
   // An offset that runs past the middle of the shape turns it inside out, and
   // does so quietly: a 4mm gap closed in by 3 from every side comes back as a
@@ -200,6 +270,9 @@ export function offsetPolygon(points: Point[], distance: number): Point[] | null
   // and no edge crossing anything. What gives it away is that the edge itself
   // now points the other way. Nothing downstream would notice — the mesh would
   // close, around the wrong ground.
+  //
+  // The giving-way above is an attempt at satisfying this, never a substitute
+  // for it: whatever the passes settle on still has to answer to the check.
   for (let i = 0; i < points.length; i++) {
     const next = (i + 1) % points.length;
     const was = { x: points[next].x - points[i].x, y: points[next].y - points[i].y };
@@ -452,17 +525,30 @@ export function triangulate(outer: Point[], holes: Point[][] = []): Point[] {
       const previous = loop[remaining[(i - 1 + remaining.length) % remaining.length]];
       const vertex = loop[remaining[i]];
       const next = loop[remaining[(i + 1) % remaining.length]];
-      const redundant =
-        samePoint(previous, vertex) ||
+      const duplicate = samePoint(previous, vertex);
+      const flat =
         Math.abs(cross2(vertex.x - previous.x, vertex.y - previous.y, next.x - vertex.x, next.y - vertex.y)) <
-          1e-9;
-      if (!redundant) continue;
+        1e-9;
+      if (!duplicate && !flat) continue;
+
+      // A vertex that is merely *flat* has to leave a triangle behind it.
+      //
+      // The caller raises walls on the loop it handed in, vertex by vertex, and
+      // pairs them against the edges of this cap. Dropping a flat vertex
+      // outright leaves the cap spanning `previous` straight to `next` while
+      // the wall still goes by way of `vertex` — a T-junction, three edges with
+      // nothing to pair against, and a solid that is open along a seam nobody
+      // drew. The sliver covers no area but carries those two edges, which is
+      // the whole reason to keep it. A *duplicate* needs no such care: its two
+      // real edges run opposite ways and cancel.
+      if (!duplicate) out.push(previous, vertex, next);
       remaining.splice(i, 1);
       tidied = true;
       break;
     }
     if (!tidied) break;
   }
+  if (remaining.length > 3) return [];
   if (remaining.length === 3) {
     out.push(loop[remaining[0]], loop[remaining[1]], loop[remaining[2]]);
   }
@@ -574,7 +660,17 @@ function extrudeBetween(bottom: Outline, top: Outline, bottomZ: number, topZ: nu
     }
   }
 
-  return { positions: Float32Array.from(positions), count: positions.length / 9 };
+  // Last word on the way out: a solid that does not close is worse than no
+  // solid at all.
+  //
+  // Everything above is careful, and careful has not been enough — a cap that
+  // quietly drops a vertex the walls still use leaves a seam that nothing
+  // downstream looks for, and the file reaches a printer as an open surface.
+  // The check that would have caught it already exists, so it runs here rather
+  // than only in the tests. Whatever this cannot vouch for, the caller gets
+  // nothing for, and can say so.
+  const mesh = { positions: Float32Array.from(positions), count: positions.length / 9 };
+  return inspectMesh(mesh).watertight ? mesh : EMPTY_MESH;
 }
 
 /**

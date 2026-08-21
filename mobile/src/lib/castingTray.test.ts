@@ -445,6 +445,22 @@ test("a shape with nowhere to flare is left square and said so", () => {
   }
 
   const tray = buildTray(vee, V, VH, { widthIn: 2.5, shapeMm: 7 })!;
+  // No *uniform* offset fits here — the notch narrows to nothing at the apex.
+  // The vertices in the notch give way to what they can take while the rest of
+  // the outline keeps its flare, so the shape is flared rather than abandoned.
+  assert.equal(tray.filletsSkipped, 0, "the flare gave way rather than giving up");
+  assert.ok(tray.filletAppliedMm > 0, `flared ${tray.filletAppliedMm}mm`);
+  assert.equal(inspectMesh(tray.mesh).watertight, true, "and the tray is still sound");
+
+  const demolding = tray.findings.find((finding) => finding.title === "Demolding")!;
+  assert.equal(demolding.level, "pass");
+});
+
+test("a shape with nowhere to flare is left square and said so", () => {
+  // Two bars a single mask pixel apart. Half of what is between them, less a
+  // nozzle, is under the 0.20mm this printer could lay down — so there is no
+  // flare to be had at any width, and the shapes stand square.
+  const tray = buildTray(twoShapes(1), W, H, { ...SPEC, nozzleMm: 0.4 })!;
   assert.ok(tray.filletsSkipped > 0, "the flare was refused rather than forced");
   assert.equal(tray.filletAppliedMm, 0);
   assert.equal(inspectMesh(tray.mesh).watertight, true, "and the tray is still sound");
@@ -635,4 +651,50 @@ test("relief can be turned off without turning the drawing into a lattice", () =
   // Still the filled silhouette, not the bare linework: those are different
   // questions, and fillOutlines is the one that answers this one.
   assert.equal(off.outlinesFilled, true);
+});
+
+/** A branched snowflake — the fine line art that ear clipping finds hardest. */
+function flakeMask(size: number): Uint8Array {
+  const mask = new Uint8Array(size * size);
+  const mid = size / 2;
+  const stamp = (x: number, y: number, r: number) => {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const px = Math.round(x + dx);
+        const py = Math.round(y + dy);
+        if (px >= 0 && px < size && py >= 0 && py < size && dx * dx + dy * dy <= r * r) mask[py * size + px] = 1;
+      }
+    }
+  };
+  for (let a = 0; a < 6; a++) {
+    const angle = (a * Math.PI) / 3;
+    for (let t = 0; t < mid * 0.8; t++) stamp(mid + Math.cos(angle) * t, mid + Math.sin(angle) * t, 2);
+    for (const along of [mid * 0.37, mid * 0.57]) {
+      for (let t = 0; t < mid * 0.19; t++) {
+        stamp(mid + Math.cos(angle) * along + Math.cos(angle + 1) * t, mid + Math.sin(angle) * along + Math.sin(angle + 1) * t, 1.5);
+        stamp(mid + Math.cos(angle) * along + Math.cos(angle - 1) * t, mid + Math.sin(angle) * along + Math.sin(angle - 1) * t, 1.5);
+      }
+    }
+  }
+  return mask;
+}
+
+test("every cavity on the tray closes, however many there are", () => {
+  // This is the one that was wrong in the file people printed. A tray of one
+  // cavity was sound and a tray of three was not, because the third copy stood
+  // where a corner of it rounded into looking flat, and the cap dropped a vertex
+  // the walls still used. Nothing in the app looked, and the STL went out open.
+  const size = 300;
+  const mask = flakeMask(size);
+  for (const copies of [1, 2, 3, 4, 6]) {
+    const tray = buildTray(mask, size, size, { widthIn: 2.5, shapeMm: 7, copies })!;
+    assert.ok(tray, `${copies} cavities builds`);
+    tray.parts.forEach((part, i) => {
+      const report = inspectMesh(part);
+      assert.equal(report.watertight, true, `${copies} cavities, part ${i}: unmatched ${report.unmatched}`);
+    });
+    assert.equal(inspectMesh(tray.mesh).watertight, true, `${copies} cavities, assembled`);
+    // And closed by building it right, not by leaving the hard parts out.
+    assert.equal(tray.shapesDropped, 0, `${copies} cavities dropped a shape`);
+  }
 });

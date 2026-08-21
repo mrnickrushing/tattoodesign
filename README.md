@@ -106,7 +106,8 @@ written as binary STL in millimetres (`stl.ts`). The tray is a walled box with
 the shapes standing proud of its floor (`castingTray.ts`), packed as many
 cavities to a pour as asked for, arranged as close to square as the bed wants,
 and flared where each shape meets the floor so the silicone gets a slope to
-peel off rather than a square notch to tear at. The drawing's own lines then
+peel off rather than a square notch to tear at — narrowing where a notch is too
+tight for it rather than giving up on the shape. The drawing's own lines then
 stand proud of the filled body, so the piece carries the picture instead of
 casting as a flat slab of its own silhouette — silicone poured in cures around
 it all, and *that* is the mold. Nothing printed ever touches food.

@@ -13,7 +13,7 @@ import {
   triangulate,
   EMPTY_MESH,
 } from "./solid";
-import { groupContours, signedArea, traceContours } from "./contour";
+import { fillEnclosed, groupContours, signedArea, traceContours } from "./contour";
 import type { Point } from "./designProject";
 
 function square(size: number, at = 0): Point[] {
@@ -456,4 +456,130 @@ test("a shape inside another's hole is as near to it as any neighbour", () => {
   const island = { outer: square(4, 13), holes: [] };
   // The hole runs 5..25; the island 13..17. Eight either side.
   assert.ok(Math.abs(outlineGap(ring, island) - 8) < 1e-9, `got ${outlineGap(ring, island)}`);
+});
+
+/**
+ * A branched snowflake, traced and simplified the way a tray does it.
+ *
+ * Fine line art is what breaks ear clipping: simplification leaves long runs of
+ * vertices that are only just not collinear, and whether "just not" reads as
+ * "flat" comes down to rounding.
+ */
+function flake(size: number): Uint8Array {
+  const mask = new Uint8Array(size * size);
+  const mid = size / 2;
+  const stamp = (x: number, y: number, r: number) => {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const px = Math.round(x + dx);
+        const py = Math.round(y + dy);
+        if (px >= 0 && px < size && py >= 0 && py < size && dx * dx + dy * dy <= r * r) mask[py * size + px] = 1;
+      }
+    }
+  };
+  for (let a = 0; a < 6; a++) {
+    const angle = (a * Math.PI) / 3;
+    for (let t = 0; t < mid * 0.8; t++) stamp(mid + Math.cos(angle) * t, mid + Math.sin(angle) * t, 2);
+    for (const along of [mid * 0.37, mid * 0.57]) {
+      for (let t = 0; t < mid * 0.19; t++) {
+        stamp(mid + Math.cos(angle) * along + Math.cos(angle + 1) * t, mid + Math.sin(angle) * along + Math.sin(angle + 1) * t, 1.5);
+        stamp(mid + Math.cos(angle) * along + Math.cos(angle - 1) * t, mid + Math.sin(angle) * along + Math.sin(angle - 1) * t, 1.5);
+      }
+    }
+  }
+  return mask;
+}
+
+/**
+ * The outline a tray would raise walls on: the same mapping castingTray uses.
+ *
+ * Faithful down to the margin, on purpose. Every term shifts the coordinates,
+ * and the whole point of this fixture is that it stands where the arithmetic
+ * rounds badly — drop the margin and it lands somewhere harmless instead.
+ */
+function placed(mask: Uint8Array, size: number, dx: number, dy: number): Point[] {
+  const mmPerPx = (2.5 * 25.4) / size;
+  const shape = groupContours(traceContours(fillEnclosed(mask, size, size), size, size, 0.1 / mmPerPx))[0];
+  let minX = Infinity;
+  let maxY = -Infinity;
+  for (const point of shape.outer.points) {
+    minX = Math.min(minX, point.x);
+    maxY = Math.max(maxY, point.y);
+  }
+  // The flip matters too. It reverses the loop, which changes which corners are
+  // convex and so the whole order ears come off in.
+  return shape.outer.points.map((point) => ({
+    x: (point.x - minX) * mmPerPx + dx + 8,
+    y: (maxY - point.y) * mmPerPx + dy + 8,
+  }));
+}
+
+const PLACEMENTS: [number, number][] = [
+  [0, 0],
+  [28.718, 50.662],
+  [57.435, 0],
+  [103.7, 88.13],
+];
+
+test("a simple polygon comes back as exactly two triangles fewer than its corners", () => {
+  // The count is the tell. A triangulation that quietly drops a vertex still
+  // covers the same area and still looks right; what it no longer does is meet
+  // the walls raised on that vertex.
+  //
+  // An invariant guard rather than the reproduction — the placement that
+  // actually rounded badly is the one castingTray computes, and it is pinned in
+  // "every cavity on the tray closes". This one holds the rule that broke.
+  const mask = flake(300);
+  for (const [dx, dy] of PLACEMENTS) {
+    const outer = placed(mask, 300, dx, dy);
+    assert.equal(
+      triangulate(outer, []).length / 3,
+      outer.length - 2,
+      `at (${dx}, ${dy}) with ${outer.length} corners`
+    );
+  }
+});
+
+test("a shape closes wherever it is put on the tray", () => {
+  // Ear clipping dropped a boundary vertex it read as flat while the walls
+  // beside it still went by way of that vertex: the cap spanned straight
+  // across, three edges had nothing to pair against, and the solid came out
+  // open along a seam — one cavity of a tray sound and the next not, from
+  // nothing but where they stood.
+  //
+  // Same standing as the test above: this holds the property, and the tray test
+  // holds the placement that broke it.
+  const mask = flake(300);
+  const volumes: number[] = [];
+  for (const [dx, dy] of PLACEMENTS) {
+    const outer = placed(mask, 300, dx, dy);
+    const mesh = extrudePrism(outer, [], 0, 2);
+    const report = inspectMesh(mesh);
+    assert.equal(
+      report.watertight,
+      true,
+      `at (${dx}, ${dy}): unmatched ${report.unmatched}, degenerate ${report.degenerate}`
+    );
+    volumes.push(meshVolume(mesh));
+  }
+  // And the same solid wherever it stands: moving a shape across the bed cannot
+  // change how much plastic it takes.
+  const spread = (Math.max(...volumes) - Math.min(...volumes)) / Math.max(...volumes);
+  assert.ok(spread < 1e-5, `volume drifted as it moved: ${volumes.map((v) => v.toFixed(4)).join(", ")}`);
+});
+
+test("an extrusion hands back nothing rather than something open", () => {
+  // Whatever it cannot vouch for, the caller gets none of — so a shape it
+  // cannot close leaves as an empty mesh the caller can count, never as a
+  // surface with a seam in it.
+  const square4 = square(4);
+  assert.ok(extrudePrism(square4, [], 0, 2).count > 0, "an honest shape still comes back");
+
+  // A loop that doubles back on itself has no inside to close over.
+  const pinched = [
+    { x: 0, y: 0 }, { x: 4, y: 4 }, { x: 8, y: 0 },
+    { x: 8, y: 8 }, { x: 4, y: 4 }, { x: 0, y: 8 },
+  ];
+  const mesh = extrudePrism(pinched, [], 0, 2);
+  assert.ok(mesh.count === 0 || inspectMesh(mesh).watertight, "open is not one of the options");
 });
