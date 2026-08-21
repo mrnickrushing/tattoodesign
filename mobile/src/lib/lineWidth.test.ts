@@ -28,6 +28,14 @@ test("an empty mask is uniformly far from everything", () => {
   assert.ok(dist.every((value) => value >= 4), "nothing to be near");
 });
 
+test("a one-pixel line measures one pixel, not two", () => {
+  // The transform counts steps to the nearest blank, so the centre of a
+  // hairline is already a step away from one. Doubling that alone reads every
+  // hairline as twice its width, which is the direction that fails to warn.
+  const mask = bars(60, 30, [{ y: 15, thickness: 1, from: 5, to: 55 }]);
+  assert.equal(finestStrokeWidth(mask, 60, 30), 1);
+});
+
 test("the finest line is measured, not the finest pixel", () => {
   // A 9px bar and a 3px bar. The answer is the thin one, in pixels, whatever
   // the resolution of the frame it sits in.
@@ -36,7 +44,7 @@ test("the finest line is measured, not the finest pixel", () => {
     { y: 40, thickness: 3, from: 10, to: 110 },
   ]);
   const finest = finestStrokeWidth(mask, 120, 60);
-  assert.ok(finest >= 2 && finest <= 4.5, `expected about 3px, got ${finest.toFixed(2)}`);
+  assert.ok(Math.abs(finest - 3) <= 1, `expected about 3px, got ${finest.toFixed(2)}`);
 });
 
 test("a heavy piece is not reported as fine just because it is big", () => {

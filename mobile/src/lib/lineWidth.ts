@@ -94,9 +94,15 @@ export function finestStrokeWidth(mask: Uint8Array, width: number, height: numbe
   const inward = distanceTransform(blank, width, height);
   const skeleton = skeletonize(mask, width, height);
 
+  // Twice the distance, less one. The transform counts whole steps to the
+  // nearest blank *pixel*, so the centre of a one-pixel line is already one
+  // step away and doubling alone would call it two pixels wide. Subtracting
+  // the step back off is exact on odd widths and a pixel conservative on even
+  // ones — the safe direction, since this drives a warning and reading a line
+  // as wider than it is means failing to raise one.
   const widths: number[] = [];
   for (let i = 0; i < skeleton.length; i++) {
-    if (skeleton[i]) widths.push(inward[i] * 2);
+    if (skeleton[i]) widths.push(Math.max(0, inward[i] * 2 - 1));
   }
   if (!widths.length) return 0;
 
