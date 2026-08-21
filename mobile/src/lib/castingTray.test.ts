@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { buildTray, packCavities } from "./castingTray";
 import { inspectMesh, meshVolume } from "./solid";
 import { encodeStl, stlByteLength } from "./stl";
+import { groupContours, traceContours } from "./contour";
 
 const W = 120;
 const H = 90;
@@ -697,4 +698,62 @@ test("every cavity on the tray closes, however many there are", () => {
     // And closed by building it right, not by leaving the hard parts out.
     assert.equal(tray.shapesDropped, 0, `${copies} cavities dropped a shape`);
   }
+});
+
+test("every solid the tray counts is a solid in the file", () => {
+  // Relief pieces leave by the same door as shapes when the extrusion will not
+  // vouch for them — and if they left quietly, the tray would still have grown
+  // taller to make room for them and still be saying the drawing was raised
+  // onto the face. So the count has to add up: floor, walls, a body per shape
+  // per cavity, and a relief solid per traced line per cavity.
+  //
+  // A guard on the accounting rather than a reproduction: no relief piece
+  // actually fails to close on this drawing, so it would have passed before the
+  // counting was there too. What it holds is the pairing — a file short of
+  // solids and a tray reporting none left out cannot both be true.
+  const mask = drawn(6);
+  const tray = buildTray(mask, W, H, { ...SPEC, filletMm: 0, copies: 3 })!;
+  assert.ok(tray.reliefAppliedMm > 0, "there is relief to account for");
+
+  const mmPerPx = (SPEC.widthIn * 25.4) / W;
+  const lines = groupContours(traceContours(mask, W, H, 0.1 / mmPerPx)).length;
+  const bodies = tray.shapes;
+  const expected = 2 + bodies + lines * tray.cavities;
+
+  assert.equal(tray.shapesDropped, 0, "nothing was left out");
+  assert.equal(
+    tray.parts.length,
+    expected,
+    `${tray.parts.length} solids in the file against ${expected} the tray says it made`
+  );
+});
+
+test("a warning about what has to stand up does not read as one about the raised lines", () => {
+  // A stroke between one bead and two is printable lying on a face and not
+  // printable standing 6mm off the floor. Both findings are true at once, and
+  // said carelessly they look like the app contradicting itself: "will not
+  // print" beside "the lines stand proud", over the same millimetre.
+  const size = 200;
+  const mask = new Uint8Array(size * size);
+  const box = (x0: number, y0: number, x1: number, y1: number) => {
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) mask[y * size + x] = 1;
+  };
+  // An outlined box, so filling changes something and there is relief to raise.
+  box(40, 40, 150, 43); box(40, 147, 150, 150);
+  box(40, 40, 43, 150); box(147, 40, 150, 150);
+  // Plus a stroke enclosing nothing, so the filled body keeps a thin part.
+  box(60, 165, 140, 168);
+
+  // 1.5in over 200px: a 3px stroke measures 0.57mm — over one 0.4mm bead, under
+  // the 0.8mm two nozzles a standing wall needs.
+  const tray = buildTray(mask, size, size, { widthIn: 1.5, shapeMm: 6, nozzleMm: 0.4 })!;
+  assert.ok(tray.reliefAppliedMm > 0, "the lines are raised");
+
+  const detail = tray.findings.find((finding) => finding.title === "Detail")!;
+  assert.equal(detail.level, "warn", "the standing part is still too thin to stand");
+  assert.match(detail.detail, /standing off the floor/, "and says that is what it measured");
+  assert.match(detail.detail, /raised lines are a separate question/, "and says the lines are not what it means");
+
+  const relief = tray.findings.find((finding) => finding.title === "Relief")!;
+  assert.equal(relief.level, "pass", "a bead-wide ridge on a face is fine");
 });

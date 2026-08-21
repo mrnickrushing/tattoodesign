@@ -465,7 +465,13 @@ export function buildTray(
         )
       )
     )
-    .filter((part) => part.count > 0);
+    .filter((part) => {
+      // The same door the shapes leave by. Without this the tray would grow
+      // taller to make room for lines it then quietly dropped, and go on saying
+      // the drawing had been raised onto the face.
+      if (!part.count) shapesDropped++;
+      return part.count > 0;
+    });
 
   // Everything standing between the floor and the silicone: the shapes, their
   // skirts, and the relief on top of them.
@@ -582,12 +588,23 @@ function inspectTray(
       ? {
           level: "pass",
           title: "Detail",
-          detail: `The finest detail is about ${finestMm.toFixed(2)}mm, over the ${minimumMm.toFixed(2)}mm a ${limits.nozzleMm}mm nozzle needs to lay down a standing wall.`,
+          detail: `The thinnest part standing off the floor is about ${finestMm.toFixed(2)}mm, over the ${minimumMm.toFixed(2)}mm a ${limits.nozzleMm}mm nozzle needs to lay down a standing wall.`,
         }
       : {
           level: "warn",
           title: "Detail",
-          detail: `The finest detail is about ${finestMm.toFixed(2)}mm, under the ${minimumMm.toFixed(2)}mm a ${limits.nozzleMm}mm nozzle can hold. It will not print — not badly, but not at all. Scale the piece up or take the fine lines out.`,
+          // Named as the *standing* part on purpose. A raised line is measured
+          // against one bead, a shape standing off the floor against two, and
+          // the two findings sit next to each other: without saying which is
+          // which, "will not print" and "the lines stand proud" read as the app
+          // contradicting itself over the same millimetre.
+          detail: `The thinnest part standing off the floor is about ${finestMm.toFixed(2)}mm, under the ${minimumMm.toFixed(2)}mm a ${limits.nozzleMm}mm nozzle needs for something ${limits.shapeMm.toFixed(
+            1
+          )}mm tall. It will not print — not badly, but not at all. Scale the piece up or take the fine lines out.${
+            limits.reliefAppliedMm > 0
+              ? " The raised lines are a separate question and are fine: they lie on the face rather than standing on the floor, so a single bead holds them."
+              : ""
+          }`,
         }
   );
 
@@ -663,8 +680,8 @@ function inspectTray(
     findings.push({
       level: "warn",
       title: "Left out",
-      detail: `${limits.shapesDropped} shape${
-        limits.shapesDropped === 1 ? " could" : "s could"
+      detail: `${limits.shapesDropped} part${
+        limits.shapesDropped === 1 ? " of the drawing could" : "s of the drawing could"
       } not be closed into a solid and ${
         limits.shapesDropped === 1 ? "was" : "were"
       } left out of the file rather than written open — an open surface is the one thing a slicer cannot make sense of. The rest of the tray is sound. Simplify that part of the drawing, or scale the piece up, and export again.`,
