@@ -16,7 +16,6 @@
 
 import { AlphaType, ColorType, ImageFormat, Skia } from "@shopify/react-native-skia";
 import { stripDataUrlPrefix } from "./files";
-import { makeStrokeLayer, type Point, type StrokeLayer } from "./designProject";
 import {
   bandMask,
   bandTones,
@@ -28,9 +27,12 @@ import {
   type BandStrategy,
   type SeparationPlan,
 } from "./tone";
-import { shadeRegion, type Mask } from "./shading";
+
+import { shadingLayersFrom, type ShadingResult } from "./toneLayers";
 
 export { defaultPlan, type SeparationPlan, type TonePass } from "./tone";
+export { scalePoints, shadingLayersFrom } from "./toneLayers";
+export type { ShadingResult } from "./toneLayers";
 
 /** Working resolution for the analysis. Geometry scales back up losslessly. */
 const MAX_DIMENSION = 900;
@@ -119,30 +121,10 @@ export function toneStudy(dataUrl: string, bands: number, strategy: BandStrategy
   };
 }
 
-/** What one band's marks became, for reporting back to the caller. */
-export type ShadingResult = {
-  layers: StrokeLayer[];
-  /** Marks laid down, per band that had a pass. */
-  marks: number;
-};
-
-function scalePoints(points: Point[], factor: number): Point[] {
-  return points.map((point) => ({
-    x: point.x * factor,
-    y: point.y * factor,
-    ...(typeof point.w === "number" ? { w: point.w * factor } : {}),
-  }));
-}
-
-const BAND_NAMES = ["Core black", "Shadow", "Mid tone", "Light", "Highlight", "Paper"];
-
 /**
  * One shading layer per band the plan asks for, darkest first.
  *
- * Bands are masked cumulatively — a mid-tone pass covers everything at least
- * that dark — because that is how ink accumulates on skin. A shadow that only
- * received the shadow pass would read lighter than the mid-tone beside it,
- * which is backwards.
+ * Decode here, decide in toneLayers.ts.
  */
 export function shadingLayers(
   dataUrl: string,
@@ -151,40 +133,5 @@ export function shadingLayers(
   canvasHeight: number
 ): ShadingResult {
   const { gray, width, height } = decodeGray(dataUrl);
-  const cuts = thresholds(gray, plan.bands, plan.strategy);
-  const banded = posterize(gray, cuts);
-  const toCanvas = canvasWidth / width;
-
-  const layers: StrokeLayer[] = [];
-  let marks = 0;
-
-  // Lightest first so the darkest band ends up on top of the layer stack,
-  // matching the order the marks would actually be laid down.
-  for (let band = plan.passes.length - 1; band >= 0; band--) {
-    const pass = plan.passes[band]?.shading;
-    if (!pass) continue;
-
-    const mask: Mask = { data: bandMask(banded, band, true), width, height };
-    const strokes = shadeRegion(mask, pass);
-    if (!strokes.length) continue;
-    marks += strokes.length;
-
-    const base = makeStrokeLayer(
-      canvasWidth,
-      canvasHeight,
-      `${BAND_NAMES[band] ?? `Band ${band + 1}`} · ${pass.style}`
-    );
-    layers.push({
-      ...base,
-      strokes: strokes.map((stroke) => ({
-        points: scalePoints(stroke.points, toCanvas),
-        width: Math.max(0.5, stroke.width * toCanvas),
-        color: "#111111",
-        mode: "draw" as const,
-        opacity: 1,
-      })),
-    });
-  }
-
-  return { layers, marks };
+  return shadingLayersFrom(gray, width, height, plan, canvasWidth, canvasHeight);
 }

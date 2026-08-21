@@ -7,225 +7,34 @@
 import { Skia, ColorType, AlphaType, ImageFormat } from "@shopify/react-native-skia";
 import { DEFAULT_CENTERLINE, centerlineStencil, classifySource, inkMask } from "./lineart";
 import { structuralEdges, thresholdsFrom } from "./edges";
+import { stripDataUrlPrefix } from "./files";
 import { skeletonize } from "./vectorize";
+import {
+  boxBlur,
+  buildMask,
+  dilate,
+  isPlainSubject,
+  sobelMagnitude,
+  suppressBackground,
+  toGrayscale,
+  DEFAULT_STENCIL_OPTIONS,
+} from "./stencilPixels";
+import type { StencilMask, StencilOptions } from "./stencilPixels";
 
-export type StencilOptions = {
-  /** Longest side the source image is downscaled to before processing. */
-  maxDimension?: number;
-  /** Gradient magnitude (0-255) above which a pixel becomes a line. Lower = more lines. */
-  threshold?: number;
-  /** Radius (px) used to thicken detected lines. 0 = hairline. */
-  lineWeight?: number;
-  /** Box-blur radius applied before edge detection to suppress noise. */
-  denoise?: number;
-  /** Invert to white-on-black instead of the default black-on-white. */
-  invert?: boolean;
-  /** Rendering strategy. Each mode is tuned for a different transfer style. */
-  mode?: StencilMode;
-  /** Suppress a flat background sampled from the image corners before tracing. */
-  isolateBackground?: boolean;
-  /**
-   * Pick the pipeline from what the source actually is.
-   *
-   * Edge detection is right for a photograph and wrong for a drawing: a
-   * drawing's strokes have two edges each, so every line comes back doubled.
-   * When this is on, an image that is already line art takes the centreline
-   * path instead. See lib/lineart.ts.
-   */
-  autoDetectSource?: boolean;
-};
-
-export type StencilMode = "outline" | "fine" | "photocopy" | "halftone" | "crosshatch" | "centerline";
-
-export const DEFAULT_STENCIL_OPTIONS: Required<StencilOptions> = {
-  maxDimension: 1200,
-  threshold: 60,
-  lineWeight: 1,
-  denoise: 1,
-  invert: false,
-  mode: "outline",
-  isolateBackground: false,
-  autoDetectSource: true,
-};
-
-function stripDataUrlPrefix(dataUrl: string): string {
-  const idx = dataUrl.indexOf(",");
-  return idx >= 0 && dataUrl.slice(0, idx).includes("base64") ? dataUrl.slice(idx + 1) : dataUrl;
-}
-
-function toGrayscale(pixels: Uint8Array): Float32Array {
-  const out = new Float32Array(pixels.length / 4);
-  for (let i = 0, j = 0; i < pixels.length; i += 4, j++) {
-    out[j] = pixels[i] * 0.299 + pixels[i + 1] * 0.587 + pixels[i + 2] * 0.114;
-  }
-  return out;
-}
-
-function suppressBackground(pixels: Uint8Array, width: number, height: number): Uint8Array {
-  const out = new Uint8Array(pixels);
-  const sample = (x: number, y: number) => {
-    const i = (y * width + x) * 4;
-    return [pixels[i], pixels[i + 1], pixels[i + 2]] as const;
-  };
-  const corners = [sample(0, 0), sample(width - 1, 0), sample(0, height - 1), sample(width - 1, height - 1)];
-  const bg = [0, 1, 2].map((channel) => corners.reduce((sum, color) => sum + color[channel], 0) / corners.length);
-  // A deliberately conservative cutoff: this removes paper/wall fields while
-  // preserving skin texture and pale artwork that aggressive segmentation loses.
-  const tolerance = 42;
-  for (let i = 0; i < out.length; i += 4) {
-    const distance = Math.sqrt(
-      (out[i] - bg[0]) ** 2 + (out[i + 1] - bg[1]) ** 2 + (out[i + 2] - bg[2]) ** 2
-    );
-    if (distance < tolerance) out[i] = out[i + 1] = out[i + 2] = 255;
-  }
-  return out;
-}
-
-function boxBlur(
-  src: Float32Array,
-  width: number,
-  height: number,
-  radius: number
-): Float32Array {
-  if (radius <= 0) return src;
-  const out = new Float32Array(src.length);
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      let sum = 0;
-      let count = 0;
-      for (let dy = -radius; dy <= radius; dy++) {
-        const yy = y + dy;
-        if (yy < 0 || yy >= height) continue;
-        for (let dx = -radius; dx <= radius; dx++) {
-          const xx = x + dx;
-          if (xx < 0 || xx >= width) continue;
-          sum += src[yy * width + xx];
-          count++;
-        }
-      }
-      out[y * width + x] = sum / count;
-    }
-  }
-  return out;
-}
-
-const SOBEL_X = [-1, 0, 1, -2, 0, 2, -1, 0, 1];
-const SOBEL_Y = [-1, -2, -1, 0, 0, 0, 1, 2, 1];
-
-function sobelMagnitude(
-  gray: Float32Array,
-  width: number,
-  height: number
-): Float32Array {
-  const out = new Float32Array(width * height);
-  let max = 1;
-  for (let y = 1; y < height - 1; y++) {
-    for (let x = 1; x < width - 1; x++) {
-      let gx = 0;
-      let gy = 0;
-      let k = 0;
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          const v = gray[(y + dy) * width + (x + dx)];
-          gx += v * SOBEL_X[k];
-          gy += v * SOBEL_Y[k];
-          k++;
-        }
-      }
-      const mag = Math.sqrt(gx * gx + gy * gy);
-      out[y * width + x] = mag;
-      if (mag > max) max = mag;
-    }
-  }
-  for (let i = 0; i < out.length; i++) out[i] = (out[i] / max) * 255;
-  return out;
-}
-
-function dilate(
-  mask: Uint8Array,
-  width: number,
-  height: number,
-  radius: number
-): Uint8Array {
-  if (radius <= 0) return mask;
-  const out = new Uint8Array(mask.length);
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      let on = false;
-      for (let dy = -radius; dy <= radius && !on; dy++) {
-        const yy = y + dy;
-        if (yy < 0 || yy >= height) continue;
-        for (let dx = -radius; dx <= radius; dx++) {
-          const xx = x + dx;
-          if (xx < 0 || xx >= width) continue;
-          if (mask[yy * width + xx]) {
-            on = true;
-            break;
-          }
-        }
-      }
-      out[y * width + x] = on ? 1 : 0;
-    }
-  }
-  return out;
-}
-
-function buildMask(
-  mode: StencilMode,
-  gray: Float32Array,
-  magnitude: Float32Array,
-  width: number,
-  height: number,
-  threshold: number
-): Uint8Array {
-  const mask = new Uint8Array(width * height);
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const i = y * width + x;
-      const tone = gray[i];
-      if (mode === "photocopy") {
-        mask[i] = tone < Math.min(245, threshold + 95) ? 1 : 0;
-      } else if (mode === "halftone") {
-        const cell = 7;
-        const radius = Math.max(0, Math.round(((255 - tone) / 255) * 3));
-        const dx = (x % cell) - Math.floor(cell / 2);
-        const dy = (y % cell) - Math.floor(cell / 2);
-        mask[i] = radius > 0 && dx * dx + dy * dy <= radius * radius ? 1 : 0;
-      } else if (mode === "crosshatch") {
-        const darkness = 255 - tone;
-        const hatch = (x + y) % 9 === 0 || (darkness > 95 && (x - y + height) % 11 === 0) || (darkness > 165 && y % 7 === 0);
-        mask[i] = darkness > 45 && hatch ? 1 : 0;
-      } else {
-        const cutoff = mode === "fine" ? threshold * 1.18 : threshold;
-        mask[i] = magnitude[i] > cutoff ? 1 : 0;
-      }
-    }
-  }
-  return mask;
-}
-
-/**
- * Whether the picture is a subject on a plain field or rendered edge to edge.
- *
- * A photo of a rose on a wall has large flat areas; a fully shaded
- * illustration has texture everywhere. The second needs a much longer run
- * before a fragment is believed to be a line, or its shading arrives as dirt.
- */
-function isPlainSubject(gray: Uint8Array): boolean {
-  if (!gray.length) return true;
-  let flatRuns = 0;
-  for (let i = 1; i < gray.length; i++) {
-    if (Math.abs(gray[i] - gray[i - 1]) <= 2) flatRuns++;
-  }
-  return flatRuns / gray.length > 0.7;
-}
-
-export type StencilMask = {
-  /** One byte per pixel: 1 where a line was detected, 0 elsewhere. */
-  mask: Uint8Array;
-  width: number;
-  height: number;
-};
+// The arithmetic lives in stencilPixels.ts, where it can be tested; this file
+// is the half that has to talk to Skia. Re-exported so nothing that already
+// imports from here has to care which side of the line a name sits on.
+export {
+  DEFAULT_STENCIL_OPTIONS,
+  boxBlur,
+  buildMask,
+  dilate,
+  isPlainSubject,
+  sobelMagnitude,
+  suppressBackground,
+  toGrayscale,
+} from "./stencilPixels";
+export type { StencilMask, StencilMode, StencilOptions } from "./stencilPixels";
 
 /**
  * Runs the photo -> stencil pipeline and stops at the binary mask, before it
