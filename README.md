@@ -103,8 +103,10 @@ piece — placement, size, coverage and session date — that opens with no sign
 A drawing becomes a printable casting tray: closed boundaries traced from the
 artwork (`contour.ts`), extruded into a watertight mesh (`solid.ts`), and
 written as binary STL in millimetres (`stl.ts`). The tray is a walled box with
-the shapes standing proud of its floor (`castingTray.ts`) — silicone poured in
-cures around them, and *that* is the mold. Nothing printed ever touches food.
+the shapes standing proud of its floor (`castingTray.ts`), packed as many
+cavities to a pour as asked for and arranged as close to square as the bed
+wants — silicone poured in cures around them, and *that* is the mold. Nothing
+printed ever touches food.
 Before it exports it says what will go wrong: detail under two nozzle widths
 does not print badly, it does not print at all.
 
@@ -123,7 +125,7 @@ semantic icon set mapped to SF Symbols with an Ionicons fallback
 (`icons.ts`).
 
 Most of this lives under `mobile/src/lib/*.ts` as pure, unit-tested
-functions — 678 tests as of this writing (`npm test` in `mobile/`) — with
+functions — 690 tests as of this writing (`npm test` in `mobile/`) — with
 UI wired on top in `mobile/src/app/[brand]/*.tsx` and
 `mobile/src/components/`.
 

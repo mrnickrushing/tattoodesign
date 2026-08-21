@@ -86,6 +86,8 @@ export const PREF_KEYS = {
   pen: "editor.pen",
   placementWidthIn: "placement.widthIn",
   hourlyRate: "quote.hourlyRate",
+  nozzleMm: "printer.nozzleMm",
+  bedMm: "printer.bedMm",
 } as const;
 
 export function isFiniteNumber(value: unknown): value is number {

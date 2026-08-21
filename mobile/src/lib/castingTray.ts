@@ -39,6 +39,15 @@ export type TraySpec = {
   /** Print bed, for warning before rather than after. */
   bedMm?: number;
   /**
+   * How many cavities the tray should hold. One pour, this many pieces.
+   */
+  copies?: number;
+  /**
+   * Silicone left between neighbouring cavities. Too thin and the wall
+   * between two pieces tears when the mold is peeled off them.
+   */
+  webbingMm?: number;
+  /**
    * Whether an outline should stand up as the shape it outlines. On by
    * default, because line art is usually a silhouette. Off when the marks
    * themselves are the object — a lattice, a monogram cut right through.
@@ -52,7 +61,78 @@ const DEFAULTS = {
   marginMm: 8,
   nozzleMm: 0.4,
   bedMm: 220,
+  copies: 1,
+  webbingMm: 6,
 };
+
+export type CavityGrid = {
+  columns: number;
+  rows: number;
+  /** Top-left of each cavity, relative to the block of them. */
+  positions: { x: number; y: number }[];
+  /** Extent of the whole block, before the tray's own margin. */
+  widthMm: number;
+  depthMm: number;
+};
+
+/**
+ * Arranges `count` cavities of one size into the tidiest block.
+ *
+ * The sheet builder's packers in layout.ts answer the opposite question —
+ * they fit cells into a page whose size is already decided, shrinking the
+ * cells until they go. Here the cavities are a fixed size, because they are the
+ * size of the cookie, and it is the tray that has to grow to fit them.
+ *
+ * Column counts are all tried and scored on the *longest* side of the result:
+ * a print bed is square and its limit is whichever way the tray is widest, so
+ * the arrangement closest to square is the one most likely to fit. Ties go to
+ * the smaller total footprint, which is less plastic and less silicone.
+ */
+export function packCavities(
+  count: number,
+  unitWidthMm: number,
+  unitDepthMm: number,
+  webbingMm: number
+): CavityGrid {
+  const wanted = Math.max(1, Math.floor(count));
+  const gap = Math.max(0, webbingMm);
+  const empty: CavityGrid = { columns: 0, rows: 0, positions: [], widthMm: 0, depthMm: 0 };
+  if (!(unitWidthMm > 0) || !(unitDepthMm > 0)) return empty;
+
+  let best: { columns: number; rows: number; widthMm: number; depthMm: number } | null = null;
+  for (let columns = 1; columns <= wanted; columns++) {
+    const rows = Math.ceil(wanted / columns);
+    const widthMm = columns * unitWidthMm + (columns - 1) * gap;
+    const depthMm = rows * unitDepthMm + (rows - 1) * gap;
+    if (!best) {
+      best = { columns, rows, widthMm, depthMm };
+      continue;
+    }
+    const longest = Math.max(widthMm, depthMm);
+    const bestLongest = Math.max(best.widthMm, best.depthMm);
+    const better =
+      longest < bestLongest ||
+      (longest === bestLongest && widthMm * depthMm < best.widthMm * best.depthMm);
+    if (better) best = { columns, rows, widthMm, depthMm };
+  }
+  if (!best) return empty;
+
+  const { columns, rows, widthMm, depthMm } = best;
+  const positions: { x: number; y: number }[] = [];
+  for (let i = 0; i < wanted; i++) {
+    const row = Math.floor(i / columns);
+    const column = i % columns;
+    // A last row that is not full is centred on its own, so the odd one out
+    // does not sit against one wall with all the silicone on the other side.
+    const inRow = Math.min(columns, wanted - row * columns);
+    const rowWidth = inRow * unitWidthMm + (inRow - 1) * gap;
+    positions.push({
+      x: (widthMm - rowWidth) / 2 + column * (unitWidthMm + gap),
+      y: row * (unitDepthMm + gap),
+    });
+  }
+  return { columns, rows, positions, widthMm, depthMm };
+}
 
 /**
  * How far the parts of the tray sink into each other.
@@ -80,8 +160,12 @@ export type Tray = {
   plasticCm3: number;
   /** Silicone to fill it, in millilitres. The expensive half. */
   siliconeMl: number;
-  /** Shapes standing on the floor. */
+  /** Shapes standing on the floor, across every cavity. */
   shapes: number;
+  /** Cavities on the tray, and how they were arranged. */
+  cavities: number;
+  columns: number;
+  rows: number;
   /**
    * Whether filling enclosed regions actually changed the shape.
    *
@@ -120,6 +204,8 @@ export function buildTray(
   const marginMm = spec.marginMm ?? DEFAULTS.marginMm;
   const nozzleMm = spec.nozzleMm ?? DEFAULTS.nozzleMm;
   const bedMm = spec.bedMm ?? DEFAULTS.bedMm;
+  const copies = Math.max(1, Math.floor(spec.copies ?? DEFAULTS.copies));
+  const webbingMm = Math.max(0, spec.webbingMm ?? DEFAULTS.webbingMm);
 
   if (maskWidth <= 0 || maskHeight <= 0 || mask.length < maskWidth * maskHeight) return null;
   if (!(spec.widthIn > 0) || !(spec.shapeMm > 0)) return null;
@@ -156,13 +242,21 @@ export function buildTray(
   // Image y runs down the screen and a printed tray is looked at from above, so
   // the artwork is flipped on the way into millimetres. Without it every design
   // comes out of the mold upside down, and lettering comes out unreadable.
-  const toMm = (point: Point): Point => ({
-    x: (point.x - minX) * mmPerPx + marginMm,
-    y: (maxY - point.y) * mmPerPx + marginMm,
+  //
+  // Into cavity-local millimetres: the artwork's own corner becomes the origin,
+  // and each copy of it is then offset to where the packer put that cavity.
+  const toMm = (point: Point, at: { x: number; y: number }): Point => ({
+    x: (point.x - minX) * mmPerPx + at.x + marginMm,
+    y: (maxY - point.y) * mmPerPx + at.y + marginMm,
   });
 
-  const widthMm = (maxX - minX) * mmPerPx + marginMm * 2;
-  const depthMm = (maxY - minY) * mmPerPx + marginMm * 2;
+  const unitWidthMm = (maxX - minX) * mmPerPx;
+  const unitDepthMm = (maxY - minY) * mmPerPx;
+  const grid = packCavities(copies, unitWidthMm, unitDepthMm, webbingMm);
+  if (!grid.positions.length) return null;
+
+  const widthMm = grid.widthMm + marginMm * 2;
+  const depthMm = grid.depthMm + marginMm * 2;
   const heightMm = floorMm + spec.shapeMm + coverMm;
 
   const floor = extrudePrism(rectangle(0, 0, widthMm, depthMm), [], 0, floorMm);
@@ -173,12 +267,16 @@ export function buildTray(
     heightMm
   );
 
-  const positives = shapes.map((shape) =>
-    extrudePrism(
-      shape.outer.points.map(toMm),
-      shape.holes.map((hole) => hole.points.map(toMm)),
-      floorMm - WELD_MM,
-      floorMm + spec.shapeMm
+  // One solid per shape per cavity: six cookies from one design is six
+  // separate closed solids, not one shape repeated by the slicer.
+  const positives = grid.positions.flatMap((at) =>
+    shapes.map((shape) =>
+      extrudePrism(
+        shape.outer.points.map((point) => toMm(point, at)),
+        shape.holes.map((hole) => hole.points.map((point) => toMm(point, at))),
+        floorMm - WELD_MM,
+        floorMm + spec.shapeMm
+      )
     )
   );
 
@@ -200,15 +298,41 @@ export function buildTray(
     plasticCm3: Math.max(0, plasticMm3) / 1000,
     siliconeMl: Math.max(0, cavityMm3) / 1000,
     shapes: positives.length,
+    cavities: grid.positions.length,
+    columns: grid.columns,
+    rows: grid.rows,
     outlinesFilled,
     findings: inspectTray(shape, maskWidth, maskHeight, mmPerPx, {
       widthMm,
       depthMm,
-      heightMm,
       nozzleMm,
       bedMm,
+      copies,
+      unitWidthMm,
+      unitDepthMm,
+      webbingMm,
+      marginMm,
     }),
   };
+}
+
+/** The largest number of cavities that still fits the bed, asked of the packer. */
+function describeFit(limits: {
+  bedMm: number;
+  copies: number;
+  unitWidthMm: number;
+  unitDepthMm: number;
+  webbingMm: number;
+  marginMm: number;
+}): string {
+  const room = limits.bedMm - limits.marginMm * 2;
+  for (let count = limits.copies - 1; count >= 1; count--) {
+    const grid = packCavities(count, limits.unitWidthMm, limits.unitDepthMm, limits.webbingMm);
+    if (grid.widthMm <= room && grid.depthMm <= room) {
+      return `${count} would — print ${Math.ceil(limits.copies / count)} trays, or make the piece smaller.`;
+    }
+  }
+  return "Not even one fits at this size. Make the piece smaller.";
 }
 
 /**
@@ -223,7 +347,17 @@ function inspectTray(
   maskWidth: number,
   maskHeight: number,
   mmPerPx: number,
-  limits: { widthMm: number; depthMm: number; heightMm: number; nozzleMm: number; bedMm: number }
+  limits: {
+    widthMm: number;
+    depthMm: number;
+    nozzleMm: number;
+    bedMm: number;
+    copies: number;
+    unitWidthMm: number;
+    unitDepthMm: number;
+    webbingMm: number;
+    marginMm: number;
+  }
 ): ProductionFinding[] {
   const findings: ProductionFinding[] = [];
 
@@ -249,12 +383,17 @@ function inspectTray(
       ? {
           level: "pass",
           title: "Bed",
-          detail: `${limits.widthMm.toFixed(0)} x ${limits.depthMm.toFixed(0)}mm, inside a ${limits.bedMm}mm bed.`,
+          detail: `${limits.widthMm.toFixed(0)} x ${limits.depthMm.toFixed(0)}mm, inside a ${limits.bedMm}mm bed${
+            limits.copies > 1 ? ` — ${limits.copies} cavities` : ""
+          }.`,
         }
       : {
           level: "warn",
           title: "Bed",
-          detail: `${limits.widthMm.toFixed(0)} x ${limits.depthMm.toFixed(0)}mm will not fit a ${limits.bedMm}mm bed. Print the shapes across two trays, or make them smaller.`,
+          // Saying how many *would* fit turns a dead end into a decision. The
+          // answer is not the ratio of the areas: the packer rearranges the
+          // grid at every count, so the only way to know is to ask it.
+          detail: `${limits.widthMm.toFixed(0)} x ${limits.depthMm.toFixed(0)}mm will not fit a ${limits.bedMm}mm bed. ${describeFit(limits)}`,
         }
   );
 

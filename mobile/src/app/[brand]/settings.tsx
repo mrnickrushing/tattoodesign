@@ -94,6 +94,8 @@ export default function SettingsScreen() {
   const [backupBusy, setBackupBusy] = useState(false);
   const [prefCount, setPrefCount] = useState(0);
   const [hourlyRate, setHourlyRate] = useState("");
+  const [nozzle, setNozzle] = useState("");
+  const [bed, setBed] = useState("");
 
   useEffect(() => {
     Promise.all([getSpendLimit(), getGenerationUsage()]).then(([savedLimit, usage]) => {
@@ -104,7 +106,16 @@ export default function SettingsScreen() {
     preferences
       .get<number>(brand.id, PREF_KEYS.hourlyRate, 0)
       .then((saved) => setHourlyRate(saved > 0 ? String(saved) : ""));
+    preferences.get<number>(brand.id, PREF_KEYS.nozzleMm, 0).then((saved) => setNozzle(saved > 0 ? String(saved) : ""));
+    preferences.get<number>(brand.id, PREF_KEYS.bedMm, 0).then((saved) => setBed(saved > 0 ? String(saved) : ""));
   }, [brand.id]);
+
+  /** Saves a typed number, or clears it back to the default when it is not one. */
+  function saveNumber(key: string, text: string, apply: (value: string) => void) {
+    apply(text);
+    const parsed = Number.parseFloat(text);
+    void preferences.set(brand.id, key, Number.isFinite(parsed) && parsed > 0 ? parsed : 0);
+  }
 
   function saveHourlyRate(text: string) {
     setHourlyRate(text);
@@ -115,7 +126,7 @@ export default function SettingsScreen() {
   function resetSessionDefaults() {
     Alert.alert(
       "Reset session defaults?",
-      "Trace settings, brush, and placement width go back to factory values for this studio.",
+      "Trace settings, brush, placement width, your rate and printer go back to factory values for this studio.",
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -124,6 +135,14 @@ export default function SettingsScreen() {
           onPress: async () => {
             await preferences.clear(brand.id);
             setPrefCount(0);
+            // The fields on this screen have to go back with them. Their
+            // loading effect only reruns when the studio changes, so leaving
+            // them alone shows a 0.8mm nozzle over a preference that is now
+            // 0.4mm — and the preflight guardrail quietly measures against a
+            // number nobody can see.
+            setHourlyRate("");
+            setNozzle("");
+            setBed("");
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           },
         },
@@ -402,11 +421,53 @@ export default function SettingsScreen() {
 
       <View style={{ height: SPACE.lg }} />
 
+      {brand.id === "sugar" && (
+        <>
+          <SectionLabel>Your 3D printer</SectionLabel>
+          <Card>
+            <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 13, lineHeight: 18 }}>
+              Casting trays are checked against these before they export. Detail finer than two
+              nozzle widths does not print badly — it does not print at all — so a wrong nozzle
+              here is a wasted print. Blank uses 0.4mm and a 220mm bed, which is what most
+              machines are.
+            </Text>
+            <View style={styles.syncRow}>
+              <TextInput
+                value={nozzle}
+                onChangeText={(text) => saveNumber(PREF_KEYS.nozzleMm, text, setNozzle)}
+                placeholder="Nozzle (mm)"
+                placeholderTextColor={theme.muted}
+                keyboardType="decimal-pad"
+                accessibilityLabel="Printer nozzle size in millimetres"
+                style={[
+                  styles.input,
+                  { flex: 1, color: theme.foreground, borderColor: theme.line, backgroundColor: theme.surfaceAlt, fontFamily: theme.fontBody },
+                ]}
+              />
+              <TextInput
+                value={bed}
+                onChangeText={(text) => saveNumber(PREF_KEYS.bedMm, text, setBed)}
+                placeholder="Bed (mm)"
+                placeholderTextColor={theme.muted}
+                keyboardType="number-pad"
+                accessibilityLabel="Printer bed size in millimetres"
+                style={[
+                  styles.input,
+                  { flex: 1, color: theme.foreground, borderColor: theme.line, backgroundColor: theme.surfaceAlt, fontFamily: theme.fontBody },
+                ]}
+              />
+            </View>
+          </Card>
+
+          <View style={{ height: SPACE.lg }} />
+        </>
+      )}
+
       <SectionLabel>Session defaults</SectionLabel>
       <Card>
         <Text style={{ color: theme.foreground, fontFamily: theme.fontBody, fontSize: 13, lineHeight: 18 }}>
           {prefCount
-            ? `${prefCount} remembered setting${prefCount === 1 ? "" : "s"} for ${brand.name} — trace options, brush, placement width.`
+            ? `${prefCount} remembered setting${prefCount === 1 ? "" : "s"} for ${brand.name} — trace options, brush, placement width, and anything set above.`
             : `Nothing remembered yet — trace options, brush, and placement width save automatically as you work.`}
         </Text>
         {prefCount > 0 && (

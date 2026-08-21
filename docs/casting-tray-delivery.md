@@ -1,6 +1,6 @@
 # Casting trays — design to 3D printer
 
-## Status — spine complete, tray is single-layer
+## Status — spine complete, trays hold many cavities
 
 Allison's side of the app makes images; what she needs from them is a mold. The
 workflow is: 3D print a tray, pour silicone into it, and the cured silicone is
@@ -30,7 +30,12 @@ that becomes an object.
   a closed surface, plus `meshVolume` and `inspectMesh` as the checks that
   matter.
 - **`stl.ts`** — binary STL, in millimetres.
-- **`castingTray.ts`** — floor, walls, positives, and the findings.
+- **`castingTray.ts`** — floor, walls, positives, and the findings. `packCavities`
+  arranges N copies of the design into the block closest to square, because a
+  print bed is square and its limit is whichever way the tray ends up widest.
+  The sheet builder's packers in `layout.ts` answer the opposite question —
+  they shrink cells to fit a page whose size is decided — so this is its own
+  function rather than a reuse.
 - **`lineWidth.ts`** — how fine the finest line actually is, shared with the
   skin-tone warning that needed the same measurement.
 
@@ -49,9 +54,6 @@ masks built and weighed — is the gate that matters.
 
 ## What is not built
 
-- **Multi-cavity packing.** Shapes are laid out where the artwork put them.
-  A real tray wants them packed with silicone webbing between — `fillGrid` in
-  `layout.ts` already answers the identical question for cookies on a sheet.
 - **Fillets at the base of each positive.** A sharp interior corner is where
   silicone tears first on demolding.
 - **Relief detail.** Interior linework raised on the top face, rather than the
@@ -59,15 +61,28 @@ masks built and weighed — is the gate that matters.
 - **Two-part molds.** Cake pops and truffles are spheres; `substrate.ts` knows
   their real sizes. A sphere needs two halves with registration keys, which is
   a different solid entirely.
-- **Nozzle as a setting.** Defaults to 0.4mm and is a parameter; nothing in the
-  UI sets it yet, pending knowing what printer she runs.
+- **Fillets.** See above — the one physical concern still unaddressed.
 
 ## Verified
 
-`npm test` (678), `tsc --noEmit`, `expo lint`, and `expo export --platform ios`
-clean. A three-inch snowflake exports as a 76 × 69 × 13mm tray, 5092 triangles,
-249KB, watertight, ~25cm³ of filament and ~43ml of silicone. The same design at
-two inches correctly refuses: its arms come out 0.63mm, under the 0.8mm a
+`npm test` (690), `tsc --noEmit`, `expo lint`, and `expo export --platform ios`
+clean.
+
+A 2.5-inch snowflake, 7mm thick:
+
+| Cavities | Grid | Tray | Filament | Silicone |
+|---|---|---|---|---|
+| 1 | 1 × 1 | 66 × 61 × 13mm | 20cm³ | 31ml |
+| 6 | 2 × 3 | 121 × 162 × 13mm | 76cm³ | 179ml |
+| 12 | 3 × 4 | 177 × 212 × 13mm | 133cm³ | 355ml |
+
+All watertight; twelve just fits a 220mm bed. Asking for more than fits reports
+how many *would*, and that number is checked against the packer rather than
+estimated from the ratio of the areas — the grid rearranges at every count, so
+the ratio is wrong.
+
+A three-inch snowflake passes the detail check at 0.95mm; the same design at
+two inches correctly refuses, its arms coming out 0.63mm against the 0.8mm a
 0.4mm nozzle can lay down.
 
 Untested by machine: the export button itself, which needs a device and a
