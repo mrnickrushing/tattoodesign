@@ -49,7 +49,8 @@ type Segment = {
   arc: number;
 };
 
-function distanceToSegment(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+/** Shortest distance from a point to a line segment. */
+export function distanceToSegment(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
   const dx = bx - ax;
   const dy = by - ay;
   const lengthSquared = dx * dx + dy * dy;
