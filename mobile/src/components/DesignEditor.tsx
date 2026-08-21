@@ -63,7 +63,8 @@ import { consolidateWithin } from "@/lib/sketch";
 import { DEFAULT_TRACE, polylinesToStrokeLayer, skeletonize, tracePolylines } from "@/lib/vectorize";
 import { addCutLine, DEFAULT_CUT_LINE } from "@/lib/cutline";
 import { shareDataUrl, shareUri } from "@/lib/files";
-import { assessCoverup, compareCapture, inspectProduction, simulateHealing, trayFromDesign, wrapForSurface, type ProductionFinding } from "@/lib/productionTools";
+import { assessCoverup, compareCapture, inspectProduction, moldFromDesign, simulateHealing, trayFromDesign, wrapForSurface, type ProductionFinding } from "@/lib/productionTools";
+import { ballFor, type Substrate } from "@/lib/substrate";
 import { encodeStl, toBase64 } from "@/lib/stl";
 import { HEAL_AGES, type HealAge } from "@/lib/healing";
 import { MIN_LINE_GAP_MM, checkLineSpacing, pxPerMmFromDpi, spacingFinding } from "@/lib/spacing";
@@ -1035,6 +1036,16 @@ export function DesignEditor({
    */
   function exportCastingTray() {
     if (!project || !preview) return;
+
+    // A ball takes a different road entirely. It has no flat face to stand on,
+    // so there is no tray of standing shapes to make and no thickness to ask
+    // about — its thickness is how wide it is.
+    const ball = ballFor(surfaceId);
+    if (ball) {
+      askBallCavities(ball);
+      return;
+    }
+
     setChoosing({
       title: "How thick are they?",
       subtitle: "The shapes stand this proud of the tray floor, so it is how deep the finished piece will be.",
@@ -1044,6 +1055,24 @@ export function DesignEditor({
         { value: 12, label: "Chunky — 12mm", detail: "A solid piece with real weight to it." },
       ],
       onPick: (shapeMm) => askCavities(shapeMm),
+    });
+  }
+
+  /**
+   * A ball is not a tray of standing shapes, so it does not get asked a tray's
+   * questions. Its thickness is its own diameter and there is nothing to decide
+   * about filling an outline — the drawing is pressed onto a dome either way.
+   */
+  function askBallCavities(ball: Substrate) {
+    setChoosing({
+      title: `How many ${ball.label.toLowerCase()}s at a time?`,
+      subtitle: "Each one needs both halves of the mold, so this is what one pair of trays makes.",
+      choices: [1, 2, 4, 6, 9, 12].map((copies) => ({
+        value: copies,
+        label: copies === 1 ? "Just one" : `${copies}`,
+        detail: copies === 1 ? "One ball per pour." : undefined,
+      })),
+      onPick: (copies) => void reviewSphereMold(ball, copies),
     });
   }
 
@@ -1164,6 +1193,88 @@ export function DesignEditor({
         else void shareCastingTray(built);
       },
     });
+  }
+
+  /**
+   * Builds both halves of a ball mold and puts them up for approval.
+   *
+   * Two files, and they are not interchangeable: one carries the drawing and
+   * one is smooth, and each has to be printed on its own. So they are offered
+   * one at a time rather than handed over as a pair somebody has to keep
+   * straight afterwards.
+   */
+  async function reviewSphereMold(ball: Substrate, copies: number) {
+    if (!project || !preview) return;
+    setBusy(true);
+    let built: ReturnType<typeof moldFromDesign> = null;
+    try {
+      const [nozzleMm, bedMm] = await Promise.all([
+        preferences.get<number>(brand.id, PREF_KEYS.nozzleMm, 0),
+        preferences.get<number>(brand.id, PREF_KEYS.bedMm, 0),
+      ]);
+      built = moldFromDesign(preview, {
+        diameterIn: ball.widthIn,
+        stick: ball.stick,
+        copies,
+        nozzleMm: nozzleMm > 0 ? nozzleMm : undefined,
+        bedMm: bedMm > 0 ? bedMm : undefined,
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't build the mold.");
+      return;
+    } finally {
+      setBusy(false);
+    }
+    if (!built) {
+      setError("Nothing to wrap onto a ball — trace or draw a design first.");
+      return;
+    }
+    const mold = built;
+    setFindings(mold.findings);
+
+    const warnings = mold.findings.filter((finding) => finding.level === "warn");
+    const summary =
+      `${mold.cavities} ${ball.label.toLowerCase()}${mold.cavities === 1 ? "" : "s"} a pour, from two trays of ` +
+      `${mold.designed.widthMm.toFixed(0)} x ${mold.designed.depthMm.toFixed(0)}mm. ` +
+      `About ${(mold.designed.plasticCm3 + mold.plain.plasticCm3).toFixed(0)}cm³ of filament for the pair, and ` +
+      `${(mold.designed.siliconeMl + mold.plain.siliconeMl).toFixed(0)}ml of silicone to fill them.`;
+
+    setChoosing({
+      title: warnings.length ? "Worth checking before you print" : "Two halves to print",
+      subtitle: warnings.length
+        ? `${warnings.map((finding) => finding.detail).join("\n\n")}\n\n${summary}`
+        : summary,
+      choices: [
+        {
+          value: 0,
+          label: "Export the half with the drawing",
+          detail: "The domes carry the picture. Print this one first.",
+        },
+        {
+          value: 1,
+          label: "Export the smooth half",
+          detail: "The back of the ball, with the pour holes and the key hollows.",
+        },
+      ],
+      onPick: (value) => {
+        const half = value === 0 ? mold.designed : mold.plain;
+        void shareMoldHalf(half, value === 0 ? "designed" : "smooth");
+      },
+    });
+  }
+
+  async function shareMoldHalf(half: { mesh: Parameters<typeof encodeStl>[0] }, which: string) {
+    if (!project) return;
+    setBusy(true);
+    try {
+      const bytes = encodeStl(half.mesh, `${project.title} mold ${which}`);
+      const name = project.title.replace(/[^a-z0-9]+/gi, "-").toLowerCase() || "mold";
+      await shareDataUrl(`data:model/stl;base64,${toBase64(bytes)}`, `${name}-mold-${which}.stl`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't share the mold half.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function shareCastingTray(tray: NonNullable<ReturnType<typeof trayFromDesign>>) {

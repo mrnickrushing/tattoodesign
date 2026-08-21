@@ -110,7 +110,12 @@ peel off rather than a square notch to tear at — narrowing where a notch is to
 tight for it rather than giving up on the shape. The drawing's own lines then
 stand proud of the filled body, so the piece carries the picture instead of
 casting as a flat slab of its own silhouette — silicone poured in cures around
-it all, and *that* is the mold. Nothing printed ever touches food.
+it all, and *that* is the mold. Round things take a different road: a cake pop
+or a truffle is a ball with no flat face to stand on, so it comes as two trays
+(`dome.ts`, `sphereMold.ts`) — one carrying the drawing pressed onto the dome
+from directly above, one smooth with the pour holes, the second mirrored so the
+halves land on each other when one is turned over. Nothing printed ever touches
+food.
 Before it exports it says what will go wrong: detail under two nozzle widths
 does not print badly, it does not print at all.
 

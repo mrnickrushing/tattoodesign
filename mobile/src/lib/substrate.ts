@@ -1,3 +1,4 @@
+import { findSurface } from "./curveWarp";
 // The thing the design is actually going onto, drawn so you can look at it.
 //
 // A design judged on white paper tells you almost nothing about how it will
@@ -112,6 +113,25 @@ export const SUBSTRATES: Substrate[] = [
     frostingInset: 0.12,
   },
 ];
+
+/**
+ * Whether a substrate is a whole ball, rather than something merely curved.
+ *
+ * The surface kind is not enough on its own: a domed cookie is a sphere too —
+ * a very large one that the cookie is a small cap of. What tells a ball apart
+ * is that the sphere *is* the sweet, so the way round it matches its own width.
+ * A cake pop is 1.5in across and 4.7in round; a 3in domed cookie is 28in round.
+ */
+export function isBall(substrate: Substrate): boolean {
+  const surface = findSurface(substrate.surfaceId);
+  if (!surface || surface.kind !== "sphere") return false;
+  return Math.abs(surface.circumferenceIn - Math.PI * substrate.widthIn) < substrate.widthIn * 0.15;
+}
+
+/** The ball drawn on this surface, if the surface is one. */
+export function ballFor(surfaceId: string): Substrate | undefined {
+  return SUBSTRATES.find((substrate) => substrate.surfaceId === surfaceId && isBall(substrate));
+}
 
 export function findSubstrate(id: string): Substrate | undefined {
   return SUBSTRATES.find((item) => item.id === id);
