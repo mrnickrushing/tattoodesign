@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { circle, dome, domeSegments } from "./dome";
+import { circle, dome, domeSegments, domeStrayMm } from "./dome";
 import { inspectMesh, meshVolume, extrudePrism } from "./solid";
 
 const W = 64;
@@ -106,16 +106,14 @@ test("roundness is judged by how far a facet strays, not how long it is", () => 
   // The distinction the first version of this got wrong. A facet's *length*
   // against the nozzle demands 256 facets on a cake pop to buy an accuracy of
   // one and a half microns; what matters is how far the flat facet strays from
-  // the ball, and forty facets is already inside a twentieth of a millimetre.
-  const stray = (radius: number, segments: number) => radius * (1 - Math.cos(Math.PI / segments));
-
+  // the ball.
   for (const radius of [19.05, 13.97, 5]) {
     const segments = domeSegments(radius);
-    assert.ok(stray(radius, segments) <= 0.05, `r=${radius}: ${segments} facets stray ${stray(radius, segments)}`);
+    assert.ok(domeStrayMm(radius, segments) <= 0.05, `r=${radius}: ${segments} facets stray ${domeStrayMm(radius, segments)}`);
     // And no further than it has to: four fewer would be outside the tolerance,
     // or it is already at the floor.
     assert.ok(
-      segments === 32 || stray(radius, segments - 4) > 0.05,
+      segments === 32 || domeStrayMm(radius, segments - 4) > 0.05,
       `r=${radius}: ${segments} facets is finer than the tolerance asks for`
     );
   }
@@ -124,20 +122,84 @@ test("roundness is judged by how far a facet strays, not how long it is", () => 
   assert.ok(domeSegments(19.05) > domeSegments(5));
 });
 
+test("the ball really is as round as it is said to be", () => {
+  // Measured off the triangles rather than worked out again.
+  //
+  // The version of this that shipped asserted the segment count against the
+  // same formula the code used to choose it, which proves only that the
+  // arithmetic was done twice. It was the wrong formula both times: it measured
+  // the sag of one equatorial edge, while the mesh bands in both directions and
+  // a triangle's diagonal spans root-two times the angle its sides do. Every
+  // ball was twice as faceted as it claimed, and this test agreed with it.
+  const sampleWorstSag = (radius: number, segments: number): number => {
+    const mesh = dome({ x: 0, y: 0 }, radius, 0, segments, 0.01);
+    let worst = 0;
+    for (let t = 0; t < mesh.count; t++) {
+      const corner = [0, 1, 2].map((k) => [
+        mesh.positions[t * 9 + k * 3],
+        mesh.positions[t * 9 + k * 3 + 1],
+        mesh.positions[t * 9 + k * 3 + 2],
+      ]);
+      // The flat underside and the skirt are not meant to be round.
+      if (corner.some((point) => point[2] < 0.001)) continue;
+
+      const u = corner[1].map((c, k) => c - corner[0][k]);
+      const v = corner[2].map((c, k) => c - corner[0][k]);
+      const normal = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+      const length = Math.hypot(...normal);
+      if (length < 1e-12) continue;
+      const unit = normal.map((c) => c / length);
+      const offset = unit[0] * corner[0][0] + unit[1] * corner[0][1] + unit[2] * corner[0][2];
+
+      // Walk the patch the triangle stands in for, push each point out to the
+      // true ball, and see how far from the flat facet it lands.
+      for (let a = 0; a <= 5; a++) {
+        for (let b = 0; a + b <= 5; b++) {
+          const c = 5 - a - b;
+          const inside = [0, 1, 2].map((k) => (a * corner[0][k] + b * corner[1][k] + c * corner[2][k]) / 5);
+          const reach = Math.hypot(...inside);
+          if (reach < 1e-9) continue;
+          const onBall = inside.map((x) => (x / reach) * radius);
+          worst = Math.max(worst, Math.abs(onBall[0] * unit[0] + onBall[1] * unit[1] + onBall[2] * unit[2] - offset));
+        }
+      }
+    }
+    return worst;
+  };
+
+  for (const radius of [19.05, 13.97]) {
+    const segments = domeSegments(radius);
+    const measured = sampleWorstSag(radius, segments);
+    assert.ok(measured <= 0.05, `r=${radius}: ${segments} facets actually stray ${measured.toFixed(4)}mm`);
+    // And what the code says about itself is an honest ceiling on what it
+    // built — not under it, which would be telling somebody half a truth, and
+    // not wildly over it either, which would be a different way of not knowing.
+    // Sampling a patch on a grid can only ever find the worst point
+    // approximately, so the ceiling is allowed to sit a little above it.
+    const claimed = domeStrayMm(radius, segments);
+    assert.ok(measured <= claimed * 1.02, `r=${radius}: claims ${claimed.toFixed(4)}mm, strays ${measured.toFixed(4)}mm`);
+    assert.ok(measured >= claimed * 0.8, `r=${radius}: claims ${claimed.toFixed(4)}mm for an actual ${measured.toFixed(4)}mm`);
+  }
+});
+
 test("a drawing on the ball is what makes it worth going finer", () => {
   const radius = 19.05;
   const plain = domeSegments(radius);
 
   // Detail to carry raises the count, and finer detail raises it further.
-  const coarse = domeSegments(radius, 4);
+  const coarse = domeSegments(radius, 2);
   const fine = domeSegments(radius, 1);
-  assert.ok(coarse > plain, `${coarse} facets for 4mm detail against ${plain} plain`);
-  assert.ok(fine > coarse, `${fine} for 1mm detail against ${coarse} for 4mm`);
+  assert.ok(coarse > plain, `${coarse} facets for 2mm detail against ${plain} plain`);
+  assert.ok(fine > coarse, `${fine} for 1mm detail against ${coarse} for 2mm`);
+
+  // Detail coarser than the ball's own roundness asks for changes nothing —
+  // there is no reason to go finer for a feature the facets already resolve.
+  assert.equal(domeSegments(radius, 8), plain, "a broad feature is carried by a plain ball's facets");
 
   // Two facets across the finest feature is the demand, so the facet is about
   // half of it — the coarsest a step can be and still read as an edge.
   const facet = (2 * Math.PI * radius) / coarse;
-  assert.ok(facet <= 4 / 2 + 0.01, `a 4mm feature got ${facet.toFixed(2)}mm facets`);
+  assert.ok(facet <= 2 / 2 + 0.01, `a 2mm feature got ${facet.toFixed(2)}mm facets`);
 
   // And it stops, because a ball here is one of several on two trays.
   assert.equal(domeSegments(radius, 0.01), 192, "capped");

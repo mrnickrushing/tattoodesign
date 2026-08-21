@@ -1,4 +1,4 @@
-import { circle, dome, domeSegments, type DomeRelief } from "./dome";
+import { circle, dome, domeSegments, domeStrayMm, type DomeRelief } from "./dome";
 import type { Point } from "./designProject";
 import type { ProductionFinding } from "./productionTools";
 import { finestStrokeWidth } from "./lineWidth";
@@ -395,7 +395,10 @@ function inspect(limits: {
   // sounds like the bar to clear and is nothing of the kind: on a 1.5in ball it
   // is an accuracy of one and a half microns, bought with thirty-three thousand
   // triangles that no printer can express.
-  const strayMm = (limits.diameterMm / 2) * (1 - Math.cos(Math.PI / limits.segments));
+  //
+  // Measured across a triangle, not along an edge. The edge is the number that
+  // comes to hand and it is half the truth — see domeStrayMm.
+  const strayMm = domeStrayMm(limits.diameterMm / 2, limits.segments);
   findings.push({
     level: "pass",
     title: "Roundness",

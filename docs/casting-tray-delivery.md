@@ -107,8 +107,14 @@ that becomes an object.
   ball**, not how long the facet is. Facet length against the nozzle was the
   first rule here and it is the wrong physics: it demands 256 facets and 33,000
   triangles a ball to buy an accuracy of one and a half microns, on a printer
-  laying two-tenths of a millimetre. Chord deviation asks for 44, and the ball
-  is still inside a twentieth of a millimetre of true. Relief is the real reason
+  laying two-tenths of a millimetre.
+
+  Measured across a *triangle*, not along an edge. Bands run both ways and the
+  latitude step matches the longitude one, so a facet's diagonal spans root-two
+  times the angle its sides do — and sag goes as the square of the angle, which
+  makes the diagonal stray twice as far as the equatorial edge that comes to
+  hand first. Sizing on the edge gives a ball twice as faceted as it claims.
+  On the triangle it is 64 facets, and the ball holds fifty microns. Relief is the real reason
   to go finer — the drawing is only as sharp as the facets under it — so only
   the half that carries a drawing pays for them.
 
