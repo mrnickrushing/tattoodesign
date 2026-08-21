@@ -2,6 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   extrudePrism,
+  extrudeTapered,
+  isSimplePolygon,
+  offsetOutline,
+  offsetPolygon,
+  outlineGap,
   inspectMesh,
   mergeMeshes,
   meshVolume,
@@ -216,4 +221,239 @@ test("random blobs all extrude into closed solids of the right volume", () => {
       `trial ${trial}: volume ${volume.toFixed(2)} against ${filled * 2} pixels of mask`
     );
   }
+});
+
+test("growing a square grows it by the offset on every side", () => {
+  const grown = offsetPolygon(square(10), 2)!;
+  assert.equal(grown.length, 4, "the vertex count is preserved");
+  const xs = grown.map((p) => p.x).sort((a, b) => a - b);
+  const ys = grown.map((p) => p.y).sort((a, b) => a - b);
+  assert.deepEqual([xs[0], xs[3]], [-2, 12]);
+  assert.deepEqual([ys[0], ys[3]], [-2, 12]);
+  assert.ok(Math.abs(signedArea(grown) - 14 * 14) < 1e-6);
+});
+
+test("a negative offset shrinks it by the same amount", () => {
+  const shrunk = offsetPolygon(square(10), -2)!;
+  assert.ok(Math.abs(signedArea(shrunk) - 6 * 6) < 1e-6);
+});
+
+test("the raw offset follows the winding it is given", () => {
+  // "Outward" means left of travel, so a reversed loop grows the other way —
+  // which is exactly why offsetOutline normalises the winding before offsetting
+  // rather than trusting whatever it was handed.
+  assert.ok(Math.abs(signedArea(offsetPolygon(square(10), 2)!) - 14 * 14) < 1e-6);
+  assert.ok(Math.abs(Math.abs(signedArea(offsetPolygon([...square(10)].reverse(), 2)!)) - 6 * 6) < 1e-6);
+
+  // offsetOutline is the one that does not care.
+  const forward = offsetOutline({ outer: square(10), holes: [] }, 2)!;
+  const backward = offsetOutline({ outer: [...square(10)].reverse(), holes: [] }, 2)!;
+  assert.ok(Math.abs(signedArea(forward.outer) - signedArea(backward.outer)) < 1e-6);
+});
+
+test("an offset that turns the shape inside out is refused", () => {
+  // The quiet failure: every corner crosses the middle and comes back a tidy
+  // smaller square, wound the same way, crossing nothing, with an area that has
+  // honestly shrunk. Only the edges give it away, by pointing the other way.
+  assert.equal(offsetPolygon(square(4), -3), null, "shrunk past its own middle");
+  assert.ok(offsetPolygon(square(4), -1), "a modest shrink still comes back");
+  assert.ok(Math.abs(signedArea(offsetPolygon(square(4), -1)!) - 2 * 2) < 1e-6);
+});
+
+test("a sharp corner is cut short rather than run away to a point", () => {
+  // A needle. Offsetting it properly sends the tip off toward infinity —
+  // the reach goes as one over the sine of half the angle.
+  // Wound the way a solid is wound, so the offset grows it rather than
+  // collapsing it — offsetPolygon takes the winding at its word.
+  const needle: Point[] = [
+    { x: 0, y: 0 },
+    { x: 100, y: -1 },
+    { x: 100, y: 1 },
+  ];
+  assert.ok(signedArea(needle) > 0, "the test shape has to be wound as a solid");
+  const grown = offsetPolygon(needle, 2)!;
+  assert.ok(grown, "it still offsets");
+  grown.forEach((p) => {
+    assert.ok(Number.isFinite(p.x) && Number.isFinite(p.y));
+    // Four times the offset is as far as any corner may travel.
+    assert.ok(Math.hypot(p.x, p.y) < 200, `a corner ran to ${p.x.toFixed(0)},${p.y.toFixed(0)}`);
+  });
+});
+
+test("a folded corner has no bisector and is refused", () => {
+  assert.equal(offsetPolygon([{ x: 0, y: 0 }, { x: 10, y: 0 }], 1), null, "not a polygon");
+  // Doubling straight back on itself: no direction is out of both edges.
+  assert.equal(offsetPolygon([{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 0, y: 0 }, { x: 5, y: 5 }], 1), null);
+  assert.equal(
+    offsetPolygon([{ x: 0, y: 0 }, { x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }], 1),
+    null,
+    "a repeated vertex has no edge direction"
+  );
+});
+
+test("a loop that crosses itself is recognised as one", () => {
+  assert.equal(isSimplePolygon(square(10)), true);
+  // A bow tie.
+  assert.equal(
+    isSimplePolygon([{ x: 0, y: 0 }, { x: 10, y: 10 }, { x: 10, y: 0 }, { x: 0, y: 10 }]),
+    false
+  );
+  assert.equal(isSimplePolygon([{ x: 0, y: 0 }, { x: 1, y: 1 }]), false, "too few points to be a loop");
+});
+
+test("growing a shape shrinks the holes in it", () => {
+  const outline = { outer: square(30), holes: [[...square(8, 11)].reverse()] };
+  const grown = offsetOutline(outline, 2)!;
+  assert.ok(grown, "a shape with room to grow does");
+  assert.ok(Math.abs(signedArea(grown.outer) - 34 * 34) < 1e-6, "the boundary grew");
+  assert.ok(Math.abs(Math.abs(signedArea(grown.holes[0])) - 4 * 4) < 1e-6, "and the gap in it closed in");
+  assert.ok(signedArea(grown.holes[0]) < 0, "still wound as a hole");
+});
+
+test("an offset that would eat through a hole is refused", () => {
+  // A 4mm gap cannot survive being closed in by 3 from every side.
+  const outline = { outer: square(30), holes: [[...square(4, 13)].reverse()] };
+  assert.equal(offsetOutline(outline, 3), null);
+});
+
+test("an offset that would knot the boundary is refused", () => {
+  // A narrow C: grow it enough and the two arms pass through each other.
+  const c: Point[] = [
+    { x: 0, y: 0 },
+    { x: 40, y: 0 },
+    { x: 40, y: 6 },
+    { x: 8, y: 6 },
+    { x: 8, y: 20 },
+    { x: 40, y: 20 },
+    { x: 40, y: 26 },
+    { x: 0, y: 26 },
+  ];
+  const modest = offsetOutline({ outer: c, holes: [] }, 1);
+  assert.ok(modest, "a small offset is fine");
+  assert.equal(isSimplePolygon(modest!.outer), true);
+
+  const greedy = offsetOutline({ outer: c, holes: [] }, 9);
+  assert.equal(greedy, null, "one that closes the mouth of the C is not");
+});
+
+test("a tapered solid is closed and holds the volume of a frustum", () => {
+  // A 14mm square at the bottom narrowing to 10mm at the top, 2 tall.
+  const bottom = { outer: offsetPolygon(square(10), 2)!, holes: [] };
+  const top = { outer: square(10), holes: [] };
+  const mesh = extrudeTapered(bottom, top, 0, 2);
+
+  const report = inspectMesh(mesh);
+  assert.equal(report.watertight, true, `unmatched ${report.unmatched}, degenerate ${report.degenerate}`);
+
+  // Prismatoid rule: (h/6)(A_bottom + 4*A_middle + A_top), the middle section
+  // being a 12mm square.
+  const expected = (2 / 6) * (14 * 14 + 4 * (12 * 12) + 10 * 10);
+  assert.ok(Math.abs(meshVolume(mesh) - expected) < 1e-2, `got ${meshVolume(mesh).toFixed(3)}, expected ${expected}`);
+});
+
+test("a tapered solid with a hole through it is still closed", () => {
+  const top = { outer: square(30), holes: [[...square(8, 11)].reverse()] };
+  const bottom = offsetOutline(top, 2)!;
+  const mesh = extrudeTapered(bottom, top, 0, 3);
+  assert.equal(inspectMesh(mesh).watertight, true);
+  assert.ok(meshVolume(mesh) > 0, "and faces outward");
+});
+
+test("ends that do not correspond produce nothing rather than a guess", () => {
+  const five: Point[] = [...square(10), { x: 5, y: 12 }];
+  assert.equal(extrudeTapered({ outer: square(10), holes: [] }, { outer: five, holes: [] }, 0, 2).count, 0);
+  assert.equal(
+    extrudeTapered({ outer: square(10), holes: [] }, { outer: square(10), holes: [square(4, 3)] }, 0, 2).count,
+    0,
+    "one end with a hole the other does not have"
+  );
+  assert.equal(extrudeTapered({ outer: square(10), holes: [] }, { outer: square(10), holes: [] }, 2, 2).count, 0);
+});
+
+test("a taper described upside down is the same solid", () => {
+  const wide = { outer: offsetPolygon(square(10), 2)!, holes: [] };
+  const narrow = { outer: square(10), holes: [] };
+  const up = meshVolume(extrudeTapered(wide, narrow, 0, 2));
+  const down = meshVolume(extrudeTapered(narrow, wide, 2, 0));
+  assert.ok(Math.abs(up - down) < 1e-6, `${up} against ${down}`);
+  assert.ok(up > 0);
+});
+
+test("a loop that merely touches itself is not simple either", () => {
+  // Two lobes meeting at a point. Nothing crosses — every edge stays on its own
+  // side — so a strict crossing test calls this clean and the walls built on it
+  // come out with a seam. It is what an offset produces the moment it grows two
+  // parts of a shape into contact, which is the case worth catching.
+  assert.equal(
+    isSimplePolygon([
+      { x: 0, y: 0 }, { x: 4, y: 4 }, { x: 8, y: 0 },
+      { x: 8, y: 8 }, { x: 4, y: 4 }, { x: 0, y: 8 },
+    ]),
+    false,
+    "pinched at a repeated vertex"
+  );
+
+  // A vertex landing in the middle of an edge it is not an end of: the same
+  // pinch, without a duplicate point to give it away.
+  assert.equal(
+    isSimplePolygon([
+      { x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 },
+      { x: 5, y: 0 }, { x: 0, y: 10 },
+    ]),
+    false,
+    "a vertex sitting on a far edge"
+  );
+
+  // Doubling back along the line it came in on: no crossing, no repeated point,
+  // and no solid between the two passes.
+  assert.equal(
+    isSimplePolygon([
+      { x: 0, y: 0 }, { x: 10, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 6 },
+    ]),
+    false,
+    "collinear overlap"
+  );
+
+  // And the ordinary cases still pass: a square has collinear neighbours only
+  // where it is entitled to them.
+  assert.equal(isSimplePolygon(square(10)), true);
+  assert.equal(
+    isSimplePolygon([{ x: 0, y: 0 }, { x: 5, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }]),
+    true,
+    "a redundant point along an edge is not a pinch"
+  );
+});
+
+test("the gap between two outlines is the closest their boundaries come", () => {
+  const left = { outer: square(10), holes: [] };
+  // Side by side, so the gap is along one axis only.
+  const right = {
+    outer: [
+      { x: 14, y: 0 }, { x: 24, y: 0 }, { x: 24, y: 10 }, { x: 14, y: 10 },
+    ],
+    holes: [],
+  };
+  assert.ok(Math.abs(outlineGap(left, right) - 4) < 1e-9, `got ${outlineGap(left, right)}`);
+
+  // A ceiling is an answer nobody will act on, not a measurement.
+  assert.equal(outlineGap(left, right, 2), 2, "further apart than asked about");
+  assert.ok(Math.abs(outlineGap(left, right, 9) - 4) < 1e-9, "nearer than the ceiling, so measured");
+
+  // Set diagonally, the nearest approach is corner to corner and counts both
+  // axes — square(size, at) steps along x and y together.
+  const corner = { outer: square(10, 13), holes: [] };
+  assert.ok(
+    Math.abs(outlineGap(left, corner) - Math.hypot(3, 3)) < 1e-9,
+    `got ${outlineGap(left, corner)}`
+  );
+});
+
+test("a shape inside another's hole is as near to it as any neighbour", () => {
+  // A ring with a small square standing in the middle of it. The gap that
+  // matters is to the *hole*, not to the ring's outer edge — and an offset
+  // closes it from both sides just the same.
+  const ring = { outer: square(30), holes: [[...square(20, 5)].reverse()] };
+  const island = { outer: square(4, 13), holes: [] };
+  // The hole runs 5..25; the island 13..17. Eight either side.
+  assert.ok(Math.abs(outlineGap(ring, island) - 8) < 1e-9, `got ${outlineGap(ring, island)}`);
 });

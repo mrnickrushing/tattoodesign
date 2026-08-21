@@ -104,8 +104,10 @@ A drawing becomes a printable casting tray: closed boundaries traced from the
 artwork (`contour.ts`), extruded into a watertight mesh (`solid.ts`), and
 written as binary STL in millimetres (`stl.ts`). The tray is a walled box with
 the shapes standing proud of its floor (`castingTray.ts`), packed as many
-cavities to a pour as asked for and arranged as close to square as the bed
-wants — silicone poured in cures around them, and *that* is the mold. Nothing
+cavities to a pour as asked for, arranged as close to square as the bed wants,
+and flared where each shape meets the floor so the silicone gets a slope to
+peel off rather than a square notch to tear at — silicone poured in cures
+around them, and *that* is the mold. Nothing
 printed ever touches food.
 Before it exports it says what will go wrong: detail under two nozzle widths
 does not print badly, it does not print at all.
@@ -125,7 +127,7 @@ semantic icon set mapped to SF Symbols with an Ionicons fallback
 (`icons.ts`).
 
 Most of this lives under `mobile/src/lib/*.ts` as pure, unit-tested
-functions — 690 tests as of this writing (`npm test` in `mobile/`) — with
+functions — 711 tests as of this writing (`npm test` in `mobile/`) — with
 UI wired on top in `mobile/src/app/[brand]/*.tsx` and
 `mobile/src/components/`.
 
