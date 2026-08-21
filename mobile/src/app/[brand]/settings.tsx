@@ -94,6 +94,8 @@ export default function SettingsScreen() {
   const [backupBusy, setBackupBusy] = useState(false);
   const [prefCount, setPrefCount] = useState(0);
   const [hourlyRate, setHourlyRate] = useState("");
+  const [nozzle, setNozzle] = useState("");
+  const [bed, setBed] = useState("");
 
   useEffect(() => {
     Promise.all([getSpendLimit(), getGenerationUsage()]).then(([savedLimit, usage]) => {
@@ -104,7 +106,16 @@ export default function SettingsScreen() {
     preferences
       .get<number>(brand.id, PREF_KEYS.hourlyRate, 0)
       .then((saved) => setHourlyRate(saved > 0 ? String(saved) : ""));
+    preferences.get<number>(brand.id, PREF_KEYS.nozzleMm, 0).then((saved) => setNozzle(saved > 0 ? String(saved) : ""));
+    preferences.get<number>(brand.id, PREF_KEYS.bedMm, 0).then((saved) => setBed(saved > 0 ? String(saved) : ""));
   }, [brand.id]);
+
+  /** Saves a typed number, or clears it back to the default when it is not one. */
+  function saveNumber(key: string, text: string, apply: (value: string) => void) {
+    apply(text);
+    const parsed = Number.parseFloat(text);
+    void preferences.set(brand.id, key, Number.isFinite(parsed) && parsed > 0 ? parsed : 0);
+  }
 
   function saveHourlyRate(text: string) {
     setHourlyRate(text);
@@ -401,6 +412,48 @@ export default function SettingsScreen() {
       </Card>
 
       <View style={{ height: SPACE.lg }} />
+
+      {brand.id === "sugar" && (
+        <>
+          <SectionLabel>Your 3D printer</SectionLabel>
+          <Card>
+            <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 13, lineHeight: 18 }}>
+              Casting trays are checked against these before they export. Detail finer than two
+              nozzle widths does not print badly — it does not print at all — so a wrong nozzle
+              here is a wasted print. Blank uses 0.4mm and a 220mm bed, which is what most
+              machines are.
+            </Text>
+            <View style={styles.syncRow}>
+              <TextInput
+                value={nozzle}
+                onChangeText={(text) => saveNumber(PREF_KEYS.nozzleMm, text, setNozzle)}
+                placeholder="Nozzle (mm)"
+                placeholderTextColor={theme.muted}
+                keyboardType="decimal-pad"
+                accessibilityLabel="Printer nozzle size in millimetres"
+                style={[
+                  styles.input,
+                  { flex: 1, color: theme.foreground, borderColor: theme.line, backgroundColor: theme.surfaceAlt, fontFamily: theme.fontBody },
+                ]}
+              />
+              <TextInput
+                value={bed}
+                onChangeText={(text) => saveNumber(PREF_KEYS.bedMm, text, setBed)}
+                placeholder="Bed (mm)"
+                placeholderTextColor={theme.muted}
+                keyboardType="number-pad"
+                accessibilityLabel="Printer bed size in millimetres"
+                style={[
+                  styles.input,
+                  { flex: 1, color: theme.foreground, borderColor: theme.line, backgroundColor: theme.surfaceAlt, fontFamily: theme.fontBody },
+                ]}
+              />
+            </View>
+          </Card>
+
+          <View style={{ height: SPACE.lg }} />
+        </>
+      )}
 
       <SectionLabel>Session defaults</SectionLabel>
       <Card>

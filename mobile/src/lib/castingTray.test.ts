@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildTray } from "./castingTray";
+import { buildTray, packCavities } from "./castingTray";
 import { inspectMesh, meshVolume } from "./solid";
 import { encodeStl, stlByteLength } from "./stl";
 
@@ -160,7 +160,7 @@ test("a tray too big for the bed is called out too", () => {
   const wide = buildTray(oneShape(), W, H, { ...SPEC, widthIn: 20 })!;
   const bed = wide.findings.find((finding) => finding.title === "Bed")!;
   assert.equal(bed.level, "warn");
-  assert.ok(bed.detail.includes("two trays"), "and says what to do about it");
+  assert.ok(bed.detail.includes("Not even one fits"), `and says what to do about it: ${bed.detail}`);
   assert.equal(buildTray(oneShape(), W, H, SPEC)!.findings.find((f) => f.title === "Bed")!.level, "pass");
 });
 
@@ -225,4 +225,130 @@ test("the tray says whether the fill was a real choice", () => {
 
   // And asking for the literal reading never reports a fill that did not happen.
   assert.equal(buildTray(outline, W, H, { ...SPEC, fillOutlines: false })!.outlinesFilled, false);
+});
+
+test("cavities pack into the arrangement closest to square", () => {
+  // A print bed is square and its limit is whichever way the tray is widest,
+  // so four 20mm cavities go 2x2 rather than 4x1.
+  const four = packCavities(4, 20, 20, 5);
+  assert.deepEqual({ columns: four.columns, rows: four.rows }, { columns: 2, rows: 2 });
+  assert.equal(four.widthMm, 45, "two 20s and one 5mm web");
+  assert.equal(four.depthMm, 45);
+
+  const one = packCavities(1, 20, 30, 5);
+  assert.deepEqual({ columns: one.columns, rows: one.rows, widthMm: one.widthMm, depthMm: one.depthMm }, {
+    columns: 1,
+    rows: 1,
+    widthMm: 20,
+    depthMm: 30,
+  });
+
+  // Tall cavities pack wide, so the block stays as square as it can.
+  const tall = packCavities(6, 10, 40, 4);
+  assert.ok(tall.columns > tall.rows, `expected a wide grid for tall pieces, got ${tall.columns}x${tall.rows}`);
+});
+
+test("no two cavities are closer than the webbing between them", () => {
+  for (const count of [1, 2, 3, 5, 7, 12]) {
+    const grid = packCavities(count, 24, 18, 6);
+    assert.equal(grid.positions.length, count);
+    for (let i = 0; i < grid.positions.length; i++) {
+      for (let j = i + 1; j < grid.positions.length; j++) {
+        const a = grid.positions[i];
+        const b = grid.positions[j];
+        // Overlapping in one axis means the gap in the other has to hold.
+        const gapX = Math.max(a.x, b.x) - (Math.min(a.x, b.x) + 24);
+        const gapY = Math.max(a.y, b.y) - (Math.min(a.y, b.y) + 18);
+        assert.ok(
+          gapX >= 6 - 1e-9 || gapY >= 6 - 1e-9,
+          `count ${count}: cavities ${i} and ${j} are ${gapX.toFixed(1)}/${gapY.toFixed(1)}mm apart`
+        );
+      }
+    }
+  }
+});
+
+test("every cavity sits inside the block the packer measured", () => {
+  for (const count of [1, 4, 5, 9, 11]) {
+    const grid = packCavities(count, 24, 18, 6);
+    grid.positions.forEach((at, i) => {
+      assert.ok(at.x >= -1e-9 && at.x + 24 <= grid.widthMm + 1e-9, `count ${count} cavity ${i} overhangs in x`);
+      assert.ok(at.y >= -1e-9 && at.y + 18 <= grid.depthMm + 1e-9, `count ${count} cavity ${i} overhangs in y`);
+    });
+  }
+});
+
+test("a short last row is centred rather than shoved against one wall", () => {
+  // Five into a grid of any shape leaves one row short. Whichever row that is,
+  // the odd one out should not sit against a wall with all the silicone on the
+  // other side of it.
+  const grid = packCavities(5, 20, 20, 5);
+  const lastY = Math.max(...grid.positions.map((at) => at.y));
+  const lastRow = grid.positions.filter((at) => at.y === lastY);
+  assert.ok(lastRow.length < grid.columns, `expected a short last row, got ${lastRow.length} of ${grid.columns}`);
+
+  const left = Math.min(...lastRow.map((at) => at.x));
+  const right = grid.widthMm - Math.max(...lastRow.map((at) => at.x + 20));
+  assert.ok(Math.abs(left - right) < 1e-9, `last row is off-centre: ${left} against ${right}`);
+});
+
+test("a packer with nothing to pack returns nothing", () => {
+  assert.equal(packCavities(4, 0, 20, 5).positions.length, 0);
+  assert.equal(packCavities(4, 20, -1, 5).positions.length, 0);
+  assert.equal(packCavities(0, 20, 20, 5).positions.length, 1, "fewer than one is one");
+});
+
+test("a tray holds the number of cavities it was asked for", () => {
+  const six = buildTray(oneShape(), W, H, { ...SPEC, copies: 6 })!;
+  assert.equal(six.cavities, 6);
+  assert.equal(six.shapes, 6, "one shape in the artwork, six on the tray");
+  assert.equal(six.parts.length, 8, "floor, walls, six positives");
+  assert.equal(six.columns * six.rows >= 6, true);
+  assert.equal(inspectMesh(six.mesh).watertight, true);
+});
+
+test("more cavities is a bigger tray and more of everything", () => {
+  const one = buildTray(oneShape(), W, H, SPEC)!;
+  const six = buildTray(oneShape(), W, H, { ...SPEC, copies: 6 })!;
+  assert.ok(six.widthMm > one.widthMm);
+  assert.ok(six.plasticCm3 > one.plasticCm3);
+  assert.ok(six.siliconeMl > one.siliconeMl);
+  // Six cavities of the same piece displace six times the silicone the one did.
+  const perCavity = (tray: typeof one) => meshVolume(tray.parts[2]);
+  assert.ok(Math.abs(perCavity(six) - perCavity(one)) < 1e-3, "each cavity is the same piece");
+});
+
+test("the webbing between cavities is the caller's to set", () => {
+  const tight = buildTray(oneShape(), W, H, { ...SPEC, copies: 4, webbingMm: 2 })!;
+  const roomy = buildTray(oneShape(), W, H, { ...SPEC, copies: 4, webbingMm: 12 })!;
+  assert.ok(roomy.widthMm > tight.widthMm, "more silicone between them is a wider tray");
+  assert.equal(roomy.cavities, tight.cavities);
+});
+
+test("a tray too big for the bed says how many would fit", () => {
+  const many = buildTray(oneShape(), W, H, { ...SPEC, copies: 12, bedMm: 120 })!;
+  const bed = many.findings.find((finding) => finding.title === "Bed")!;
+  assert.equal(bed.level, "warn");
+  assert.match(bed.detail, /\d+ would — print \d+ trays/, `expected a count and a plan: ${bed.detail}`);
+
+  // And what it claims fits, actually fits.
+  const claimed = Number(bed.detail.match(/(\d+) would/)![1]);
+  const check = buildTray(oneShape(), W, H, { ...SPEC, copies: claimed, bedMm: 120 })!;
+  assert.equal(check.findings.find((f) => f.title === "Bed")!.level, "pass", "the number it named has to be true");
+});
+
+test("a piece too big for the bed on its own says so plainly", () => {
+  const huge = buildTray(oneShape(), W, H, { ...SPEC, widthIn: 20, bedMm: 120 })!;
+  const bed = huge.findings.find((finding) => finding.title === "Bed")!;
+  assert.equal(bed.level, "warn");
+  assert.ok(bed.detail.includes("Not even one fits"), bed.detail);
+});
+
+test("cavity count never leaves a token unresolved", () => {
+  for (const copies of [1, 2, 7, 24]) {
+    const tray = buildTray(oneShape(), W, H, { ...SPEC, copies, bedMm: 150 })!;
+    tray.findings.forEach((finding) => {
+      assert.ok(!/\$\{|undefined|NaN/.test(finding.detail), `${copies}: ${finding.detail}`);
+    });
+  }
 });

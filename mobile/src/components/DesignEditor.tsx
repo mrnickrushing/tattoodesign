@@ -1032,10 +1032,27 @@ export function DesignEditor({
           { label: "Chunky — 12mm", shapeMm: 12 },
         ].map((choice) => ({
           text: choice.label,
-          onPress: () => void reviewCastingTray(choice.shapeMm, true),
+          onPress: () => askCavities(choice.shapeMm),
         })),
       ]
     );
+  }
+
+  /**
+   * How many cavities one pour should fill.
+   *
+   * The tray grows to hold them and the packer arranges them as close to square
+   * as it can, because a print bed is square and its limit is whichever way the
+   * tray ends up widest.
+   */
+  function askCavities(shapeMm: number) {
+    Alert.alert("How many at a time?", "Each cavity is one piece out of a single pour of silicone.", [
+      { text: "Cancel", style: "cancel" },
+      ...[1, 4, 6, 12].map((copies) => ({
+        text: copies === 1 ? "Just one" : `${copies}`,
+        onPress: () => void reviewCastingTray(shapeMm, true, copies),
+      })),
+    ]);
   }
 
   /**
@@ -1051,12 +1068,25 @@ export function DesignEditor({
    * cannot say whether an enclosed white region is inside the shape or a hole
    * through it, and only the person who drew it knows.
    */
-  async function reviewCastingTray(shapeMm: number, fillOutlines: boolean) {
+  async function reviewCastingTray(shapeMm: number, fillOutlines: boolean, copies: number) {
     if (!project || !preview) return;
     setBusy(true);
     let tray: ReturnType<typeof trayFromDesign> = null;
     try {
-      tray = trayFromDesign(preview, { widthIn: project.canvas.width / PRINT_DPI, shapeMm, fillOutlines });
+      // Zero means "not set", and buildTray's own defaults are the same 0.4mm
+      // and 220mm bed, so an unanswered setting changes nothing.
+      const [nozzleMm, bedMm] = await Promise.all([
+        preferences.get<number>(brand.id, PREF_KEYS.nozzleMm, 0),
+        preferences.get<number>(brand.id, PREF_KEYS.bedMm, 0),
+      ]);
+      tray = trayFromDesign(preview, {
+        widthIn: project.canvas.width / PRINT_DPI,
+        shapeMm,
+        fillOutlines,
+        copies,
+        nozzleMm: nozzleMm > 0 ? nozzleMm : undefined,
+        bedMm: bedMm > 0 ? bedMm : undefined,
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't build the casting tray.");
       return;
@@ -1071,8 +1101,10 @@ export function DesignEditor({
     setFindings(built.findings);
 
     const warnings = built.findings.filter((finding) => finding.level === "warn");
+    const arrangement =
+      built.cavities > 1 ? `${built.cavities} cavities, ${built.columns} x ${built.rows}` : "One cavity";
     const summary =
-      `${built.shapes} shape${built.shapes === 1 ? "" : "s"} on a ${built.widthMm.toFixed(0)} x ${built.depthMm.toFixed(0)}mm tray. ` +
+      `${arrangement} on a ${built.widthMm.toFixed(0)} x ${built.depthMm.toFixed(0)}mm tray. ` +
       `About ${built.plasticCm3.toFixed(0)}cm³ of filament, and roughly ${built.siliconeMl.toFixed(0)}ml of silicone to fill it.`;
 
     Alert.alert(
@@ -1083,7 +1115,7 @@ export function DesignEditor({
         // Only offered when the fill actually changed the shape — otherwise
         // both readings are the same tray and the question is noise.
         ...(fillOutlines && built.outlinesFilled
-          ? [{ text: "Keep the holes", onPress: () => void reviewCastingTray(shapeMm, false) }]
+          ? [{ text: "Keep the holes", onPress: () => void reviewCastingTray(shapeMm, false, copies) }]
           : []),
         {
           text: warnings.length ? "Export anyway" : "Export",
