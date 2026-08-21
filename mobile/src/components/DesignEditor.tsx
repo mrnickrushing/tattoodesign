@@ -1080,7 +1080,7 @@ export function DesignEditor({
    * cannot say whether an enclosed white region is inside the shape or a hole
    * through it, and only the person who drew it knows.
    */
-  async function reviewCastingTray(shapeMm: number, fillOutlines: boolean, copies: number) {
+  async function reviewCastingTray(shapeMm: number, fillOutlines: boolean, copies: number, reliefMm?: number) {
     if (!project || !preview) return;
     setBusy(true);
     let tray: ReturnType<typeof trayFromDesign> = null;
@@ -1096,6 +1096,7 @@ export function DesignEditor({
         shapeMm,
         fillOutlines,
         copies,
+        reliefMm,
         nozzleMm: nozzleMm > 0 ? nozzleMm : undefined,
         bedMm: bedMm > 0 ? bedMm : undefined,
       });
@@ -1117,24 +1118,52 @@ export function DesignEditor({
       built.cavities > 1 ? `${built.cavities} cavities, ${built.columns} x ${built.rows}` : "One cavity";
     const summary =
       `${arrangement} on a ${built.widthMm.toFixed(0)} x ${built.depthMm.toFixed(0)}mm tray. ` +
+      (built.reliefAppliedMm > 0
+        ? `Pieces ${(shapeMm + built.reliefAppliedMm).toFixed(1)}mm thick, lines and all. `
+        : "") +
       `About ${built.plasticCm3.toFixed(0)}cm³ of filament, and roughly ${built.siliconeMl.toFixed(0)}ml of silicone to fill it.`;
 
-    Alert.alert(
-      warnings.length ? "Worth checking before you print" : "Ready to export",
-      warnings.length ? `${warnings.map((finding) => finding.detail).join("\n\n")}\n\n${summary}` : summary,
-      [
-        { text: "Cancel", style: "cancel" },
-        // Only offered when the fill actually changed the shape — otherwise
-        // both readings are the same tray and the question is noise.
-        ...(fillOutlines && built.outlinesFilled
-          ? [{ text: "Keep the holes", onPress: () => void reviewCastingTray(shapeMm, false, copies) }]
-          : []),
-        {
-          text: warnings.length ? "Export anyway" : "Export",
-          onPress: () => void shareCastingTray(built),
-        },
-      ]
-    );
+    // A list rather than an alert: with both readings of the drawing on offer
+    // this runs to four options, and Android alerts quietly drop the fourth.
+    // Each alternative is only shown when it is a real question — see the
+    // conditions below — so most designs still get two rows and a cancel.
+    const choices: Choice[] = [];
+    // Only when the fill actually changed the shape. Otherwise both readings
+    // are the same tray and the question is noise.
+    if (fillOutlines && built.outlinesFilled) {
+      choices.push({
+        value: 1,
+        label: "Keep the holes",
+        detail: "Stand the marks up as they are, instead of filling what they enclose.",
+      });
+    }
+    // Only when there was linework to raise and it was raised. Nothing to
+    // decline otherwise.
+    if (built.reliefAppliedMm > 0) {
+      choices.push({
+        value: 2,
+        label: "Cast it flat",
+        detail: `Drop the raised lines and make a plain ${shapeMm.toFixed(1)}mm silhouette.`,
+      });
+    }
+    choices.push({
+      value: 0,
+      label: warnings.length ? "Export anyway" : "Export",
+      detail: `${built.widthMm.toFixed(0)} x ${built.depthMm.toFixed(0)}mm STL for the printer.`,
+    });
+
+    setChoosing({
+      title: warnings.length ? "Worth checking before you print" : "Ready to export",
+      subtitle: warnings.length
+        ? `${warnings.map((finding) => finding.detail).join("\n\n")}\n\n${summary}`
+        : summary,
+      choices,
+      onPick: (value) => {
+        if (value === 1) void reviewCastingTray(shapeMm, false, copies, reliefMm);
+        else if (value === 2) void reviewCastingTray(shapeMm, fillOutlines, copies, 0);
+        else void shareCastingTray(built);
+      },
+    });
   }
 
   async function shareCastingTray(tray: NonNullable<ReturnType<typeof trayFromDesign>>) {

@@ -541,3 +541,98 @@ test("the webbing between cavities is a limit on the flare too", () => {
   const roomy = buildTray(oneShape(), W, H, { ...SPEC, copies: 4, webbingMm: 6 })!;
   assert.equal(roomy.filletAppliedMm, 0.8, "six millimetres of webbing is no constraint at all");
 });
+
+/** A square drawn as a stroke with a cross through it: an outline, not a solid. */
+function drawn(strokePx: number): Uint8Array {
+  const mask = new Uint8Array(W * H);
+  const box = (x0: number, y0: number, x1: number, y1: number) => {
+    for (let y = Math.max(0, Math.round(y0)); y < Math.min(H, Math.round(y1)); y++) {
+      for (let x = Math.max(0, Math.round(x0)); x < Math.min(W, Math.round(x1)); x++) mask[y * W + x] = 1;
+    }
+  };
+  const s = strokePx;
+  box(20, 15, 100, 15 + s);
+  box(20, 75 - s, 100, 75);
+  box(20, 15, 20 + s, 75);
+  box(100 - s, 15, 100, 75);
+  box(20, 45 - s / 2, 100, 45 + s / 2);
+  box(60 - s / 2, 15, 60 + s / 2, 75);
+  return mask;
+}
+
+test("the drawing's own lines stand proud of the face it is drawn on", () => {
+  const tray = buildTray(drawn(6), W, H, { ...SPEC, filletMm: 0 })!;
+  assert.equal(tray.reliefAppliedMm, 0.6, "raised by the default relief");
+
+  // Floor, walls, the filled body, and the linework on top of it.
+  assert.equal(tray.parts.length, 4);
+  const relief = tray.parts[3];
+
+  let lowest = Infinity;
+  let highest = -Infinity;
+  for (let i = 2; i < relief.positions.length; i += 3) {
+    lowest = Math.min(lowest, relief.positions[i]);
+    highest = Math.max(highest, relief.positions[i]);
+  }
+  // Sunk into the top of the body by the weld and no more: any gap and the
+  // lines float, any more and the volumes below count the overlap twice.
+  assert.ok(Math.abs(lowest - (2 + 6 - 0.01)) < 1e-6, `relief starts at ${lowest}`);
+  assert.ok(Math.abs(highest - (2 + 6 + 0.6)) < 1e-6, `relief tops out at ${highest}`);
+
+  // And the silicone still has its full cover over the tallest thing on the tray.
+  assert.ok(Math.abs(tray.heightMm - (2 + 6 + 0.6 + 4)) < 1e-9, `tray is ${tray.heightMm}mm tall`);
+});
+
+test("raised linework is worth exactly the plastic it stands in", () => {
+  const mask = drawn(6);
+  const tray = buildTray(mask, W, H, { ...SPEC, filletMm: 0 })!;
+
+  // Counted straight off the mask rather than off the mesh: the relief is a
+  // prism of the inked pixels, so its volume is their area times its height.
+  const mmPerPx = (SPEC.widthIn * 25.4) / W;
+  let inked = 0;
+  for (let i = 0; i < W * H; i++) if (mask[i]) inked++;
+  const expected = inked * mmPerPx * mmPerPx * (tray.reliefAppliedMm + 0.01);
+
+  assert.ok(
+    Math.abs(meshVolume(tray.parts[3]) - expected) / expected < 0.02,
+    `relief is ${meshVolume(tray.parts[3]).toFixed(1)}mm3 against ${expected.toFixed(1)}mm3 of linework`
+  );
+
+  // Every part still closes, relief included.
+  tray.parts.forEach((part, i) => {
+    assert.equal(inspectMesh(part).watertight, true, `part ${i} is open`);
+  });
+  assert.equal(inspectMesh(tray.mesh).watertight, true);
+});
+
+test("a shape with nothing drawn inside it gets no relief", () => {
+  // A plain rectangle is already its own silhouette: filling changes nothing,
+  // so there is no linework to raise and no reason to make the piece thicker.
+  const solid = buildTray(oneShape(), W, H, SPEC)!;
+  assert.equal(solid.reliefAppliedMm, 0);
+  assert.ok(Math.abs(solid.heightMm - (2 + 6 + 4)) < 1e-9);
+  assert.ok(!solid.findings.some((finding) => finding.title === "Relief"), "and nothing to say about it");
+});
+
+test("linework finer than a bead cannot be raised, and says so", () => {
+  // The same drawing at an inch across instead of three: a two-pixel stroke is
+  // 0.42mm of artwork, and the measurement of it lands under the 0.4mm a nozzle
+  // lays down. Fineness is a question about the printed size, not the mask.
+  const tray = buildTray(drawn(2), W, H, { ...SPEC, widthIn: 1, nozzleMm: 0.4 })!;
+  assert.equal(tray.reliefAppliedMm, 0, "refused rather than promised");
+  assert.ok(Math.abs(tray.heightMm - (2 + 6 + 4)) < 1e-9, "and the tray does not grow for it");
+
+  const relief = tray.findings.find((finding) => finding.title === "Relief");
+  assert.equal(relief?.level, "warn");
+  assert.match(relief!.detail, /cast as a plain silhouette/);
+});
+
+test("relief can be turned off without turning the drawing into a lattice", () => {
+  const off = buildTray(drawn(6), W, H, { ...SPEC, reliefMm: 0, filletMm: 0 })!;
+  assert.equal(off.reliefAppliedMm, 0);
+  assert.equal(off.parts.length, 3, "floor, walls, and the filled body alone");
+  // Still the filled silhouette, not the bare linework: those are different
+  // questions, and fillOutlines is the one that answers this one.
+  assert.equal(off.outlinesFilled, true);
+});

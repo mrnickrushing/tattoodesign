@@ -1,6 +1,6 @@
 # Casting trays — design to 3D printer
 
-## Status — spine complete, trays hold many cavities and are filleted
+## Status — spine complete; trays hold many cavities, are filleted, and carry the drawing
 
 Allison's side of the app makes images; what she needs from them is a mold. The
 workflow is: 3D print a tray, pour silicone into it, and the cured silicone is
@@ -48,6 +48,18 @@ that becomes an object.
   and a flare may take at most half of that less a nozzle width, because two
   shapes that grow into each other come off the printer welded into one.
 
+- **Relief.** A filled design casts as a flat slab of its own silhouette: the
+  drawing survives only as a border, and every interior line is lost. So the
+  body is the filled shape and the *original* linework is extruded on top of it,
+  sunk in by the weld and no more. The two inversions still cancel, so a line
+  standing proud of the printed positive is a line standing proud of the
+  chocolate.
+
+  The width a relief line has to clear is **one bead, not two**. A free-standing
+  wall needs two perimeters to hold itself up; a ridge on a face is held up by
+  the face. Below one bead it is refused outright and the finding says the piece
+  will cast plain — the same posture as the fillet floor, for the same reason.
+
 ## Five things that were only visible in the arithmetic
 
 None of these show up in a render, which is why the property test — 60 random
@@ -73,8 +85,6 @@ masks built and weighed — is the gate that matters.
 
 ## What is not built
 
-- **Relief detail.** Interior linework raised on the top face, rather than the
-  silhouette alone standing up.
 - **Two-part molds.** Cake pops and truffles are spheres; `substrate.ts` knows
   their real sizes. A sphere needs two halves with registration keys, which is
   a different solid entirely.
