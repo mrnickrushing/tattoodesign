@@ -82,18 +82,28 @@ test("the artwork is flipped so it does not come out of the mold upside down", (
   assert.ok(tray.depthMm > 8 * 2, "and the tray has real depth");
 });
 
-test("holes in the artwork are holes in the shape that stands up", () => {
+test("a gap in the artwork is read whichever way the caller asks for", () => {
+  // A drawing cannot say whether an enclosed white region is inside the shape
+  // or a hole through it. Both readings have to be available and both have to
+  // produce a closed solid.
   const ring = oneShape();
   for (let y = 35; y < 55; y++) for (let x = 45; x < 75; x++) ring[y * W + x] = 0;
-
-  const tray = buildTray(ring, W, H, SPEC)!;
-  assert.equal(tray.shapes, 1);
   const solid = buildTray(oneShape(), W, H, SPEC)!;
+
+  const asSilhouette = buildTray(ring, W, H, SPEC)!;
+  assert.equal(asSilhouette.shapes, 1);
   assert.ok(
-    meshVolume(tray.parts[2]) < meshVolume(solid.parts[2]),
-    "a ring uses less plastic than the disc it came from"
+    Math.abs(meshVolume(asSilhouette.parts[2]) - meshVolume(solid.parts[2])) < 1,
+    "filled, the gap closes and it is the same piece as the solid one"
   );
-  assert.equal(inspectMesh(tray.parts[2]).watertight, true);
+
+  const asHole = buildTray(ring, W, H, { ...SPEC, fillOutlines: false })!;
+  assert.ok(
+    meshVolume(asHole.parts[2]) < meshVolume(solid.parts[2]),
+    "kept, the gap goes right through and uses less plastic"
+  );
+  assert.equal(inspectMesh(asHole.parts[2]).watertight, true, "and is still closed around the hole");
+  assert.equal(inspectMesh(asSilhouette.parts[2]).watertight, true);
 });
 
 test("several shapes each get their own solid", () => {
@@ -184,4 +194,21 @@ test("the tray encodes to a file a slicer will open", () => {
   assert.equal(bytes.length, stlByteLength(tray.mesh.count));
   assert.ok(bytes.length > 84, "there is something in it");
   assert.ok(bytes.length < 4_000_000, `${(bytes.length / 1024).toFixed(0)}KB is a sane size to AirDrop`);
+});
+
+test("an outlined design stands up as the shape, not as its own outline", () => {
+  const outline = new Uint8Array(W * H);
+  for (let y = 20; y < 70; y++) for (let x = 30; x < 90; x++) outline[y * W + x] = 1;
+  for (let y = 24; y < 66; y++) for (let x = 34; x < 86; x++) outline[y * W + x] = 0;
+
+  const filled = buildTray(outline, W, H, SPEC)!;
+  const literal = buildTray(outline, W, H, { ...SPEC, fillOutlines: false })!;
+
+  assert.equal(filled.shapes, 1);
+  assert.ok(
+    meshVolume(filled.parts[2]) > meshVolume(literal.parts[2]) * 3,
+    "the silhouette is far more solid than the ring of linework"
+  );
+  // And the literal reading is still available and still closed.
+  assert.equal(inspectMesh(literal.parts[2]).watertight, true);
 });

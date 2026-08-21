@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   enclosedArea,
+  fillEnclosed,
   groupContours,
   insideContour,
   signedArea,
@@ -199,4 +200,33 @@ test("a hole in a ring goes to the ring, not to whatever else surrounds it", () 
 
 test("grouping an empty trace is an empty list", () => {
   assert.deepEqual(groupContours([]), []);
+});
+
+test("an outline stands up as the shape it outlines", () => {
+  // A hollow square, the way line art arrives. Traced literally it is a ring
+  // of its own linework; what anyone making a mold wants is the square.
+  const mask = rect(new Uint8Array(20 * 20), 20, 4, 4, 16, 16);
+  rect(mask, 20, 6, 6, 14, 14, 0);
+  assert.equal(enclosedArea(traceContours(mask, 20, 20)), 12 * 12 - 8 * 8, "the ring on its own");
+
+  const filled = fillEnclosed(mask, 20, 20);
+  assert.equal(enclosedArea(traceContours(filled, 20, 20)), 12 * 12, "and the silhouette once filled");
+});
+
+test("filling reaches into a concave bay without closing it off", () => {
+  // A C shape: the bay is open to the outside, so it stays open.
+  const mask = rect(new Uint8Array(20 * 20), 20, 4, 4, 16, 16);
+  rect(mask, 20, 8, 8, 20, 12, 0);
+  const before = enclosedArea(traceContours(mask, 20, 20));
+  assert.equal(enclosedArea(traceContours(fillEnclosed(mask, 20, 20), 20, 20)), before, "nothing to fill");
+});
+
+test("filling an already-solid shape changes nothing", () => {
+  const mask = rect(new Uint8Array(20 * 20), 20, 4, 4, 16, 16);
+  assert.deepEqual(Array.from(fillEnclosed(mask, 20, 20)), Array.from(mask));
+});
+
+test("filling a blank or short frame is safe", () => {
+  assert.equal(fillEnclosed(new Uint8Array(100), 10, 10).reduce<number>((s, v) => s + v, 0), 0);
+  assert.equal(fillEnclosed(new Uint8Array(4), 10, 10).length, 100);
 });

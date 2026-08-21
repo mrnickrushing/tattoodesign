@@ -198,6 +198,56 @@ export function traceContours(
   return contours.sort((a, b) => Math.abs(b.area) - Math.abs(a.area));
 }
 
+/**
+ * Fills in whatever the artwork encloses.
+ *
+ * A drawing of a snowflake is usually an outline, and an outline traced
+ * literally stands up as a hollow ring of its own linework rather than as a
+ * snowflake. What is wanted is the silhouette, so anything the outside cannot
+ * reach becomes part of the shape.
+ *
+ * The catch is that a 2D drawing cannot say whether an enclosed white region is
+ * *inside* the shape or a hole through it — a ring drawn as two circles is both
+ * readings at once. This takes the common one; the caller keeps the choice.
+ */
+export function fillEnclosed(mask: Uint8Array, width: number, height: number): Uint8Array {
+  const filled = new Uint8Array(width * height);
+  if (width <= 0 || height <= 0 || mask.length < filled.length) return filled;
+  filled.set(mask.subarray(0, filled.length));
+
+  // Flood the background inward from the frame. An explicit stack, because a
+  // mostly-blank frame would otherwise recurse a megapixel deep.
+  const outside = new Uint8Array(filled.length);
+  const stack: number[] = [];
+  const consider = (index: number) => {
+    if (outside[index] || filled[index]) return;
+    outside[index] = 1;
+    stack.push(index);
+  };
+
+  for (let x = 0; x < width; x++) {
+    consider(x);
+    consider((height - 1) * width + x);
+  }
+  for (let y = 0; y < height; y++) {
+    consider(y * width);
+    consider(y * width + width - 1);
+  }
+
+  while (stack.length) {
+    const index = stack.pop()!;
+    const x = index % width;
+    const y = (index - x) / width;
+    if (x > 0) consider(index - 1);
+    if (x < width - 1) consider(index + 1);
+    if (y > 0) consider(index - width);
+    if (y < height - 1) consider(index + width);
+  }
+
+  for (let i = 0; i < filled.length; i++) if (!outside[i]) filled[i] = 1;
+  return filled;
+}
+
 /** Ray casting: whether a point falls inside a closed loop. */
 export function insideContour(point: Point, loop: Point[]): boolean {
   let inside = false;

@@ -16,7 +16,7 @@
 // on a positive is copied into the silicone and then into every piece cast from
 // it, forever.
 
-import { groupContours, traceContours } from "./contour";
+import { fillEnclosed, groupContours, traceContours } from "./contour";
 import type { Point } from "./designProject";
 import { finestStrokeWidth } from "./lineWidth";
 import type { ProductionFinding } from "./productionTools";
@@ -38,6 +38,12 @@ export type TraySpec = {
   nozzleMm?: number;
   /** Print bed, for warning before rather than after. */
   bedMm?: number;
+  /**
+   * Whether an outline should stand up as the shape it outlines. On by
+   * default, because line art is usually a silhouette. Off when the marks
+   * themselves are the object — a lattice, a monogram cut right through.
+   */
+  fillOutlines?: boolean;
 };
 
 const DEFAULTS = {
@@ -110,10 +116,11 @@ export function buildTray(
   if (!(spec.widthIn > 0) || !(spec.shapeMm > 0)) return null;
 
   const mmPerPx = (spec.widthIn * INCH_MM) / maskWidth;
+  const shape = spec.fillOutlines === false ? mask : fillEnclosed(mask, maskWidth, maskHeight);
 
   // Simplified to a tenth of a millimetre: finer than the printer resolves, so
   // the staircase goes without any of the shape going with it.
-  const contours = traceContours(mask, maskWidth, maskHeight, 0.1 / mmPerPx);
+  const contours = traceContours(shape, maskWidth, maskHeight, 0.1 / mmPerPx);
   const shapes = groupContours(contours);
   if (!shapes.length) return null;
 
@@ -177,7 +184,7 @@ export function buildTray(
     plasticCm3: Math.max(0, plasticMm3) / 1000,
     siliconeMl: Math.max(0, cavityMm3) / 1000,
     shapes: positives.length,
-    findings: inspectTray(mask, maskWidth, maskHeight, mmPerPx, {
+    findings: inspectTray(shape, maskWidth, maskHeight, mmPerPx, {
       widthMm,
       depthMm,
       heightMm,
