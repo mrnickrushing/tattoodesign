@@ -40,6 +40,22 @@ export async function saveDataUrlToPhotos(dataUrl: string, filename: string): Pr
   download(toBlob(dataUrl), filename);
 }
 
+/** Shares raw bytes, without a base64 detour. See the native sibling. */
+export async function shareBytes(bytes: Uint8Array, filename: string): Promise<void> {
+  const blob = new Blob([bytes as BlobPart], { type: "application/octet-stream" });
+  const file = new File([blob], filename, { type: blob.type });
+  if (navigator.canShare?.({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file] });
+      return;
+    } catch (error) {
+      // A cancelled share is a choice, not a failure.
+      if (error instanceof Error && error.name === "AbortError") return;
+    }
+  }
+  download(blob, filename);
+}
+
 export async function shareDataUrl(dataUrl: string, filename: string): Promise<void> {
   const blob = toBlob(dataUrl);
   const file = new File([blob], filename, { type: blob.type });

@@ -62,10 +62,19 @@ import { layDown, toolsFor } from "@/lib/material";
 import { consolidateWithin } from "@/lib/sketch";
 import { DEFAULT_TRACE, polylinesToStrokeLayer, skeletonize, tracePolylines } from "@/lib/vectorize";
 import { addCutLine, DEFAULT_CUT_LINE } from "@/lib/cutline";
-import { shareDataUrl, shareUri } from "@/lib/files";
+import { shareBytes, shareUri } from "@/lib/files";
 import { assessCoverup, compareCapture, inspectProduction, moldFromDesign, simulateHealing, trayFromDesign, wrapForSurface, type ProductionFinding } from "@/lib/productionTools";
 import { ballFor, type Substrate } from "@/lib/substrate";
-import { encodeStl, toBase64 } from "@/lib/stl";
+import {
+  cavityPrompt,
+  moldPrompt,
+  thicknessPrompt,
+  trayPrompt,
+  MOLD_DESIGNED,
+  TRAY_CAST_FLAT,
+  TRAY_KEEP_HOLES,
+} from "@/lib/exportFlow";
+import { encodeStl } from "@/lib/stl";
 import { HEAL_AGES, type HealAge } from "@/lib/healing";
 import { MIN_LINE_GAP_MM, checkLineSpacing, pxPerMmFromDpi, spacingFinding } from "@/lib/spacing";
 import { PREF_KEYS, isFiniteNumber, preferences } from "@/lib/preferences";
@@ -1046,16 +1055,7 @@ export function DesignEditor({
       return;
     }
 
-    setChoosing({
-      title: "How thick are they?",
-      subtitle: "The shapes stand this proud of the tray floor, so it is how deep the finished piece will be.",
-      choices: [
-        { value: 4, label: "Thin — 4mm", detail: "A flat topper or a thin chocolate." },
-        { value: 7, label: "Standard — 7mm", detail: "A cookie you would recognise as a cookie." },
-        { value: 12, label: "Chunky — 12mm", detail: "A solid piece with real weight to it." },
-      ],
-      onPick: (shapeMm) => askCavities(shapeMm),
-    });
+    setChoosing({ ...thicknessPrompt(), onPick: (shapeMm) => askCavities(shapeMm) });
   }
 
   /**
@@ -1065,13 +1065,7 @@ export function DesignEditor({
    */
   function askBallCavities(ball: Substrate) {
     setChoosing({
-      title: `How many ${ball.label.toLowerCase()}s at a time?`,
-      subtitle: "Each one needs both halves of the mold, so this is what one pair of trays makes.",
-      choices: [1, 2, 4, 6, 9, 12].map((copies) => ({
-        value: copies,
-        label: copies === 1 ? "Just one" : `${copies}`,
-        detail: copies === 1 ? "One ball per pour." : undefined,
-      })),
+      ...cavityPrompt([1, 2, 4, 6, 9, 12], ball.label.toLowerCase()),
       onPick: (copies) => void reviewSphereMold(ball, copies),
     });
   }
@@ -1085,13 +1079,7 @@ export function DesignEditor({
    */
   function askCavities(shapeMm: number) {
     setChoosing({
-      title: "How many at a time?",
-      subtitle: "Each cavity is one piece out of a single pour of silicone.",
-      choices: [1, 2, 4, 6, 9, 12, 18, 24].map((copies) => ({
-        value: copies,
-        label: copies === 1 ? "Just one" : `${copies}`,
-        detail: copies === 1 ? "One piece per pour." : undefined,
-      })),
+      ...cavityPrompt([1, 2, 4, 6, 9, 12, 18, 24]),
       onPick: (copies) => void reviewCastingTray(shapeMm, true, copies),
     });
   }
@@ -1142,54 +1130,11 @@ export function DesignEditor({
     const built = tray;
     setFindings(built.findings);
 
-    const warnings = built.findings.filter((finding) => finding.level === "warn");
-    const arrangement =
-      built.cavities > 1 ? `${built.cavities} cavities, ${built.columns} x ${built.rows}` : "One cavity";
-    const summary =
-      `${arrangement} on a ${built.widthMm.toFixed(0)} x ${built.depthMm.toFixed(0)}mm tray. ` +
-      (built.reliefAppliedMm > 0
-        ? `Pieces ${(shapeMm + built.reliefAppliedMm).toFixed(1)}mm thick, lines and all. `
-        : "") +
-      `About ${built.plasticCm3.toFixed(0)}cm³ of filament, and roughly ${built.siliconeMl.toFixed(0)}ml of silicone to fill it.`;
-
-    // A list rather than an alert: with both readings of the drawing on offer
-    // this runs to four options, and Android alerts quietly drop the fourth.
-    // Each alternative is only shown when it is a real question — see the
-    // conditions below — so most designs still get two rows and a cancel.
-    const choices: Choice[] = [];
-    // Only when the fill actually changed the shape. Otherwise both readings
-    // are the same tray and the question is noise.
-    if (fillOutlines && built.outlinesFilled) {
-      choices.push({
-        value: 1,
-        label: "Keep the holes",
-        detail: "Stand the marks up as they are, instead of filling what they enclose.",
-      });
-    }
-    // Only when there was linework to raise and it was raised. Nothing to
-    // decline otherwise.
-    if (built.reliefAppliedMm > 0) {
-      choices.push({
-        value: 2,
-        label: "Cast it flat",
-        detail: `Drop the raised lines and make a plain ${shapeMm.toFixed(1)}mm silhouette.`,
-      });
-    }
-    choices.push({
-      value: 0,
-      label: warnings.length ? "Export anyway" : "Export",
-      detail: `${built.widthMm.toFixed(0)} x ${built.depthMm.toFixed(0)}mm STL for the printer.`,
-    });
-
     setChoosing({
-      title: warnings.length ? "Worth checking before you print" : "Ready to export",
-      subtitle: warnings.length
-        ? `${warnings.map((finding) => finding.detail).join("\n\n")}\n\n${summary}`
-        : summary,
-      choices,
+      ...trayPrompt(built, shapeMm, fillOutlines),
       onPick: (value) => {
-        if (value === 1) void reviewCastingTray(shapeMm, false, copies, reliefMm);
-        else if (value === 2) void reviewCastingTray(shapeMm, fillOutlines, copies, 0);
+        if (value === TRAY_KEEP_HOLES) void reviewCastingTray(shapeMm, false, copies, reliefMm);
+        else if (value === TRAY_CAST_FLAT) void reviewCastingTray(shapeMm, fillOutlines, copies, 0);
         else void shareCastingTray(built);
       },
     });
@@ -1231,34 +1176,11 @@ export function DesignEditor({
     }
     const mold = built;
     setFindings(mold.findings);
-
-    const warnings = mold.findings.filter((finding) => finding.level === "warn");
-    const summary =
-      `${mold.cavities} ${ball.label.toLowerCase()}${mold.cavities === 1 ? "" : "s"} a pour, from two trays of ` +
-      `${mold.designed.widthMm.toFixed(0)} x ${mold.designed.depthMm.toFixed(0)}mm. ` +
-      `About ${(mold.designed.plasticCm3 + mold.plain.plasticCm3).toFixed(0)}cm³ of filament for the pair, and ` +
-      `${(mold.designed.siliconeMl + mold.plain.siliconeMl).toFixed(0)}ml of silicone to fill them.`;
-
     setChoosing({
-      title: warnings.length ? "Worth checking before you print" : "Two halves to print",
-      subtitle: warnings.length
-        ? `${warnings.map((finding) => finding.detail).join("\n\n")}\n\n${summary}`
-        : summary,
-      choices: [
-        {
-          value: 0,
-          label: "Export the half with the drawing",
-          detail: "The domes carry the picture. Print this one first.",
-        },
-        {
-          value: 1,
-          label: "Export the smooth half",
-          detail: "The back of the ball, with the pour holes and the key hollows.",
-        },
-      ],
+      ...moldPrompt(mold, ball.label.toLowerCase()),
       onPick: (value) => {
-        const half = value === 0 ? mold.designed : mold.plain;
-        void shareMoldHalf(half, value === 0 ? "designed" : "smooth");
+        const designed = value === MOLD_DESIGNED;
+        void shareMoldHalf(designed ? mold.designed : mold.plain, designed ? "designed" : "smooth");
       },
     });
   }
@@ -1269,7 +1191,7 @@ export function DesignEditor({
     try {
       const bytes = encodeStl(half.mesh, `${project.title} mold ${which}`);
       const name = project.title.replace(/[^a-z0-9]+/gi, "-").toLowerCase() || "mold";
-      await shareDataUrl(`data:model/stl;base64,${toBase64(bytes)}`, `${name}-mold-${which}.stl`);
+      await shareBytes(bytes, `${name}-mold-${which}.stl`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't share the mold half.");
     } finally {
@@ -1283,7 +1205,7 @@ export function DesignEditor({
     try {
       const bytes = encodeStl(tray.mesh, `${project.title} casting tray`);
       const name = project.title.replace(/[^a-z0-9]+/gi, "-").toLowerCase() || "tray";
-      await shareDataUrl(`data:model/stl;base64,${toBase64(bytes)}`, `${name}-tray.stl`);
+      await shareBytes(bytes, `${name}-tray.stl`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't share the casting tray.");
     } finally {
@@ -2044,16 +1966,16 @@ function Inspector({
     return (
       <PanelTitle icon="layers-outline" title={`${project.layers.length} editable layer${project.layers.length === 1 ? "" : "s"}`} subtitle="Top layers appear in front. Lock production-critical artwork before arranging.">
         {[...project.layers].reverse().map((layer) => (
-            <Pressable key={layer.id} onPress={() => onProject("Select layer", { ...project, selectedLayerId: layer.id })} style={[styles.layerRow, { backgroundColor: layer.id === project.selectedLayerId ? `${theme.accent}16` : theme.surfaceAlt, borderColor: layer.id === project.selectedLayerId ? theme.accent : theme.line }]}>
-              <Pressable onPress={() => onProject(layer.visible ? "Hide layer" : "Show layer", updateLayer(project, layer.id, (item) => ({ ...item, visible: !item.visible })))} hitSlop={8}>
+            <Pressable key={layer.id} onPress={() => onProject("Select layer", { ...project, selectedLayerId: layer.id })} accessibilityRole="button" accessibilityState={{ selected: layer.id === project.selectedLayerId }} style={[styles.layerRow, { backgroundColor: layer.id === project.selectedLayerId ? `${theme.accent}16` : theme.surfaceAlt, borderColor: layer.id === project.selectedLayerId ? theme.accent : theme.line }]}>
+              <Pressable onPress={() => onProject(layer.visible ? "Hide layer" : "Show layer", updateLayer(project, layer.id, (item) => ({ ...item, visible: !item.visible })))} hitSlop={8} accessibilityRole="button" accessibilityLabel={`${layer.visible ? "Hide" : "Show"} ${layer.name}`}>
               <Icon name={layer.visible ? "visibility" : "visibilityOff"} size={TYPE.body.fontSize + SPACE.xs / 3} color={layer.visible ? theme.foreground : theme.muted} />
               </Pressable>
               <View style={{ flex: 1 }}>
               <Text numberOfLines={1} style={[TYPE.caption, { color: theme.foreground, fontFamily: theme.fontBodyMedium }]}>{layer.name}</Text>
               <Text style={[TYPE.micro, { color: theme.muted, fontFamily: theme.fontBody }]}>{layer.kind.toUpperCase()} · {Math.round(layer.opacity * 100)}%</Text>
               </View>
-            <Pressable onPress={() => onProject("Move layer up", moveLayer(project, layer.id, 1))} hitSlop={8}><Icon name="chevronUp" size={TYPE.body.fontSize + SPACE.xs / 3} color={theme.muted} /></Pressable>
-            <Pressable onPress={() => onProject("Move layer down", moveLayer(project, layer.id, -1))} hitSlop={8}><Icon name="chevronDown" size={TYPE.body.fontSize + SPACE.xs / 3} color={theme.muted} /></Pressable>
+            <Pressable onPress={() => onProject("Move layer up", moveLayer(project, layer.id, 1))} hitSlop={8} accessibilityRole="button" accessibilityLabel={`Move ${layer.name} in front`}><Icon name="chevronUp" size={TYPE.body.fontSize + SPACE.xs / 3} color={theme.muted} /></Pressable>
+            <Pressable onPress={() => onProject("Move layer down", moveLayer(project, layer.id, -1))} hitSlop={8} accessibilityRole="button" accessibilityLabel={`Move ${layer.name} behind`}><Icon name="chevronDown" size={TYPE.body.fontSize + SPACE.xs / 3} color={theme.muted} /></Pressable>
             <Icon name={layer.locked ? "lock" : "unlock"} size={TYPE.caption.fontSize} color={layer.locked ? theme.accent : theme.muted} />
           </Pressable>
         ))}

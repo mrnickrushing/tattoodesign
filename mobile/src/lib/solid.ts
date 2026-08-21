@@ -714,30 +714,56 @@ export type WatertightReport = {
  */
 export function inspectMesh(mesh: Mesh): WatertightReport {
   const p = mesh.positions;
-  const directed = new Map<string, number>();
-  let degenerate = 0;
 
-  // Quantised so that two vertices meant to be the same are the same. Float32
-  // rounding on a shared corner would otherwise read as a crack.
-  const key = (i: number) => `${p[i].toFixed(4)},${p[i + 1].toFixed(4)},${p[i + 2].toFixed(4)}`;
+  // Corners are interned to integers first, and edges keyed on those.
+  //
+  // The obvious way is a string per edge — two corners spelled out and joined —
+  // and it is what this did. It also made the watertight check *four fifths* of
+  // the cost of building a ball: sixty-character keys, three to a triangle, and
+  // `toFixed` on every coordinate to make them. Interning trades that for one
+  // short key per corner and plain arithmetic per edge, and the check is a
+  // runtime guard now rather than only a test, so what it costs is paid on
+  // every export.
+  const ids = new Map<string, number>();
+  const corner = (i: number): number => {
+    // Quantised the same way and for the same reason: two vertices meant to be
+    // the same have to land on the same id, and float32 rounding on a shared
+    // corner would otherwise read as a crack. A tenth of a micron.
+    const key = `${Math.round(p[i] * 1e4)},${Math.round(p[i + 1] * 1e4)},${Math.round(p[i + 2] * 1e4)}`;
+    const found = ids.get(key);
+    if (found !== undefined) return found;
+    const made = ids.size;
+    ids.set(key, made);
+    return made;
+  };
+
+  const directed = new Map<number, number>();
+  let degenerate = 0;
+  const abc = [0, 0, 0];
 
   for (let t = 0; t < mesh.count; t++) {
     const i = t * 9;
-    const corners = [key(i), key(i + 3), key(i + 6)];
-    if (corners[0] === corners[1] || corners[1] === corners[2] || corners[2] === corners[0]) {
+    abc[0] = corner(i);
+    abc[1] = corner(i + 3);
+    abc[2] = corner(i + 6);
+    if (abc[0] === abc[1] || abc[1] === abc[2] || abc[2] === abc[0]) {
       degenerate++;
       continue;
     }
     for (let e = 0; e < 3; e++) {
-      const edge = `${corners[e]}|${corners[(e + 1) % 3]}`;
+      // Packed rather than concatenated. A mesh would need sixty-seven million
+      // distinct corners before this stopped being exact, and one that large
+      // has other problems.
+      const edge = abc[e] * 0x4000000 + abc[(e + 1) % 3];
       directed.set(edge, (directed.get(edge) ?? 0) + 1);
     }
   }
 
   let unmatched = 0;
   for (const [edge, times] of directed) {
-    const [from, to] = edge.split("|");
-    if (times !== 1 || (directed.get(`${to}|${from}`) ?? 0) !== 1) unmatched++;
+    const from = Math.floor(edge / 0x4000000);
+    const to = edge - from * 0x4000000;
+    if (times !== 1 || (directed.get(to * 0x4000000 + from) ?? 0) !== 1) unmatched++;
   }
 
   return { watertight: unmatched === 0 && degenerate === 0 && mesh.count > 0, unmatched, degenerate };

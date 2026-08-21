@@ -36,6 +36,25 @@ export async function saveDataUrlToPhotos(dataUrl: string, filename: string): Pr
   await MediaLibrary.saveToLibraryAsync(file.uri);
 }
 
+/**
+ * Shares raw bytes, without a base64 detour.
+ *
+ * `shareDataUrl` is the right door for an image that already *is* a data URL —
+ * that is how the design library stores them. It is the wrong one for something
+ * generated as bytes: encoding a mesh to base64 only for this to decode it back
+ * costs a second of held-up UI and, on a mold, a twelve-megabyte string in
+ * memory on a phone that has better uses for it.
+ */
+export async function shareBytes(bytes: Uint8Array, filename: string): Promise<void> {
+  const Sharing = await import("expo-sharing");
+  const file = new File(Paths.cache, filename);
+  if (file.exists) file.delete();
+  file.write(bytes);
+  const available = await Sharing.isAvailableAsync();
+  if (!available) throw new Error("Sharing isn't available on this device.");
+  await Sharing.shareAsync(file.uri);
+}
+
 export async function shareDataUrl(dataUrl: string, filename: string): Promise<void> {
   const Sharing = await import("expo-sharing");
   const file = writeDataUrlToTempFile(dataUrl, filename);
