@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 420" width="1200" height="420" role="img" aria-label="Inkline — Ink Lab and Sugar Haus">
+  <defs>
+    <linearGradient id="seam" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ef233c"/>
+      <stop offset="1" stop-color="#d83c78"/>
+    </linearGradient>
+    <filter id="soft" x="-40%" y="-40%" width="180%" height="180%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <!-- studio halves -->
+  <polygon points="0,0 620,0 580,420 0,420" fill="#0a0909"/>
+  <polygon points="620,0 1200,0 1200,420 580,420" fill="#fff6f0"/>
+  <line x1="620" y1="0" x2="580" y2="420" stroke="url(#seam)" stroke-width="3"/>
+
+  <!-- Ink Lab decorative mandala (geometric flash style), low opacity -->
+  <g stroke="#ef233c" stroke-width="1.5" fill="none" opacity="0.2">
+    <circle cx="150" cy="325" r="55"/>
+    <circle cx="150" cy="325" r="30"/>
+    <line x1="95" y1="325" x2="205" y2="325"/>
+    <line x1="150" y1="270" x2="150" y2="380"/>
+    <line x1="111.1" y1="286.1" x2="188.9" y2="363.9"/>
+    <line x1="188.9" y1="286.1" x2="111.1" y2="363.9"/>
+  </g>
+
+  <!-- Sugar Haus decorative iced cookie, low opacity -->
+  <g stroke="#d83c78" stroke-width="2" fill="none" opacity="0.22" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="1080" cy="300" r="54"/>
+    <path d="M1034,292 q10,-14 20,0 q10,-14 20,0 q10,-14 20,0 q10,-14 20,0"/>
+    <circle cx="1060" cy="264" r="4"/>
+    <circle cx="1096" cy="270" r="4"/>
+    <circle cx="1080" cy="316" r="4"/>
+  </g>
+
+  <!-- Ink Lab text block -->
+  <g font-family="'Helvetica Neue', Arial, sans-serif">
+    <text x="60" y="56" fill="#ef233c" font-size="15" font-weight="700" letter-spacing="3">TATTOO FLASH STUDIO</text>
+    <text x="58" y="168" fill="#fff7f1" font-size="84" font-weight="800" letter-spacing="2">INKLINE</text>
+    <text x="62" y="204" fill="#aaa09a" font-size="19" font-weight="400">Design flash. Build sheets. Print &amp; go.</text>
+
+    <g font-size="13" font-weight="700" letter-spacing="1.5">
+      <rect x="62" y="230" width="108" height="30" rx="15" fill="none" stroke="#ef233c" stroke-width="1.5"/>
+      <text x="116" y="250" fill="#fff7f1" text-anchor="middle">GENERATE</text>
+      <rect x="180" y="230" width="98" height="30" rx="15" fill="none" stroke="#ef233c" stroke-width="1.5"/>
+      <text x="229" y="250" fill="#fff7f1" text-anchor="middle">CONVERT</text>
+      <rect x="288" y="230" width="76" height="30" rx="15" fill="none" stroke="#ef233c" stroke-width="1.5"/>
+      <text x="326" y="250" fill="#fff7f1" text-anchor="middle">SHEET</text>
+    </g>
+  </g>
+
+  <!-- Sugar Haus text block -->
+  <g>
+    <text x="700" y="56" fill="#d83c78" font-family="'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="700" letter-spacing="3">COOKIE &amp; CAKE POP STUDIO</text>
+    <text x="697" y="172" fill="#442d30" font-family="Georgia, 'Times New Roman', serif" font-size="52" font-style="italic" font-weight="700">Sugar Haus</text>
+    <text x="702" y="206" fill="#93777b" font-family="'Helvetica Neue', Arial, sans-serif" font-size="19" font-weight="400">Design sweets. Build sheets. Bake &amp; go.</text>
+
+    <g font-family="'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="700" letter-spacing="1.5">
+      <rect x="702" y="230" width="108" height="30" rx="15" fill="none" stroke="#d83c78" stroke-width="1.5"/>
+      <text x="756" y="250" fill="#442d30" text-anchor="middle">GENERATE</text>
+      <rect x="820" y="230" width="98" height="30" rx="15" fill="none" stroke="#d83c78" stroke-width="1.5"/>
+      <text x="869" y="250" fill="#442d30" text-anchor="middle">CONVERT</text>
+      <rect x="928" y="230" width="76" height="30" rx="15" fill="none" stroke="#d83c78" stroke-width="1.5"/>
+      <text x="966" y="250" fill="#442d30" text-anchor="middle">SHEET</text>
+    </g>
+  </g>
+
+  <!-- unifying seam badge, clear of both wordmarks -->
+  <g filter="url(#soft)">
+    <circle cx="600" cy="50" r="32" fill="#f4f2ef" stroke="#241716" stroke-width="2"/>
+    <g stroke="#241716" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <line x1="588" y1="64" x2="612" y2="36"/>
+      <polygon points="612,36 606,30 618,32" fill="#241716"/>
+      <polygon points="588,64 584,70 592,68" fill="#241716"/>
+    </g>
+  </g>
+
+  <!-- seam caption, in the clear lower-middle -->
+  <g filter="url(#soft)">
+    <rect x="470" y="352" width="260" height="32" rx="16" fill="#f4f2ef"/>
+    <text x="600" y="373" text-anchor="middle" font-family="'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" letter-spacing="1.6" fill="#241716">ONE TOOLKIT · TWO STUDIOS</text>
+  </g>
+</svg>

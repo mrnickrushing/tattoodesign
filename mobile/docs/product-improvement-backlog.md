@@ -1,83 +1,90 @@
 # Inkline product improvement backlog
 
-This backlog starts from the app that already exists: dual studios, AI generation,
-photo-to-linework conversion, a per-studio design library, touch-up/crop/cut-line
-editing, true-size placement previews, saved sheets, print/share export, prompt
-history, icing previews, and OTA updates.
+## Status — audited 2026-08-20
+
+Implementation outran this doc, same failure mode as `premium-editor-delivery.md`:
+16 of 18 items below were already shipped (dates/PRs cited inline) and nobody
+came back to mark them. Two are now marked **out of scope** — this is a
+2-person app (Nick + Allison), never public, so a template marketplace and a
+multi-role team workspace don't apply. What's left as a genuine, unbuilt
+backlog is just **two items: #2 and #5.**
 
 ## Now — highest product value
 
-1. **Studio dashboard with recent work — shipped**
-   - Show recent designs and saved sheets directly beneath the primary create actions.
-   - Let people resume an unfinished sheet in one tap.
-   - This turns the app from a collection of tools into an ongoing workspace.
+1. **Studio dashboard with recent work — shipped.**
+   `src/app/[brand]/index.tsx` (`recentDesigns`, `recentSheets`, resume-in-one-tap).
 
-2. **Visual starter templates**
+2. **Visual starter templates — not started.**
    - Add illustrated prompt presets for common tattoo compositions and bakery themes.
    - Preview the expected composition before generation instead of listing only a style name.
    - Include seasonal Sugar Haus packs and traditional/fine-line Ink Lab packs.
 
-3. **Search, tags, favorites, and folders**
-   - Organize the design library by client, event, collection, or order.
-   - Support favorites and user-created tags, with filters for generated, converted, and uploaded work.
+3. **Search, tags, favorites, and folders — shipped.**
+   `libraryFilter.ts` (`favoritesOnly`, `tag`, free-text), part of PR #27.
 
-4. **AI variations and remix**
-   - Generate variations from an existing result while preserving the subject or composition.
-   - Add focused actions such as “simpler,” “bolder outline,” “more symmetrical,” and “try another pose.”
+4. **AI variations and remix — shipped.**
+   `remix.ts` (`REMIX_VERBS`, `applyRemixVerb`), PR #32.
 
-5. **Better first-run experience**
+5. **Better first-run experience — not started.**
    - Offer a sample project for each studio and a short guided path through Generate → Edit → Sheet.
    - Keep tutorials dismissible and available again from Settings.
+   - No onboarding/tutorial/first-run code exists anywhere in `src/` yet.
 
 ## Next — professional workflow upgrades
 
-6. **Client and order projects**
-   - Ink Lab: client name, placement, dimensions, appointment date, and reference notes.
-   - Sugar Haus: customer, event date, quantity, colors, sizes, and fulfillment notes.
+6. **Client and order projects — shipped.**
+   `clientProjects.ts` carries client name, placement, dimensions, appointment
+   date, and reference notes, PR #30.
 
-7. **Shareable approval proofs**
-   - Export a branded PDF or private link with design choices, true dimensions, and comments.
-   - Track approved/revision-needed status without exposing the editing workspace.
+7. **Shareable approval proofs — shipped.**
+   `proofSheet.ts` renders a branded PDF with true dimensions and an
+   approved/revision-needed status, PR #33.
 
-8. **Vector export**
-   - Export SVG/PDF linework in addition to PNG so artists can use cutters, plotters, and desktop illustration tools.
+8. **Vector export — shipped.**
+   `projectToSvg` (`designProject.ts`) wired into `DesignEditor.tsx`; PDF
+   export via `printing.ts` (`Print.printToFileAsync`).
 
-9. **Batch conversion**
-   - Import several references, apply one trace preset, review the results, and add selected designs to a sheet.
+9. **Batch conversion — shipped.**
+   `batch.ts` (`BATCH_LIMIT = 12`, queue states), PR #35.
 
-10. **Non-destructive version history**
-    - Keep named checkpoints for designs and sheets.
-    - Add undo/redo inside the design editor and allow restoring an earlier version after saving.
+10. **Non-destructive version history — shipped.**
+    `designProject.ts` snapshots (`snapshotProject`, bounded to the last 7) +
+    `VersionHistory.tsx`.
 
-11. **Reusable brand presets**
-    - Save preferred line weight, smoothing, cut-line gap, paper size, printer calibration, and export defaults.
+11. **Reusable brand presets — shipped.**
+    `preferences.ts` (`createPreferenceStore`), PR #34.
 
-12. **Cloud backup and device sync**
-    - Make local-first files recoverable and available across phone and tablet.
-    - Treat account creation as optional until a user enables backup or sharing.
+12. **Cloud backup and device sync — shipped.**
+    `encryptedBackup.ts` (AES-256-GCM, key in SecureStore) plus
+    `librarySync.ts`/`syncPlan.ts` for phone/iPad/browser sync.
 
 ## Later — expansion opportunities
 
-13. **Apple Pencil and stylus editing**
-    - Pressure-aware touch-up, palm rejection, precision zoom, and configurable brush stabilization.
+13. **Apple Pencil and stylus editing — shipped.**
+    `penInput.ts` conditions stroke width on pressure and tilt.
 
-14. **Live placement preview**
-    - Extend the existing photo mockup into a live camera overlay with calibration and frozen comparison frames.
+14. **Live placement preview — shipped.**
+    `PlacementPreview.tsx`'s `"live"` mode uses `expo-camera`'s `CameraView`,
+    plus a healed-preview overlay via `simulateHealing`.
 
-15. **Smart cleanup assistant**
-    - Detect stray specks, broken contours, dense detail, and likely cut-line problems before export.
+15. **Smart cleanup assistant — shipped.**
+    `cleanup.ts` (`findSpecks`, `bridgeGaps`, `applyCleanup`), PR #29.
 
-16. **Template marketplace or studio packs**
-    - Curated first-party packs first; creator submissions only after licensing and moderation are defined.
+16. **Template marketplace or studio packs — out of scope.**
+    Personal 2-person app; creator submissions, licensing, and moderation
+    have no audience here.
 
-17. **Team workspace**
-    - Shared project folders, roles, review comments, and handoff between designer, artist/baker, and front desk.
+17. **Team workspace — out of scope.**
+    No designer/artist/front-desk roles to hand off between when the whole
+    team is Nick and Allison.
 
-18. **Production checklist**
-    - Ink Lab: stencil readiness, dimensions, placement, and print confirmation.
-    - Sugar Haus: cutter size, icing palette, quantity, sheet count, and due-date confirmation.
+18. **Production checklist — shipped.**
+    `productionTools.ts` (`inspectProduction`), `spacing.ts` (blowout /
+    minimum-line-spacing check), `icingRecipe.ts`.
 
-## Suggested sequence
+## What's actually left
 
-Build items 1–5 as one activation milestone, then 6–12 as a professional-workflow
-milestone. Validate demand before investing in marketplace or team administration.
+Just #2 (illustrated starter-template previews) and #5 (first-run
+walkthrough). Both are small enough to plan and ship as a single wave
+whenever they're worth doing — there's no professional-workflow milestone
+left to sequence toward, that already shipped.
