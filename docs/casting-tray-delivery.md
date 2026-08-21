@@ -60,7 +60,28 @@ that becomes an object.
   the face. Below one bead it is refused outright and the finding says the piece
   will cast plain — the same posture as the fillet floor, for the same reason.
 
-## Five things that were only visible in the arithmetic
+- **A flare that gives way instead of giving up.** In a notch narrower than
+  twice the flare, the two walls run past each other and the edges between them
+  come out pointing backwards. That used to fail the whole offset — measured on
+  real line art it is 56 edges in 1390, and the other 96% were thrown away with
+  them. Now the vertices on a reversed edge give way, together, to the most they
+  can both take, and the rest of the outline keeps the full flare.
+
+  Only while a loop is *expanding*. Contracting is the opposite case: a 4mm
+  square closed in by 3 from every side has no inside left, and a loop with no
+  inside left has to be refused, not talked down to a smaller one that was never
+  there. Which is happening is the sign of the distance against the sign of the
+  winding — a hole handed a positive distance is contracting, because that is
+  what growing the solid around it means.
+
+  This was written up here as wanting *polygon booleans* — clip the offset
+  against itself and keep the valid loops. Measuring first said otherwise, and
+  said something better: a boolean would fill the notch between two arms of a
+  snowflake with solid plastic and weld them together at the base. That is the
+  same failure the tray already guards against between neighbouring shapes, and
+  no more welcome for happening inside one shape. Giving way keeps the drawing.
+
+## Six things that were only visible in the arithmetic
 
 None of these show up in a render, which is why the property test — 60 random
 masks built and weighed — is the gate that matters.
@@ -77,7 +98,18 @@ masks built and weighed — is the gate that matters.
    the tray quoted 9% *less* silicone than it needed. The body now starts at the
    top of the skirt rather than at the floor. A slicer forgives that overlap;
    somebody standing at a bench measuring rubber does not.
-5. **A loop that touches itself is not simple**, though nothing about it
+5. **A tray that was open, and had been all along.** Ear clipping drops a
+   vertex it reads as flat — but the walls are raised on the loop the caller
+   handed in, which still goes by way of that vertex. The cap spans straight
+   across, three edges have nothing to pair against, and the solid is open along
+   a seam nobody drew. Whether a corner reads as flat comes down to rounding,
+   and rounding comes down to where the shape stands, so a tray of one cavity
+   was sound and a tray of three was not. On generated line art it was **6 trays
+   in 40**. A flat vertex now leaves a sliver behind it, which covers no area
+   and carries the two edges the walls need; and `extrudeBetween` checks its own
+   work before handing it over, so what it cannot close it returns nothing for
+   and the caller counts it.
+6. **A loop that touches itself is not simple**, though nothing about it
    crosses. `isSimplePolygon` compared edges for strict crossings, so an offset
    that grew two parts of a shape into contact came back clean, and the walls
    raised on it carried zero-area faces. Touching now counts: a repeated vertex,
@@ -88,12 +120,6 @@ masks built and weighed — is the gate that matters.
 - **Two-part molds.** Cake pops and truffles are spheres; `substrate.ts` knows
   their real sizes. A sphere needs two halves with registration keys, which is
   a different solid entirely.
-- **Offsets that clip themselves.** The fillet refuses a *concave* corner where
-  two arms meet at a shallow angle, though filling that notch is exactly what a
-  fillet ought to do there. Telling it apart from a genuine self-intersection
-  needs the offset to clip itself rather than refuse — polygon booleans, a much
-  larger piece of geometry. Until then, detailed line art comes back
-  square-footed and is told so, which is at least true.
 
 ## The offset trap
 

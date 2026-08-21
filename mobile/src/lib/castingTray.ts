@@ -222,12 +222,11 @@ function flareLimit(outlines: Outline[], largestMm: number, nozzleMm: number, we
  * `floorMm`, below which the flare is finer than the printer can lay down and
  * claiming one would be a lie about a surface that came out square anyway.
  *
- * Known limit: a *concave* corner where two arms meet at a shallow angle gets
- * refused, though filling that notch is exactly what a fillet ought to do
- * there. Distinguishing it from a genuine self-intersection needs the offset to
- * clip itself rather than refuse, which is a different and much larger piece of
- * geometry. Until then, detailed line art comes back square-footed and is told
- * so, which is at least true.
+ * A concave corner no longer costs the shape its whole flare: the vertices in a
+ * notch too tight for it give way to what they can take while the rest of the
+ * outline keeps the full distance, so the flare narrows where there is no room
+ * rather than vanishing everywhere. Halving is still the fallback for the cases
+ * that give way and are refused anyway.
  */
 function flareFor(outline: Outline, largestMm: number, floorMm: number): { outline: Outline; mm: number } | null {
   for (let mm = largestMm, step = 0; step <= FILLET_HALVINGS; mm /= 2, step++) {
@@ -256,6 +255,14 @@ export type Tray = {
   filletsSkipped: number;
   /** The smallest flare actually applied, in millimetres. Zero when none was. */
   filletAppliedMm: number;
+  /**
+   * Shapes left out because the extrusion could not close them.
+   *
+   * Always zero in ordinary use. It is not zero that matters — it is that an
+   * unclosable shape leaves by this door, counted, rather than reaching a
+   * printer as an open surface.
+   */
+  shapesDropped: number;
   /**
    * How far the linework was actually raised on the top face, in millimetres.
    *
@@ -404,6 +411,9 @@ export function buildTray(
   // separate closed solids, not one shape repeated by the slicer.
   let filletsSkipped = 0;
   let smallestFlareMm = Infinity;
+  // Shapes the extrusion would not vouch for as closed solids. Better left out
+  // of the file than shipped open, but never left out quietly.
+  let shapesDropped = 0;
   const positives = grid.positions.flatMap((at) =>
     unitOutlines.flatMap((unit) => {
       const outline: Outline = {
@@ -418,7 +428,9 @@ export function buildTray(
       const skirt = flare && extrudeTapered(flare.outline, outline, floorMm - WELD_MM, floorMm + flare.mm);
       if (!flare || !skirt || !skirt.count) {
         if (filletMm > 0) filletsSkipped++;
-        return [extrudePrism(outline.outer, outline.holes, floorMm - WELD_MM, floorMm + spec.shapeMm)];
+        const square = extrudePrism(outline.outer, outline.holes, floorMm - WELD_MM, floorMm + spec.shapeMm);
+        if (!square.count) shapesDropped++;
+        return [square];
       }
       if (flare.mm < smallestFlareMm) smallestFlareMm = flare.mm;
 
@@ -434,6 +446,7 @@ export function buildTray(
         floorMm + flare.mm - WELD_MM,
         floorMm + spec.shapeMm
       );
+      if (!body.count) shapesDropped++;
       return [body, skirt];
     })
   );
@@ -479,6 +492,7 @@ export function buildTray(
     shapes: grid.positions.length * shapes.length,
     filletsSkipped,
     filletAppliedMm: Number.isFinite(smallestFlareMm) ? smallestFlareMm : 0,
+    shapesDropped,
     reliefAppliedMm,
     cavities: grid.positions.length,
     columns: grid.columns,
@@ -498,6 +512,7 @@ export function buildTray(
       filletsSkipped,
       filletAppliedMm: Number.isFinite(smallestFlareMm) ? smallestFlareMm : 0,
       shapeMm: spec.shapeMm,
+      shapesDropped,
       reliefMm,
       reliefAppliedMm,
       reliefLineMm,
@@ -551,6 +566,7 @@ function inspectTray(
     filletsSkipped: number;
     filletAppliedMm: number;
     shapeMm: number;
+    shapesDropped: number;
     reliefMm: number;
     reliefAppliedMm: number;
     reliefLineMm: number;
@@ -638,6 +654,21 @@ function inspectTray(
             detail: `The linework is about ${limits.reliefLineMm.toFixed(2)}mm across, under the ${limits.nozzleMm}mm bead this nozzle lays down, so it cannot be raised on the face. The piece will cast as a plain silhouette. Scale it up, or print it with a finer nozzle, to get the drawing back.`,
           }
     );
+  }
+
+  // Silence here would be the worst of both worlds: a tray that looks whole and
+  // is missing a piece. Rare enough that it has never been seen outside a
+  // generated test, loud enough to act on if it ever is.
+  if (limits.shapesDropped > 0) {
+    findings.push({
+      level: "warn",
+      title: "Left out",
+      detail: `${limits.shapesDropped} shape${
+        limits.shapesDropped === 1 ? " could" : "s could"
+      } not be closed into a solid and ${
+        limits.shapesDropped === 1 ? "was" : "were"
+      } left out of the file rather than written open — an open surface is the one thing a slicer cannot make sense of. The rest of the tray is sound. Simplify that part of the drawing, or scale the piece up, and export again.`,
+    });
   }
 
   findings.push({
