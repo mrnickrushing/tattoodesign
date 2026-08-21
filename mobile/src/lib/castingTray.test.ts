@@ -757,3 +757,14 @@ test("a warning about what has to stand up does not read as one about the raised
   const relief = tray.findings.find((finding) => finding.title === "Relief")!;
   assert.equal(relief.level, "pass", "a bead-wide ridge on a face is fine");
 });
+
+test("a tray says which printer it assumed when nobody has said", () => {
+  const guessed = buildTray(oneShape(), W, H, SPEC)!;
+  const printer = guessed.findings.find((finding) => finding.title === "Printer")!;
+  assert.ok(printer, "the assumption is stated");
+  assert.match(printer.detail, /0.4mm nozzle/);
+  assert.equal(printer.level, "pass", "a premise, not a fault in the file");
+
+  const known = buildTray(oneShape(), W, H, { ...SPEC, nozzleMm: 0.6, bedMm: 250 })!;
+  assert.equal(known.findings.some((finding) => finding.title === "Printer"), false);
+});

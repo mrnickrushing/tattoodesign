@@ -1,6 +1,6 @@
 # Casting trays — design to 3D printer
 
-## Status — spine complete; trays hold many cavities, are filleted, and carry the drawing
+## Status — flat trays and two-part ball molds, both carrying the drawing
 
 Allison's side of the app makes images; what she needs from them is a mold. The
 workflow is: 3D print a tray, pour silicone into it, and the cured silicone is
@@ -81,7 +81,38 @@ that becomes an object.
   same failure the tray already guards against between neighbouring shapes, and
   no more welcome for happening inside one shape. Giving way keeps the drawing.
 
-## Six things that were only visible in the arithmetic
+- **Two-part molds** (`dome.ts`, `sphereMold.ts`). A cake pop is a ball on a
+  stick and a truffle is a ball, and neither is a prism of anything — there is
+  no flat face to stand on and no one-piece silicone mold you could peel off
+  one. So it comes as **two trays**: pour each, cure each, and close the two
+  blocks onto each other.
+
+  The second tray is the first one mirrored, and that is the whole trick for
+  making the halves line up. Turning a cured block over to face its partner
+  mirrors it, so a mirrored tray cancels that out and every cavity lands back on
+  its opposite number — no symmetry demanded of the layout, odd counts and short
+  rows included.
+
+  Registration is four keys, a corner each: pins on one half, and on the other a
+  pocket built rather than subtracted — the floor cut for it with a thinner slab
+  laid underneath, because nothing here does booleans. Three keys would locate
+  the halves; the fourth is what stops anybody closing the mold the wrong way
+  round and only finding out after it sets.
+
+  The drawing is pressed onto the dome from directly above, the way a round
+  sticker goes onto a ball: the middle of the drawing lands on the pole
+  undistorted and its rim reaches the equator. Facets are chosen for the nozzle
+  and capped, because a ball at a tenth of a millimetre a facet is a file nobody
+  can open — and the finding says which it settled on.
+
+- **An assumed printer, said out loud.** Nozzle and bed default to 0.4mm and
+  220mm, and every limit in both files is measured against that nozzle. Until a
+  real one is set, the findings now say they are assuming it. Deliberately *not*
+  a warning: marking it one would put "Export anyway" on every export until a
+  printer is bought, which is how a person learns to click past warnings — and
+  the warnings here are the whole point.
+
+## Seven things that were only visible in the arithmetic
 
 None of these show up in a render, which is why the property test — 60 random
 masks built and weighed — is the gate that matters.
@@ -93,12 +124,22 @@ masks built and weighed — is the gate that matters.
 3. **A collinear sliver must stay** even though it covers nothing — its three
    edges are three real edges, and dropping one tears three holes in a surface
    that was closed.
-4. **A body counted twice under its own skirt.** Both are closed meshes over the
+4. **Two solids built on the same corners.** The pocket under a registration
+   key started out sharing its outline with the hole in the floor above it,
+   vertex for vertex. Parts of a tray overlap all over and the slicer unions
+   them happily — but two faces built on the *same* corners are a different
+   thing: the edges pair off against each other instead of against their own
+   solid, and the assembled file reads as open. A hair of difference fixes it.
+   The pour channel had the same shape of fault for a different reason: routed
+   along the floor to the nearest wall, the channel from a back-row ball ran
+   straight through the ball in front of it. It goes up through the back now,
+   which has nothing in its way whatever the layout.
+5. **A body counted twice under its own skirt.** Both are closed meshes over the
    same footprint, and `meshVolume` sums them without seeing the overlap — so
    the tray quoted 9% *less* silicone than it needed. The body now starts at the
    top of the skirt rather than at the floor. A slicer forgives that overlap;
    somebody standing at a bench measuring rubber does not.
-5. **A tray that was open, and had been all along.** Ear clipping drops a
+6. **A tray that was open, and had been all along.** Ear clipping drops a
    vertex it reads as flat — but the walls are raised on the loop the caller
    handed in, which still goes by way of that vertex. The cap spans straight
    across, three edges have nothing to pair against, and the solid is open along
@@ -109,7 +150,7 @@ masks built and weighed — is the gate that matters.
    and carries the two edges the walls need; and `extrudeBetween` checks its own
    work before handing it over, so what it cannot close it returns nothing for
    and the caller counts it.
-6. **A loop that touches itself is not simple**, though nothing about it
+7. **A loop that touches itself is not simple**, though nothing about it
    crosses. `isSimplePolygon` compared edges for strict crossings, so an offset
    that grew two parts of a shape into contact came back clean, and the walls
    raised on it carried zero-area faces. Touching now counts: a repeated vertex,
@@ -117,9 +158,15 @@ masks built and weighed — is the gate that matters.
 
 ## What is not built
 
-- **Two-part molds.** Cake pops and truffles are spheres; `substrate.ts` knows
-  their real sizes. A sphere needs two halves with registration keys, which is
-  a different solid entirely.
+- **The far side of a ball.** The drawing goes on one half and the other is
+  smooth, which is how a cake pop is decorated — it has a front. A design that
+  wrapped the whole ball would have to be split across both hemispheres and
+  meet itself at the equator, and nothing here does that.
+- **Crowned pieces.** A domed cookie is a sphere as far as `curveWarp` is
+  concerned, but it is a small cap of a very large one rather than a ball, so it
+  goes down the flat-tray road and casts with a flat top. `isBall` is the line
+  between the two: a ball's circumference is its own width times pi, a domed
+  cookie's is nothing like it.
 
 ## The offset trap
 

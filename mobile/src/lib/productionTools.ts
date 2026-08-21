@@ -14,6 +14,7 @@ import { stripDataUrlPrefix } from "./files";
 import { agePixels, healingProfile, type HealAge } from "./healing";
 import { coverageGaps, coverupFinding, coverupThreshold, edgeStrength, inkDensityMap, type Region } from "./coverup";
 import { buildTray, type Tray, type TraySpec } from "./castingTray";
+import { buildSphereMold, type SphereMold, type SphereMoldSpec } from "./sphereMold";
 import { finestStrokeWidth } from "./lineWidth";
 import { otsuThreshold } from "./sketch";
 
@@ -192,6 +193,21 @@ const TRAY_WIDTH = 600;
  * chain lives next door where it can be tested off-device, and what is here is
  * the pixels.
  */
+/**
+ * A two-part mold for a ball, from the same drawing a tray would come from.
+ *
+ * The drawing is read at the same resolution either way; what changes is what
+ * it is laid onto — a flat outline standing off a floor, or a dome pressed on
+ * from directly above.
+ */
+export function moldFromDesign(dataUrl: string, spec: SphereMoldSpec): SphereMold | null {
+  const image = decode(dataUrl);
+  const width = Math.min(TRAY_WIDTH, image.width());
+  const height = Math.max(1, Math.round((image.height() * width) / image.width()));
+  const { mask } = inkGrid(dataUrl, width, height);
+  return buildSphereMold(mask, width, height, spec);
+}
+
 export function trayFromDesign(dataUrl: string, spec: TraySpec): Tray | null {
   const image = decode(dataUrl);
   const width = Math.min(TRAY_WIDTH, image.width());

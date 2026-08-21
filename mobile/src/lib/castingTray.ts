@@ -312,6 +312,10 @@ export function buildTray(
   const coverMm = spec.coverMm ?? DEFAULTS.coverMm;
   const marginMm = spec.marginMm ?? DEFAULTS.marginMm;
   const nozzleMm = spec.nozzleMm ?? DEFAULTS.nozzleMm;
+  // Nobody has said what printer this is for. Every limit below is measured
+  // against the nozzle, so an unanswered setting is an assumption the findings
+  // would otherwise state as fact.
+  const printerAssumed = spec.nozzleMm === undefined && spec.bedMm === undefined;
   const bedMm = spec.bedMm ?? DEFAULTS.bedMm;
   const copies = Math.max(1, Math.floor(spec.copies ?? DEFAULTS.copies));
   const filletMm = Math.max(0, spec.filletMm ?? DEFAULTS.filletMm);
@@ -509,6 +513,7 @@ export function buildTray(
       depthMm,
       nozzleMm,
       bedMm,
+      printerAssumed,
       copies,
       unitWidthMm,
       unitDepthMm,
@@ -563,6 +568,7 @@ function inspectTray(
     depthMm: number;
     nozzleMm: number;
     bedMm: number;
+    printerAssumed: boolean;
     copies: number;
     unitWidthMm: number;
     unitDepthMm: number;
@@ -582,6 +588,18 @@ function inspectTray(
   const findings: ProductionFinding[] = [];
 
   const finestMm = finestStrokeWidth(mask, maskWidth, maskHeight) * mmPerPx;
+  if (limits.printerAssumed) {
+    findings.push({
+      // A stated premise, not a fault in the file. Marking it a warning would
+      // put "Export anyway" on every single export until a printer is bought,
+      // which is how a person learns to click past warnings — and the warnings
+      // here are the entire point.
+      level: "pass",
+      title: "Printer",
+      detail: `Assuming a ${limits.nozzleMm}mm nozzle on a ${limits.bedMm}mm bed, because no printer is set yet — that is the common size, and a guess. Every measurement below is taken against that nozzle: what will print, how fine a flare can be, how thin a raised line may go. Set the real one in Settings and they all move with it.`,
+    });
+  }
+
   const minimumMm = limits.nozzleMm * MIN_WALL_NOZZLES;
   findings.push(
     finestMm >= minimumMm
