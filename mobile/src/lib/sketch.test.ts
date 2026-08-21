@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   applyMatrix,
   consolidateStrokes,
+  consolidateWithin,
   deskewMatrix,
   deskewSize,
   estimatePaperQuad,
@@ -341,4 +342,11 @@ test("a buffer too short for the frame yields an empty mask, not a crash", () =>
   const mask = sheetMask(new Uint8Array(4), 100, 100);
   assert.equal(mask.length, 100 * 100);
   assert.equal(mask.reduce<number>((sum, value) => sum + value, 0), 0);
+});
+
+test("the pixel-space entry point is the same collapse", () => {
+  const paths = [horizontal(0), horizontal(3), horizontal(6)];
+  assert.deepEqual(consolidateWithin(paths, 10), consolidateStrokes(paths, 1, PX_PER_MM));
+  assert.equal(consolidateWithin(paths, 0).length, 3, "no tolerance, no consolidation");
+  assert.equal(consolidateWithin([], 10).length, 0);
 });

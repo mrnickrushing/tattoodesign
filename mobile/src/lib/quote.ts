@@ -239,7 +239,7 @@ export function icingPlan(designs: BatchDesign[], quantity: number): IcingLine[]
   const stated = designs.reduce((sum, design) => sum + Math.max(0, design.count), 0);
   const scale = quantity > 0 && stated > 0 ? quantity / stated : 1;
 
-  const byColour = new Map<string, { label: string; cups: number }>();
+  const byColour = new Map<string, { hex: string; label: string; cups: number }>();
   for (const design of designs) {
     const count = Math.max(0, design.count) * scale;
     const area = Math.max(0, design.widthIn) * Math.max(0, design.heightIn);
@@ -254,20 +254,23 @@ export function icingPlan(designs: BatchDesign[], quantity: number): IcingLine[]
     for (const colour of design.colours) {
       const share = (cups * Math.max(0, colour.weight)) / weight;
       if (share <= 0) continue;
-      const key = colour.hex.trim().toLowerCase();
+      // By hex where there is one, by name where there is not: an order
+      // planned before the colours are chosen is still three colours, and
+      // keying blank hexes together would merge them into one mix.
+      const key = colour.hex.trim().toLowerCase() || colour.label.trim().toLowerCase();
       const existing = byColour.get(key);
       if (existing) existing.cups += share;
-      else byColour.set(key, { label: colour.label, cups: share });
+      else byColour.set(key, { hex: colour.hex.trim().toLowerCase(), label: colour.label, cups: share });
     }
   }
 
   return [...byColour.entries()]
-    .map(([hex, entry]) => ({
-      hex,
+    .map(([key, entry]) => ({
+      hex: entry.hex,
       label: entry.label,
       cups: toMeasurable(entry.cups),
       exactCups: entry.cups,
-      recipe: recipeFor(hex, entry.cups),
+      recipe: entry.hex ? recipeFor(entry.hex, entry.cups) : null,
     }))
     // Most icing first: the biggest batch is the one to mix while the kitchen
     // is still clean.

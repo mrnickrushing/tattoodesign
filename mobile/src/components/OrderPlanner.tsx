@@ -2,6 +2,7 @@ import { useState } from "react";
 import { View, Text, StyleSheet, Pressable, TextInput } from "react-native";
 import * as Haptics from "expo-haptics";
 import { useBrand } from "@/context/BrandContext";
+import { planBatch } from "@/lib/quote";
 import { estimateYield } from "@/lib/yield";
 import { RADIUS, SPACE, TYPE } from "@/lib/theme";
 import { Icon } from "@/components/Icon";
@@ -34,16 +35,49 @@ export function OrderPlanner({
   const [open, setOpen] = useState(false);
   const [quantity, setQuantity] = useState("24");
   const [coverage, setCoverage] = useState(0.8);
+  const [colours, setColours] = useState(2);
+  const [rate, setRate] = useState("");
 
   const parsed = Number.parseInt(quantity, 10);
+  const pieces = Number.isFinite(parsed) ? parsed : 0;
   const estimate = estimateYield({
-    quantity: Number.isFinite(parsed) ? parsed : 0,
+    quantity: pieces,
     widthIn: pieceWidthIn,
     heightIn: pieceHeightIn,
     sheetWidthIn,
     sheetHeightIn,
     floodCoverage: coverage,
   });
+
+  // Quoted only once a rate has been typed. A price with a made-up rate behind
+  // it is worse than no price, because it is the one number people remember.
+  const hourlyRate = Number.parseFloat(rate);
+  const run =
+    Number.isFinite(hourlyRate) && hourlyRate > 0 && pieces > 0
+      ? planBatch({
+          designs: [
+            {
+              id: "order",
+              label: "Order",
+              count: pieces,
+              widthIn: pieceWidthIn,
+              heightIn: pieceHeightIn,
+              floodCoverage: coverage,
+              // Named rather than coloured: the palette is usually settled
+              // after the quantity is, and the count is what drives the passes.
+              colours: Array.from({ length: colours }, (_, i) => ({
+                hex: "",
+                label: `Colour ${i + 1}`,
+                weight: 1,
+              })),
+            },
+          ],
+          quantity: pieces,
+          sheetWidthIn,
+          sheetHeightIn,
+          hourlyRate,
+        })
+      : null;
 
   return (
     <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.line }]}>
@@ -62,7 +96,7 @@ export function OrderPlanner({
             Plan the order
           </Text>
           <Text style={[TYPE.caption, { color: theme.muted, fontFamily: theme.fontBody }]}>
-            Sheets, paper and icing for a batch
+            Sheets, icing and what to charge for a batch
           </Text>
         </View>
         <Icon name={open ? "chevronUp" : "chevronDown"} size={TYPE.body.fontSize} color={theme.muted} />
@@ -156,6 +190,74 @@ export function OrderPlanner({
             Icing is a guide, not a measurement — consistency, flood depth and what stays in the
             bag all move it. Mixing a little extra is always cheaper than matching a second batch.
           </Text>
+
+          <Text style={[TYPE.micro, { color: theme.muted, fontFamily: theme.fontBodyMedium, marginTop: SPACE.sm }]}>
+            HOW MANY COLOURS
+          </Text>
+          <View style={styles.row}>
+            {[1, 2, 3, 4, 5].map((count) => {
+              const active = colours === count;
+              return (
+                <Pressable
+                  key={count}
+                  onPress={() => {
+                    setColours(count);
+                    Haptics.selectionAsync();
+                  }}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  style={[
+                    styles.chip,
+                    { backgroundColor: active ? theme.accent : theme.surfaceAlt, borderColor: active ? theme.accent : theme.line },
+                  ]}
+                >
+                  <Text style={[TYPE.micro, { color: active ? theme.accentText : theme.muted, fontFamily: theme.fontBodyMedium }]}>
+                    {count}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          <View style={[styles.row, { marginTop: SPACE.sm }]}>
+            <Text style={[TYPE.micro, { color: theme.muted, fontFamily: theme.fontBodyMedium, width: 76 }]}>
+              YOUR RATE
+            </Text>
+            <TextInput
+              value={rate}
+              onChangeText={setRate}
+              keyboardType="decimal-pad"
+              placeholder="per hour"
+              placeholderTextColor={theme.muted}
+              accessibilityLabel="Your hourly rate"
+              style={[
+                styles.input,
+                { color: theme.foreground, borderColor: theme.line, backgroundColor: theme.surfaceAlt, fontFamily: theme.fontBody },
+              ]}
+            />
+          </View>
+
+          {run && (
+            <>
+              <View style={styles.results}>
+                <Result label="Decorating" value={`${run.hours} h`} theme={theme} />
+                <Result
+                  label="What to charge"
+                  value={`${run.subtotal}`}
+                  hint="before ingredients"
+                  theme={theme}
+                />
+              </View>
+              {run.lines.map((line) => (
+                <Text
+                  key={line.label}
+                  style={[TYPE.caption, { color: theme.muted, fontFamily: theme.fontBody }]}
+                >
+                  {line.label} — {line.detail}
+                </Text>
+              ))}
+            </>
+          )}
         </View>
       )}
     </View>

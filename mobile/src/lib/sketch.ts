@@ -623,7 +623,20 @@ function nearestOnPath(point: Point, path: Point[]): Point | null {
  * output stable when the same drawing is traced twice.
  */
 export function consolidateStrokes(paths: Point[][], toleranceMm: number, pxPerMm: number): Point[][] {
-  const tolerance = toleranceMm * pxPerMm;
+  return consolidateWithin(paths, toleranceMm * pxPerMm);
+}
+
+/**
+ * The same collapse, told the tolerance directly in pixels.
+ *
+ * A stroke coming off the tracer has no physical size yet — the mask was
+ * thresholded at a working resolution and nobody has said how big the piece
+ * prints. What that caller does know is the line weight it just traced at, and
+ * two contours within a couple of line weights of each other are the same
+ * searched line. Millimetres are the right unit for a hand drawing on a canvas
+ * of known size; pixels are the right unit for a mask.
+ */
+export function consolidateWithin(paths: Point[][], tolerance: number): Point[][] {
   if (paths.length < 2 || tolerance <= 0) return paths.map((path) => path.slice());
 
   const parent = paths.map((_, i) => i);

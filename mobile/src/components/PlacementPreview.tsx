@@ -29,7 +29,9 @@ import { CARD_HEIGHT_IN, CARD_WIDTH_IN, getScreenPpi, setScreenPpi } from "@/lib
 import { PREF_KEYS, preferences } from "@/lib/preferences";
 import { File } from "expo-file-system";
 import { HEAL_AGES, type HealAge } from "@/lib/healing";
+import { SKIN_TONES, contrastAdvice, type SkinTone } from "@/lib/skinTones";
 import { simulateHealing } from "@/lib/productionTools";
+import { pxPerMmFromDpi } from "@/lib/spacing";
 import { SPACE, RADIUS } from "@/lib/theme";
 
 type Mode = "size" | "photo" | "live";
@@ -59,6 +61,10 @@ export function PlacementPreview({
 
   const [mode, setMode] = useState<Mode>("size");
   const [aspect, setAspect] = useState(1);
+  /** Pixel width of the artwork, for working out how fine its finest mark can be. */
+  const [pixelWidth, setPixelWidth] = useState(0);
+  /** Skin to preview against. Null is the flash paper the app used to assume. */
+  const [tone, setTone] = useState<SkinTone | null>(null);
   const [ppi, setPpi] = useState(160);
   const [calibrated, setCalibrated] = useState(false);
   const [calibrating, setCalibrating] = useState(false);
@@ -84,7 +90,9 @@ export function PlacementPreview({
     RNImage.getSize(
       uri,
       (w, h) => {
-        if (active && w > 0 && h > 0) setAspect(h / w);
+        if (!active || w <= 0 || h <= 0) return;
+        setAspect(h / w);
+        setPixelWidth(w);
       },
       () => {
         // Square is the safest guess: these are line art on a square canvas.
@@ -151,6 +159,23 @@ export function PlacementPreview({
     .onUpdate((e) => {
       rotation.value = startR.value + (e.rotation * 180) / Math.PI;
     });
+
+  /**
+   * The finest mark this artwork can express at the size it is set to, in
+   * millimetres — one of its own pixels. It is a bound rather than a
+   * measurement: whatever the piece actually contains, nothing in it is finer
+   * than this, so if this clears the tone then nothing in the design can fail
+   * on it. Anything tighter needs the real linework, which is the Production
+   * desk's job rather than a preview's.
+   */
+  const artworkDpi = pixelWidth > 0 && widthIn > 0 ? pixelWidth / widthIn : 0;
+  const finestMarkMm = artworkDpi > 0 ? 1 / pxPerMmFromDpi(artworkDpi) : 0;
+  const skinAdvice = tone && finestMarkMm > 0 ? contrastAdvice("#111111", tone, finestMarkMm) : null;
+
+  function selectTone(next: SkinTone | null) {
+    setTone(next);
+    Haptics.selectionAsync();
+  }
 
   const gesture = Gesture.Simultaneous(pan, pinch, rotate);
 
@@ -386,7 +411,7 @@ export function PlacementPreview({
                 styles.stage,
                 {
                   height: stageH,
-                  backgroundColor: mode === "size" ? theme.stock : "#000000",
+                  backgroundColor: mode === "size" ? (tone?.hex ?? theme.stock) : "#000000",
                   borderColor: theme.line,
                 },
               ]}
@@ -460,6 +485,37 @@ export function PlacementPreview({
                   <Notice tone="info" icon="information-circle-outline">
                     Sizes are an estimate until you calibrate this screen.
                   </Notice>
+                </View>
+              )}
+
+              {/* Skin, not paper. Black on flash paper is about 19:1; the same
+                  black on deep skin is nearer 3:1, and the fine line that
+                  reads beautifully on the sheet is the one that disappears at
+                  arm's length. Sugar Haus has no equivalent question — a
+                  cookie really is a pale flat surface. */}
+              {brand.id !== "sugar" && (
+                <View style={{ marginTop: SPACE.sm }}>
+                  <View style={styles.chips} accessibilityRole="radiogroup">
+                    <Chip label="On paper" active={tone === null} onPress={() => selectTone(null)} />
+                    {SKIN_TONES.map((option) => (
+                      <Chip
+                        key={option.id}
+                        label={option.label.replace(/^Type /, "")}
+                        active={tone?.id === option.id}
+                        onPress={() => selectTone(option)}
+                      />
+                    ))}
+                  </View>
+                  {skinAdvice && skinAdvice.level === "warn" && (
+                    <View style={{ marginTop: SPACE.xs }}>
+                      <Notice>{skinAdvice.detail}</Notice>
+                    </View>
+                  )}
+                  {skinAdvice && skinAdvice.level === "pass" && (
+                    <Text style={[styles.footnote, { color: theme.muted, fontFamily: theme.fontBody }]}>
+                      {skinAdvice.detail}
+                    </Text>
+                  )}
                 </View>
               )}
 

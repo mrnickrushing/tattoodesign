@@ -331,3 +331,26 @@ test("quote copy never leaves a token unresolved", () => {
   })!;
   run.lines.forEach((line) => assert.ok(!/\$\{|undefined|NaN/.test(line.detail), line.detail));
 });
+
+test("colours chosen later are still separate colours", () => {
+  // An order planned before anyone has picked the palette: three colours with
+  // no hex yet. Keying those together would plan one mix for three passes.
+  const unnamed: BatchDesign = {
+    ...COOKIE,
+    colours: [
+      { hex: "", label: "Colour 1", weight: 1 },
+      { hex: "", label: "Colour 2", weight: 1 },
+      { hex: "", label: "Colour 3", weight: 1 },
+    ],
+  };
+  const plan = icingPlan([unnamed], 60);
+  assert.equal(plan.length, 3);
+  plan.forEach((line) => assert.equal(line.recipe, null, "no hex, nothing to mix from"));
+  assert.deepEqual(new Set(plan.map((line) => line.label)).size, 3);
+});
+
+test("a named colour still carries its recipe", () => {
+  const [line] = icingPlan([{ ...COOKIE, colours: [{ hex: "#E86A9A", label: "Rose", weight: 1 }] }], 40);
+  assert.equal(line.hex, "#e86a9a");
+  assert.ok(line.recipe, "a real colour can be mixed from the gels on the shelf");
+});

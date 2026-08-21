@@ -12,6 +12,7 @@ import {
 import { warpMesh, type Surface } from "./curveWarp";
 import { stripDataUrlPrefix } from "./files";
 import { agePixels, healingProfile, type HealAge } from "./healing";
+import { coverageGaps, coverupFinding, coverupThreshold, edgeStrength, inkDensityMap, type Region } from "./coverup";
 
 export type ProductionFinding = { level: "pass" | "warn"; title: string; detail: string };
 
@@ -51,6 +52,83 @@ export function inspectProduction(dataUrl: string, dpi = 203, brand: "ink" | "su
       ? { level: darkRatio < 0.36 ? "pass" : "warn", title: "Piping feasibility", detail: darkRatio < 0.36 ? "Contour density leaves practical spacing for piping and transfers." : "Dense filled regions may need simplification for edible transfer work." }
       : { level: edgeRatio < 0.22 ? "pass" : "warn", title: "Stencil separation", detail: edgeRatio < 0.22 ? "Line density leaves enough negative space for a readable thermal transfer." : "Very dense edge detail may close up on skin or thermal paper." },
   ];
+}
+
+/** Ink threshold, matching the cut-line tracer: below this the pixel is ink. */
+const INK_LUMINANCE = 128;
+
+/** Both pieces reduced to the same grid, so the two can be compared at all. */
+function inkGrid(dataUrl: string, width: number, height: number) {
+  const image = decode(dataUrl);
+  const surface = Skia.Surface.Make(width, height);
+  if (!surface) throw new Error("The cover-up comparison is too large for this device.");
+  const canvas = surface.getCanvas();
+  canvas.clear(Skia.Color("white"));
+  canvas.drawImageRect(
+    image,
+    Skia.XYWHRect(0, 0, image.width(), image.height()),
+    Skia.XYWHRect(0, 0, width, height),
+    Skia.Paint()
+  );
+  const pixels = surface.makeImageSnapshot().readPixels(0, 0, {
+    width,
+    height,
+    colorType: ColorType.RGBA_8888,
+    alphaType: AlphaType.Unpremul,
+  }) as Uint8Array | null;
+  if (!pixels) throw new Error("The cover-up comparison could not read pixel data.");
+
+  const gray = new Uint8Array(width * height);
+  const mask = new Uint8Array(width * height);
+  for (let i = 0; i < gray.length; i++) {
+    const p = i * 4;
+    const luminance = pixels[p] * 0.299 + pixels[p + 1] * 0.587 + pixels[p + 2] * 0.114;
+    gray[i] = Math.round(luminance);
+    mask[i] = luminance < INK_LUMINANCE ? 1 : 0;
+  }
+  return { gray, mask };
+}
+
+/** Working resolution for the comparison. Coverage is an area question, not a detail one. */
+const COVERUP_WIDTH = 480;
+/** Patch size, in pixels of the above. A few millimetres of skin at print size. */
+const COVERUP_CELL = 16;
+
+export type CoverupAssessment = {
+  /** How crisp the old piece still is, 0 (a faded blur) to 1 (a fresh hard edge). */
+  edgeStrength: number;
+  /** Ink the new design needs, as a multiple of the old piece's. */
+  threshold: number;
+  /** Patches the design leaves too open, worst first, in the comparison's own pixels. */
+  gaps: Region[];
+  finding: ProductionFinding;
+};
+
+/**
+ * Whether this design will actually cover the tattoo already there.
+ *
+ * Both images are resampled onto one grid — they are photographs of different
+ * things at different sizes, and nothing can be compared until they are not.
+ * That resampling is also the assumption: the caller has to have framed the
+ * existing piece the way the new design will sit over it, because nothing here
+ * can register one to the other.
+ */
+export function assessCoverup(designUrl: string, existingUrl: string): CoverupAssessment {
+  const existingImage = decode(existingUrl);
+  const width = Math.min(COVERUP_WIDTH, existingImage.width());
+  const height = Math.max(1, Math.round((existingImage.height() * width) / existingImage.width()));
+
+  const existing = inkGrid(existingUrl, width, height);
+  const design = inkGrid(designUrl, width, height);
+
+  const edge = edgeStrength(existing.gray, width, height);
+  const threshold = coverupThreshold(edge);
+  const gaps = coverageGaps(
+    inkDensityMap(design.mask, width, height, COVERUP_CELL),
+    inkDensityMap(existing.mask, width, height, COVERUP_CELL),
+    threshold
+  );
+  return { edgeStrength: edge, threshold, gaps, finding: coverupFinding(gaps, threshold) };
 }
 
 /**

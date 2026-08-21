@@ -57,10 +57,12 @@ import type { LibraryDesign } from "@/lib/designLibrary";
 import { renderProject } from "@/lib/projectRenderer";
 import type { CropRect } from "@/lib/crop";
 import { DEFAULT_STENCIL_OPTIONS, stencilMask, stencilize } from "@/lib/stencil";
+import { layDown, toolsFor } from "@/lib/material";
+import { consolidateWithin } from "@/lib/sketch";
 import { DEFAULT_TRACE, polylinesToStrokeLayer, skeletonize, tracePolylines } from "@/lib/vectorize";
 import { addCutLine, DEFAULT_CUT_LINE } from "@/lib/cutline";
 import { shareUri } from "@/lib/files";
-import { compareCapture, inspectProduction, simulateHealing, wrapForSurface, type ProductionFinding } from "@/lib/productionTools";
+import { assessCoverup, compareCapture, inspectProduction, simulateHealing, wrapForSurface, type ProductionFinding } from "@/lib/productionTools";
 import { HEAL_AGES, type HealAge } from "@/lib/healing";
 import { MIN_LINE_GAP_MM, checkLineSpacing, pxPerMmFromDpi, spacingFinding } from "@/lib/spacing";
 import { PREF_KEYS, isFiniteNumber, preferences } from "@/lib/preferences";
@@ -139,6 +141,14 @@ const TOOLS: { id: EditorTool; label: string; icon: IconName }[] = [
 // Tracing allocates per thinning pass, so the mask is capped well below the
 // canvas size. The resulting geometry scales back up losslessly.
 const TRACE_MAX_DIMENSION = 1400;
+
+/**
+ * How far apart, in traced line weights, two contours can sit and still be the
+ * same line found twice. Two is the width of a pencil search — wide enough to
+ * catch a sketchy triple-drawn edge, narrow enough to leave a deliberate
+ * double line alone.
+ */
+const SKETCH_SEARCH_WIDTHS = 2;
 
 // How far a photo is knocked back when it becomes something to draw over.
 // Faint enough that black linework reads clearly on top, strong enough to
@@ -662,11 +672,16 @@ export function DesignEditor({
         lineWeight,
         maxDimension: Math.min(longest, TRACE_MAX_DIMENSION),
       });
-      const paths = tracePolylines(skeletonize(mask, width, height), width, height, DEFAULT_TRACE);
-      if (!paths.length) {
+      const traced = tracePolylines(skeletonize(mask, width, height), width, height, DEFAULT_TRACE);
+      if (!traced.length) {
         setError("No linework found to trace. Lower the detail threshold and try again.");
         return;
       }
+      // Someone finding a line on paper draws it three or four times, and the
+      // tracer faithfully returns all four. Two contours within a couple of
+      // line weights of each other are the same searched line, so they collapse
+      // to one before any of this becomes editable geometry.
+      const paths = consolidateWithin(traced, (lineWeight + 1) * SKETCH_SEARCH_WIDTHS);
       // The mask is traced at a working resolution, so scale the geometry back
       // onto the canvas before it becomes a layer.
       const toCanvas = project.canvas.width / width;
@@ -679,12 +694,67 @@ export function DesignEditor({
         brushColor
       );
       const hidden = { ...project, layers: project.layers.map((item) => ({ ...item, visible: false })) };
-      await commit(`Trace to vector · ${paths.length} paths`, addLayer(hidden, layer));
+      const collapsed = traced.length - paths.length;
+      await commit(
+        `Trace to vector \u00b7 ${paths.length} paths${collapsed > 0 ? ` \u00b7 ${collapsed} merged` : ""}`,
+        addLayer(hidden, layer)
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't trace the linework.");
     } finally {
       setBusy(false);
     }
+  }
+
+  /**
+   * Redraws the linework as the chosen tool would actually lay it down.
+   *
+   * A design on screen is a flat vector at one weight. A tattoo is a needle
+   * grouping dragged at a particular speed and a cookie is a bead squeezed out
+   * of a tip, and neither lays a constant line. Three widths rather than the
+   * full table: the question here is fine, bold or heavy, and the whole set
+   * belongs in a picker rather than an alert.
+   */
+  async function layDownWithTool() {
+    if (!project) return;
+    const layer =
+      selected?.kind === "stroke" && !selected.locked
+        ? selected
+        : [...project.layers].reverse().find(
+            (item): item is StrokeLayer => item.kind === "stroke" && item.visible && !item.locked
+          );
+    if (!layer || !layer.strokes.length) {
+      setError("Nothing to lay down — trace or draw some linework first.");
+      return;
+    }
+
+    const tools = toolsFor(brand.id);
+    const offered = [tools[1], tools[3], tools[tools.length - 1]].filter(Boolean);
+    Alert.alert(
+      brand.id === "sugar" ? "Which tip?" : "Which grouping?",
+      "The linework is redrawn at the width this tool really lays down, thickening where the hand slowed.",
+      [
+        { text: "Cancel", style: "cancel" },
+        ...offered.map((tool) => ({
+          text: `${tool.label} — ${tool.widthMm}mm`,
+          onPress: () => {
+            const pxPerMm = pxPerMmFromDpi(PRINT_DPI);
+            const next = {
+              ...layer,
+              strokes: layer.strokes.map((stroke) =>
+                stroke.mode === "draw"
+                  ? { ...stroke, points: layDown(stroke.points, tool.widthMm, pxPerMm), width: tool.widthMm * pxPerMm }
+                  : stroke
+              ),
+            };
+            void commit(`Lay down \u00b7 ${tool.label}`, {
+              ...project,
+              layers: project.layers.map((item) => (item.id === layer.id ? next : item)),
+            });
+          },
+        })),
+      ]
+    );
   }
 
   async function cleanUpStrokes() {
@@ -909,6 +979,35 @@ export function DesignEditor({
     const asset = picked.assets[0];
     if (!asset.base64) return setError("That capture couldn't be read locally.");
     setFindings(compareCapture(preview, `data:${asset.mimeType ?? "image/jpeg"};base64,${asset.base64}`));
+  }
+
+  /**
+   * Whether this design will bury the tattoo already there.
+   *
+   * Both photographs are resampled onto one grid, which is also the assumption
+   * the artist has to satisfy: frame the existing piece the way the new design
+   * will sit over it. Nothing here can register one to the other, and a
+   * comparison of two differently-framed photos would be confidently wrong.
+   */
+  async function checkCoverup() {
+    if (!preview) return;
+    const picked = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 1, base64: true });
+    if (picked.canceled) return;
+    const asset = picked.assets[0];
+    if (!asset.base64) return setError("That photo couldn't be read locally.");
+    try {
+      const assessment = assessCoverup(preview, `data:${asset.mimeType ?? "image/jpeg"};base64,${asset.base64}`);
+      setFindings([
+        assessment.finding,
+        {
+          level: "pass",
+          title: "What's underneath",
+          detail: `The old piece reads ${Math.round(assessment.edgeStrength * 100)}% crisp, so the new one needs about ${assessment.threshold.toFixed(1)}x its ink to hide it.`,
+        },
+      ]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't compare the two photos.");
+    }
   }
 
   async function shareReviewPacket() {
@@ -1184,6 +1283,7 @@ export function DesignEditor({
               onExportSvg={exportSvg}
               onTrace={traceToVector}
               onCleanup={cleanUpStrokes}
+              onLayDown={layDownWithTool}
               nodeMode={nodeMode}
               onNodeMode={setNodeMode}
               surfaceId={surfaceId}
@@ -1193,6 +1293,7 @@ export function DesignEditor({
               onWrapWidth={setWrapWidthIn}
               onApplyWrap={applyWrap}
               onInspect={runProductionCheck}
+              onCheckCoverup={brand.id === "sugar" ? undefined : checkCoverup}
               healAge={healAge}
               onHealAge={runHealing}
               onCheckCapture={checkCapture}
@@ -1258,6 +1359,7 @@ function Inspector({
   onExportSvg,
   onTrace,
   onCleanup,
+  onLayDown,
   nodeMode,
   onNodeMode,
   surfaceId,
@@ -1267,6 +1369,7 @@ function Inspector({
   onWrapWidth,
   onApplyWrap,
   onInspect,
+  onCheckCoverup,
   healAge,
   onHealAge,
   onCheckCapture,
@@ -1311,6 +1414,7 @@ function Inspector({
   onExportSvg: () => void;
   onTrace: () => void;
   onCleanup: () => void;
+  onLayDown: () => void;
   nodeMode: "move" | "delete" | "insert";
   onNodeMode: (mode: "move" | "delete" | "insert") => void;
   surfaceId: string;
@@ -1320,6 +1424,8 @@ function Inspector({
   onWrapWidth: (value: number) => void;
   onApplyWrap: (direction: "compensate" | "foreshorten") => void;
   onInspect: () => void;
+  /** Absent for Sugar Haus: there is nothing underneath a cookie. */
+  onCheckCoverup?: () => void;
   healAge: HealAge;
   onHealAge: (age: HealAge) => void;
   onCheckCapture: () => void;
@@ -1474,6 +1580,7 @@ function Inspector({
           <MiniAction icon="color-filter-outline" label="Refine" onPress={() => onProcess("stencil")} />
           <MiniAction icon="git-network-outline" label="Vector" onPress={onTrace} />
           <MiniAction icon="sparkles-outline" label="Clean up" onPress={onCleanup} />
+          <MiniAction icon="brush-outline" label="Lay down" onPress={onLayDown} />
           <MiniAction icon="ellipse-outline" label="Cut line" onPress={() => onProcess("cutline")} />
           <MiniAction icon="code-slash-outline" label="SVG" onPress={onExportSvg} />
         </View>
@@ -1712,6 +1819,7 @@ function Inspector({
         <View style={styles.actionRow}>
           <MiniAction icon="shield-checkmark-outline" label="Preflight" onPress={onInspect} />
           <MiniAction icon="camera-outline" label="Check photo" onPress={onCheckCapture} />
+          {onCheckCoverup && <MiniAction icon="layers-outline" label="Cover-up" onPress={onCheckCoverup} />}
           <MiniAction icon="send-outline" label="Review" onPress={onShareReview} />
         </View>
         {findings.map((finding) => (
