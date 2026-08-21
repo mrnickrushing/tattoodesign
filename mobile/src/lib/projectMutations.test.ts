@@ -221,7 +221,7 @@ function store() {
     files,
     save(project: EditableDesignProject, label: string, at = 1) {
       const body = `snapshot-${files.size}.json`;
-      files.set(body, JSON.stringify(snapshotBody(project)));
+      files.set(body, JSON.stringify(snapshotBody(project, at)));
       const next = snapshotProject(project, label, body, at);
       for (const dropped of evictedBodies(project.snapshots, next.snapshots)) files.delete(dropped);
       return next;

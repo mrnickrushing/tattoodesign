@@ -42,7 +42,11 @@ export async function readManifest(brand: BrandId, id: string): Promise<string |
 
   try {
     await writeManifest(brand, id, legacy);
-    localStorage.removeItem(key);
+    // Read back before dropping the only other copy. withStore now waits for
+    // the transaction rather than the request, so this should never disagree —
+    // but "should never" is a poor reason to delete somebody's only manifest.
+    const stored = await withStore<string | undefined>(STORES.projectManifests, "readonly", (s) => s.get(key));
+    if (stored === legacy) localStorage.removeItem(key);
   } catch {
     // Couldn't move it. Hand back what is there rather than failing the load;
     // the next save writes to the new store anyway.

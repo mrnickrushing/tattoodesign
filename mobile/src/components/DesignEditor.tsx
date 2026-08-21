@@ -33,6 +33,7 @@ import {
   addRasterAsset,
   cloneProject,
   commitSnapshot,
+  dropBodies,
   openProject,
   projectAssetBase64,
   restoreSnapshot,
@@ -387,11 +388,15 @@ export function DesignEditor({
   const stageH = stageW * aspect;
   const scale = project ? stageW / project.canvas.width : 1;
 
-  async function persist(next: EditableDesignProject) {
+  async function persist(next: EditableDesignProject, evicted: string[] = []) {
     setBusy(true);
     try {
       const bumped = { ...next, revision: next.revision + 1 };
       await saveProject(bumped);
+      // Only now. Until this write lands, the manifest on disk is the previous
+      // one, and it still names these — deleting them first would leave a
+      // restore point listed in the history that cannot be restored.
+      await dropBodies(bumped, evicted);
       const flattened = await renderProject(bumped);
       setProject(bumped);
       setPreview(flattened);
@@ -414,7 +419,8 @@ export function DesignEditor({
     if (!project) return;
     setPast((items) => [...items.slice(-39), clone(project)]);
     setFuture([]);
-    await persist(await commitSnapshot(next, label));
+    const snapped = await commitSnapshot(next, label);
+    await persist(snapped.project, snapped.evicted);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   }
 

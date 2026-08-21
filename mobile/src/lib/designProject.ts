@@ -4,7 +4,7 @@ import { generateId } from "./id";
 import * as store from "./projectStore";
 import { readAsset, writeAsset } from "./projectStore";
 import * as files from "./projectFiles";
-import type { ProjectStore } from "./projectFiles";
+import type { OpenedProject, ProjectStore } from "./projectFiles";
 import { PROJECT_SCHEMA_VERSION } from "./projectFiles";
 import { readImageBase64 } from "./imageSource";
 import { addLayer, fullCanvasTransform } from "./projectMutations";
@@ -82,6 +82,16 @@ export type DesignLayer = RasterLayer | StrokeLayer | ShapeLayer | TextLayer;
 export type SnapshotBody = {
   layers: DesignLayer[];
   canvas: EditableDesignProject["canvas"];
+  /**
+   * When this restore point was taken.
+   *
+   * Written into the body as well as the manifest, because the body is what
+   * survives the manifest. Without it, recovery has no way to tell which of
+   * the files on disk is the newest and has to guess — and the first version
+   * of this guessed by layer count, which is the same for every restore point
+   * in a session spent drawing rather than adding layers.
+   */
+  createdAt: number;
 };
 
 /**
@@ -152,12 +162,14 @@ const REAL: ProjectStore = {
   now: () => Date.now(),
 };
 
-export type { LoadResult } from "./projectFiles";
+export type { LoadResult, OpenedProject } from "./projectFiles";
 
 export const readProject = (brand: BrandId, id: string) => files.readProject(REAL, brand, id);
 export const saveProject = (project: EditableDesignProject) => files.saveProject(REAL, project);
 export const commitSnapshot = (project: EditableDesignProject, label: string) =>
   files.commitSnapshot(REAL, project, label);
+export const dropBodies = (project: EditableDesignProject, bodies: string[]) =>
+  files.dropBodies(REAL, project, bodies);
 export const restoreSnapshot = (project: EditableDesignProject, index: number) =>
   files.restoreSnapshot(REAL, project, index);
 export const salvageLatestSnapshot = (brand: BrandId, id: string) =>
@@ -212,60 +224,13 @@ export async function addRasterAsset(
 
 
 
-/**
- * What opening a design gave back, and whether anything was lost getting there.
- *
- * The caller has to be told when a project was rebuilt rather than opened.
- * Silence here is the whole bug this replaces: a damaged manifest came back as
- * an ordinary empty project, so the app looked like it had opened the design
- * for the first time and the artist had no way to know otherwise.
- */
-export type OpenedProject = {
-  project: EditableDesignProject;
-  /** Set when the stored project could not be read. */
-  damage?: {
-    /** Where the unreadable manifest was kept, if it could be kept. */
-    kept: string | null;
-    /** True when a restore point was found and used instead of starting over. */
-    salvaged: boolean;
-  };
-};
-
 export async function openProject(
   brand: BrandId,
   design: LibraryDesign
 ): Promise<OpenedProject> {
-  const stored = await readProject(brand, design.id);
-  if (stored.kind === "ok") return { project: stored.project };
-
-  const damage = stored.kind === "damaged" ? { kept: stored.kept, salvaged: false } : undefined;
-
-  // A damaged manifest is not the end of the drawing: restore points are files
-  // of their own and outlive it.
-  if (stored.kind === "damaged") {
-    const salvaged = await salvageLatestSnapshot(brand, design.id);
-    if (salvaged) {
-      const now = Date.now();
-      const project: EditableDesignProject = {
-        schemaVersion: PROJECT_SCHEMA_VERSION,
-        id: design.id,
-        brand,
-        title: design.title,
-        source: design.source,
-        canvas: salvaged.canvas,
-        layers: salvaged.layers,
-        selectedLayerId: salvaged.layers.at(-1)?.id ?? null,
-        createdAt: now,
-        updatedAt: now,
-        revision: 1,
-        snapshots: [],
-      };
-      await saveProject(project);
-      return { project, damage: { kept: stored.kept, salvaged: true } };
-    }
-  }
-
-  return { project: await createProject(brand, design), damage };
+  return files.openProject(REAL, brand, design.id, { title: design.title, source: design.source }, () =>
+    createProject(brand, design)
+  );
 }
 
 export async function loadOrCreateProject(

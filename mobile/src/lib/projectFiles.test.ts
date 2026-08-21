@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   PROJECT_SCHEMA_VERSION,
   commitSnapshot,
+  dropBodies,
+  openProject,
   readProject,
   restoreSnapshot,
   salvageLatestSnapshot,
@@ -88,6 +90,24 @@ function project(): EditableDesignProject {
     revision: 1,
     snapshots: [],
   };
+}
+
+/**
+ * The editor's own order: take the restore point, write the manifest, and only
+ * then delete what fell off the end.
+ */
+async function commitAndSave(store: Parameters<typeof dropBodies>[0], value: EditableDesignProject, label: string) {
+  const { project: next, evicted } = await commitSnapshot(store, value, label);
+  await saveProject(store, next);
+  await dropBodies(store, next, evicted);
+  return next;
+}
+
+/** The same project with its one stroke moved — no change to the layer count. */
+function withX(value: EditableDesignProject, x: number): EditableDesignProject {
+  const layer = { ...(value.layers[0] as StrokeLayer) };
+  layer.strokes = [{ ...layer.strokes[0], points: [{ x, y: 10 }, { x: 20, y: 20 }] }];
+  return { ...value, layers: [layer, ...value.layers.slice(1)] };
 }
 
 const firstX = (value: EditableDesignProject) => (value.layers[0] as StrokeLayer).strokes[0].points[0].x;
@@ -190,7 +210,7 @@ test("a restore point that cannot be moved is dropped, not fatal", async () => {
 
 test("a restore point's geometry is written beside the manifest, not into it", async () => {
   const disk = fake();
-  const value = await commitSnapshot(disk.store, project(), "First");
+  const value = await commitAndSave(disk.store, project(), "First");
 
   assert.equal(value.snapshots.length, 1);
   assert.match(value.snapshots[0].body, /^snapshot-/);
@@ -208,7 +228,7 @@ test("the manifest stops growing with the version history", async () => {
   const disk = fake();
   let value = project();
   const alone = JSON.stringify(value).length;
-  for (let i = 0; i < 8; i++) value = await commitSnapshot(disk.store, value, `Edit ${i}`);
+  for (let i = 0; i < 8; i++) value = await commitAndSave(disk.store, value, `Edit ${i}`);
 
   const withHistory = JSON.stringify(value).length;
   const perSnapshot = (withHistory - alone) / 8;
@@ -218,7 +238,7 @@ test("the manifest stops growing with the version history", async () => {
 test("restore points that fall off the end take their files with them", async () => {
   const disk = fake();
   let value = project();
-  for (let i = 0; i < 12; i++) value = await commitSnapshot(disk.store, value, `Edit ${i}`);
+  for (let i = 0; i < 12; i++) value = await commitAndSave(disk.store, value, `Edit ${i}`);
 
   assert.equal(value.snapshots.length, 8);
   assert.equal(disk.texts.size, 8, `${disk.texts.size} files left for 8 restore points`);
@@ -233,15 +253,16 @@ test("a full disk costs the restore point, not the edit", async () => {
   // be the tail wagging the dog.
   const disk = fake();
   disk.fill();
-  const value = await commitSnapshot(disk.store, project(), "First");
+  const { project: value, evicted } = await commitSnapshot(disk.store, project(), "First");
   assert.deepEqual(value.snapshots, []);
+  assert.deepEqual(evicted, [], "a restore point that was never written was scheduled for deletion");
   assert.equal(value.revision, 2, "the edit itself was not counted");
   assert.equal(firstX(value), 10, "the edit's own geometry was disturbed");
 });
 
 test("a restore point whose file is gone restores nothing rather than something wrong", async () => {
   const disk = fake();
-  const value = await commitSnapshot(disk.store, project(), "First");
+  const value = await commitAndSave(disk.store, project(), "First");
   disk.texts.clear();
   assert.equal(await restoreSnapshot(disk.store, value, 0), null);
   assert.equal(await restoreSnapshot(disk.store, value, 7), null, "an index past the end found something");
@@ -251,8 +272,8 @@ test("a restore point outlives the manifest that named it", async () => {
   // The recovery this buys. Restore points are their own files now, so a
   // manifest lost to an interrupted write is no longer the end of the drawing.
   const disk = fake();
-  let value = await commitSnapshot(disk.store, project(), "First");
-  value = await commitSnapshot(disk.store, { ...value, layers: [...value.layers, makeStrokeLayer(1000, 800, "Second")] }, "Second");
+  let value = await commitAndSave(disk.store, project(), "First");
+  value = await commitAndSave(disk.store, { ...value, layers: [...value.layers, makeStrokeLayer(1000, 800, "Second")] }, "Second");
   await saveProject(disk.store, value);
   disk.truncate();
 
@@ -267,7 +288,7 @@ test("a restore point outlives the manifest that named it", async () => {
 
 test("salvage ignores files that are not restore points", async () => {
   const disk = fake();
-  const value = await commitSnapshot(disk.store, project(), "First");
+  const value = await commitAndSave(disk.store, project(), "First");
   await saveProject(disk.store, value);
   disk.texts.set(`${BRAND}/${ID}/notes.txt`, "not JSON at all");
   disk.texts.set(`${BRAND}/${ID}/snapshot-broken.json`, "{ truncated");
@@ -292,12 +313,101 @@ test("an empty restore point is not worth salvaging", async () => {
   assert.equal(await salvageLatestSnapshot(disk.store, BRAND, ID), null);
 });
 
+test("salvage takes the newest restore point, not the biggest", async () => {
+  // The first version of this compared layer counts, reasoning that nothing
+  // recorded which was newest. Nothing did, because nothing had been asked to:
+  // a session spent drawing adds strokes to layers that already exist, so every
+  // restore point tied and recovery returned whichever the store happened to
+  // list first.
+  const disk = fake();
+  let value = project();
+  for (const [n, x] of [[1, 11], [2, 22], [3, 33]] as const) {
+    value = await commitAndSave(disk.store, withX(value, x), `Edit ${n}`);
+  }
+  assert.equal(disk.texts.size, 3);
+
+  const salvaged = await salvageLatestSnapshot(disk.store, BRAND, ID);
+  assert.equal(salvaged!.layers.length, 1, "the fixture did not hold the layer count still");
+  assert.equal(firstX({ ...value, layers: salvaged!.layers }), 33, "an older restore point was recovered");
+});
+
+test("a restore point taken after a layer was deleted is still the newest", async () => {
+  // Under the old comparison this case did not merely tie, it lost: the newest
+  // restore point held fewer layers than the one before it, so recovery walked
+  // backwards past the deletion.
+  const disk = fake();
+  let value = await commitAndSave(disk.store, { ...project(), layers: [...project().layers, makeStrokeLayer(1000, 800, "Extra")] }, "Two layers");
+  value = await commitAndSave(disk.store, { ...value, layers: value.layers.slice(0, 1) }, "Deleted one");
+
+  const salvaged = await salvageLatestSnapshot(disk.store, BRAND, ID);
+  assert.equal(salvaged!.layers.length, 1, "recovery undid the layer deletion");
+});
+
+test("a salvaged drawing is handed back even when it cannot be written down", async () => {
+  // Recovering the drawing is the point; writing it back only saves doing it
+  // again. Throwing here would turn a full disk into the loss this prevents —
+  // and worse, the damaged manifest has already been moved aside by then, so
+  // the next launch would see nothing to recover from.
+  const disk = fake();
+  const value = await commitAndSave(disk.store, project(), "First");
+  await saveProject(disk.store, value);
+  disk.truncate();
+  await readProject(disk.store, BRAND, ID);
+  disk.fill();
+
+  const salvaged = await salvageLatestSnapshot(disk.store, BRAND, ID);
+  assert.ok(salvaged, "a full disk lost a restore point that was already written");
+  assert.equal(salvaged!.layers.length, 1);
+});
+
+test("restore points are still found once the damaged manifest has been moved aside", async () => {
+  // Quarantine leaves the manifest *missing*, not damaged. Looking for restore
+  // points only on the damaged path meant one failed rewrite turned every
+  // later launch into a blank canvas with the restore points sitting there.
+  const disk = fake();
+  const value = await commitAndSave(disk.store, withX(project(), 77), "First");
+  await saveProject(disk.store, value);
+  disk.truncate();
+
+  assert.equal((await readProject(disk.store, BRAND, ID)).kind, "damaged");
+  // Second open: the manifest is gone rather than damaged.
+  assert.deepEqual(await readProject(disk.store, BRAND, ID), { kind: "missing" });
+  const salvaged = await salvageLatestSnapshot(disk.store, BRAND, ID);
+  assert.equal(firstX({ ...value, layers: salvaged!.layers }), 77, "the restore point was not found the second time");
+});
+
+test("a restore point is deleted only once the manifest stops naming it", async () => {
+  // Deleting on the way past means an interrupted manifest write leaves the
+  // previous manifest — correctly — still pointing at a file that is gone.
+  const disk = fake();
+  let value = project();
+  for (let i = 0; i < 8; i++) value = await commitAndSave(disk.store, value, `Edit ${i}`);
+
+  const { project: next, evicted } = await commitSnapshot(disk.store, value, "One more");
+  assert.equal(evicted.length, 1, "nothing was scheduled for deletion at the ninth restore point");
+  assert.equal(disk.texts.size, 9, "the evicted file was deleted before the manifest was written");
+
+  // The manifest write fails, so the old one — still naming all eight — stands.
+  disk.fill();
+  await assert.rejects(() => saveProject(disk.store, next));
+  disk.fill(false);
+
+  const stored = await readProject(disk.store, BRAND, ID);
+  assert.equal(stored.kind, "ok");
+  for (let i = 0; i < 8; i++) {
+    assert.ok(
+      await restoreSnapshot(disk.store, stored.kind === "ok" ? stored.project : value, i),
+      `restore point ${i} is listed but its file is gone`
+    );
+  }
+});
+
 test("salvage will not mistake another file for a restore point", async () => {
   // Layer images and quarantined manifests sit in the same place. A manifest
   // has layers and a canvas at the top level and would otherwise look like the
   // best candidate going — and it is the very thing that could not be trusted.
   const disk = fake();
-  const value = await commitSnapshot(disk.store, project(), "First");
+  const value = await commitAndSave(disk.store, project(), "First");
   const decoy = { layers: [...value.layers, ...value.layers, ...value.layers], canvas: value.canvas };
   disk.texts.set(`${BRAND}/${ID}/project.json.damaged-1`, JSON.stringify(decoy));
 
@@ -309,7 +419,7 @@ test("a restore point holding nonsense restores nothing", async () => {
   // Parsing is not validating. Layers that are not a list would reach the
   // editor as a project it cannot draw.
   const disk = fake();
-  const value = await commitSnapshot(disk.store, project(), "First");
+  const value = await commitAndSave(disk.store, project(), "First");
   for (const body of ['{"layers":"nope","canvas":{}}', "{}", '{"canvas":{}}', "null"]) {
     disk.texts.set(`${BRAND}/${ID}/${value.snapshots[0].body}`, body);
     assert.equal(await restoreSnapshot(disk.store, value, 0), null, `${body} was restored`);
@@ -323,4 +433,93 @@ test("saving stamps the time it was written", async () => {
   await saveProject(disk.store, { ...project(), updatedAt: 1 });
   const written = JSON.parse(disk.manifests.get(`${BRAND}/${ID}`)!) as EditableDesignProject;
   assert.ok(written.updatedAt > 1, `updatedAt came through as ${written.updatedAt}`);
+});
+
+// ---------------------------------------------------------------------------
+// Opening a design, and what it says when the stored one would not open.
+// ---------------------------------------------------------------------------
+
+const IDENTITY = { title: "Rose", source: "generated" as const };
+
+/** Stands in for building a project from the design's original image. */
+function fresh(): EditableDesignProject {
+  const blank = makeStrokeLayer(1000, 800, "Original");
+  return { ...project(), layers: [blank], selectedLayerId: blank.id, snapshots: [] };
+}
+
+test("a design that opens cleanly reports no damage", async () => {
+  const disk = fake();
+  await saveProject(disk.store, project());
+  const opened = await openProject(disk.store, BRAND, ID, IDENTITY, async () => fresh());
+  assert.equal(opened.damage, undefined);
+  assert.equal(opened.project.title, "Rose");
+});
+
+test("a design never opened before is new, not damaged", async () => {
+  const disk = fake();
+  let built = false;
+  const opened = await openProject(disk.store, BRAND, ID, IDENTITY, async () => { built = true; return fresh(); });
+  assert.equal(built, true, "a new design was not built");
+  assert.equal(opened.damage, undefined, "starting a new design was reported as damage");
+});
+
+test("a damaged design comes back from its newest restore point, and says so", async () => {
+  const disk = fake();
+  const value = await commitAndSave(disk.store, withX(project(), 55), "First");
+  await saveProject(disk.store, value);
+  disk.truncate();
+
+  const opened = await openProject(disk.store, BRAND, ID, IDENTITY, async () => fresh());
+  assert.equal(opened.damage?.salvaged, true);
+  assert.match(opened.damage?.kept ?? "", /damaged-/);
+  assert.equal(firstX(opened.project), 55, "the drawing was not recovered");
+});
+
+test("a damaged design with nothing to recover from is rebuilt, and still says so", async () => {
+  const disk = fake();
+  await saveProject(disk.store, project());
+  disk.truncate();
+
+  const opened = await openProject(disk.store, BRAND, ID, IDENTITY, async () => fresh());
+  assert.equal(opened.damage?.salvaged, false);
+  assert.match(opened.damage?.kept ?? "", /damaged-/);
+  assert.equal(opened.project.layers[0].name, "Original");
+});
+
+test("a recovery that cannot be written down is still a recovery", async () => {
+  // The bug: openProject threw when this save failed. Worse than the throw was
+  // what it left behind — the damaged manifest was already quarantined, so the
+  // next launch found nothing to recover and built a blank project over the top
+  // while the restore points sat there untouched.
+  const disk = fake();
+  const value = await commitAndSave(disk.store, withX(project(), 55), "First");
+  await saveProject(disk.store, value);
+  disk.truncate();
+  disk.fill();
+
+  const opened = await openProject(disk.store, BRAND, ID, IDENTITY, async () => fresh());
+  assert.equal(opened.damage?.salvaged, true, "a full disk lost the recovery");
+  assert.equal(firstX(opened.project), 55);
+});
+
+test("recovery still works on every launch after a failed one", async () => {
+  // The second half of the same bug. Quarantine leaves the manifest missing
+  // rather than damaged, so a loader that only searched the damaged path
+  // recovered once and never again.
+  const disk = fake();
+  const value = await commitAndSave(disk.store, withX(project(), 55), "First");
+  await saveProject(disk.store, value);
+  disk.truncate();
+  disk.fill();
+  await openProject(disk.store, BRAND, ID, IDENTITY, async () => fresh());
+
+  // Second launch: the manifest is gone, not damaged, and the disk is still full.
+  const again = await openProject(disk.store, BRAND, ID, IDENTITY, async () => fresh());
+  assert.equal(again.damage?.salvaged, true, "the second launch gave up on the restore points");
+  assert.equal(firstX(again.project), 55);
+
+  // Third launch, with room again: it writes itself back and opens cleanly after.
+  disk.fill(false);
+  assert.equal((await openProject(disk.store, BRAND, ID, IDENTITY, async () => fresh())).damage?.salvaged, true);
+  assert.equal((await openProject(disk.store, BRAND, ID, IDENTITY, async () => fresh())).damage, undefined);
 });

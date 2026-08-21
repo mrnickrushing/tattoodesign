@@ -49,11 +49,11 @@ export function makeTextLayer(width: number, height: number, text = "New label")
 export const SNAPSHOT_LIMIT = 8;
 
 /** The geometry a restore point stands for, ready to be written out. */
-export function snapshotBody(project: EditableDesignProject): SnapshotBody {
+export function snapshotBody(project: EditableDesignProject, createdAt: number): SnapshotBody {
   // No clone: the caller serialises this immediately, and serialising is
   // itself the copy. Deep-cloning first measured 57ms on a real drawing, spent
   // to produce an object that is thrown away a line later.
-  return { layers: project.layers, canvas: project.canvas };
+  return { layers: project.layers, canvas: project.canvas, createdAt };
 }
 
 /**

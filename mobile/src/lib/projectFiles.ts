@@ -106,7 +106,7 @@ async function migrate(store: ProjectStore, brand: BrandId, id: string, project:
       if (!Array.isArray(snapshot?.layers)) continue;
       const body = `${SNAPSHOT_PREFIX}${generateId()}.json`;
       try {
-        await store.writeText(brand, id, body, JSON.stringify({ layers: snapshot.layers, canvas: snapshot.canvas }));
+        await store.writeText(brand, id, body, JSON.stringify({ layers: snapshot.layers, canvas: snapshot.canvas, createdAt: snapshot.createdAt }));
         snapshots.push({ label: snapshot.label, createdAt: snapshot.createdAt, body });
       } catch {
         // Out of room, most likely. Losing a restore point is survivable;
@@ -156,21 +156,111 @@ export async function commitSnapshot(
   store: ProjectStore,
   project: EditableDesignProject,
   label: string
-): Promise<EditableDesignProject> {
+): Promise<{ project: EditableDesignProject; evicted: string[] }> {
+  const at = store.now();
   const body = `${SNAPSHOT_PREFIX}${generateId()}.json`;
   try {
-    await store.writeText(project.brand, project.id, body, JSON.stringify(snapshotBody(project)));
+    await store.writeText(project.brand, project.id, body, JSON.stringify(snapshotBody(project, at)));
   } catch {
     // No room for a restore point. The edit itself still stands — refusing it
     // over a history entry would be the tail wagging the dog.
-    return { ...project, revision: project.revision + 1 };
+    return { project: { ...project, revision: project.revision + 1 }, evicted: [] };
   }
 
-  const next = snapshotProject(project, label, body, store.now());
-  for (const dropped of evictedBodies(project.snapshots, next.snapshots)) {
-    await store.deleteText(project.brand, project.id, dropped);
+  const next = snapshotProject(project, label, body, at);
+  // Handed back rather than deleted here. The manifest naming the survivors is
+  // written by the caller afterwards, and if that write fails the old manifest
+  // correctly survives — still pointing at a restore point deleted on its
+  // behalf. Deleting after the manifest commits is the only order that cannot
+  // leave a restore point listed but unreadable.
+  return { project: next, evicted: evictedBodies(project.snapshots, next.snapshots) };
+}
+
+/**
+ * What opening a design gave back, and whether anything was lost getting there.
+ *
+ * The caller has to be told when a project was rebuilt rather than opened.
+ * Silence here is the whole bug this replaces: a damaged manifest came back as
+ * an ordinary empty project, so the app looked like it had opened the design
+ * for the first time and the artist had no way to know otherwise.
+ */
+export type OpenedProject = {
+  project: EditableDesignProject;
+  /** Set when the stored project could not be read. */
+  damage?: {
+    /** Where the unreadable manifest was kept, if it could be kept. */
+    kept: string | null;
+    /** True when a restore point was found and used instead of starting over. */
+    salvaged: boolean;
+  };
+};
+
+/**
+ * Opens a stored project, falling back through recovery to a fresh one.
+ *
+ * `createFresh` is the caller's — building a new project needs the design's
+ * own image bytes, which is platform work. Everything this decides is not, and
+ * is here because the first version of it lived beside that work and could not
+ * be tested: it threw when the recovered project could not be written back,
+ * and looked for restore points only when the manifest was damaged rather than
+ * missing, so a single failed rewrite turned into a blank canvas on every
+ * launch after it.
+ */
+export async function openProject(
+  store: ProjectStore,
+  brand: BrandId,
+  id: string,
+  identity: { title: string; source: EditableDesignProject["source"] },
+  createFresh: () => Promise<EditableDesignProject>
+): Promise<OpenedProject> {
+  const stored = await readProject(store, brand, id);
+  if (stored.kind === "ok") return { project: stored.project };
+
+  const kept = stored.kind === "damaged" ? stored.kept : null;
+
+  // Restore points are files of their own, so they outlive the manifest that
+  // named them. Looked for whether the manifest was unreadable or simply gone:
+  // quarantining a damaged one leaves it missing, so searching only the damaged
+  // path loses everything the moment anything downstream fails.
+  const salvaged = await salvageLatestSnapshot(store, brand, id);
+  if (salvaged) {
+    const now = store.now();
+    const project: EditableDesignProject = {
+      schemaVersion: PROJECT_SCHEMA_VERSION,
+      id,
+      brand,
+      title: identity.title,
+      source: identity.source,
+      canvas: salvaged.canvas,
+      layers: salvaged.layers,
+      selectedLayerId: salvaged.layers.at(-1)?.id ?? null,
+      createdAt: now,
+      updatedAt: now,
+      revision: 1,
+      snapshots: [],
+    };
+    // Writing it back only saves doing this again. With no room for it, the
+    // recovered drawing in hand is still the whole point.
+    try {
+      await saveProject(store, project);
+    } catch {
+      // Salvaged again next launch.
+    }
+    return { project, damage: { kept, salvaged: true } };
   }
-  return next;
+
+  return {
+    project: await createFresh(),
+    damage: stored.kind === "damaged" ? { kept, salvaged: false } : undefined,
+  };
+}
+
+/** A body's own timestamp, or the beginning of time if it has none. */
+const at = (body: SnapshotBody): number => (typeof body.createdAt === "number" ? body.createdAt : -Infinity);
+
+/** Removes restore-point files the manifest no longer names. */
+export async function dropBodies(store: ProjectStore, project: EditableDesignProject, bodies: string[]): Promise<void> {
+  for (const body of bodies) await store.deleteText(project.brand, project.id, body);
 }
 
 /** Reads a restore point back and puts it in place. */
@@ -201,21 +291,23 @@ export async function restoreSnapshot(
  */
 export async function salvageLatestSnapshot(store: ProjectStore, brand: BrandId, id: string): Promise<SnapshotBody | null> {
   const names = (await store.listNames(brand, id)).filter((name) => name.startsWith(SNAPSHOT_PREFIX));
-  let best: { body: SnapshotBody; layers: number } | null = null;
+  let best: SnapshotBody | null = null;
   for (const name of names) {
     const raw = await store.readText(brand, id, name);
     if (!raw) continue;
     try {
       const body = JSON.parse(raw) as SnapshotBody;
       if (!Array.isArray(body?.layers) || !body.layers.length) continue;
-      // Nothing records which is newest once the manifest is gone, so take the
-      // one carrying the most work. It is a guess, and it is the right way to
-      // guess: handing back the fullest drawing found beats handing back the
-      // emptiest.
-      if (!best || body.layers.length > best.layers) best = { body, layers: body.layers.length };
+      // Newest wins, on the time the body itself records. The first version of
+      // this took whichever held the most layers, on the grounds that nothing
+      // said which was newest — but a session spent drawing adds strokes to
+      // layers that already exist, so every restore point tied and recovery
+      // returned whichever the directory happened to list first. Deleting a
+      // layer made the newest one lose outright.
+      if (!best || at(body) > at(best)) best = body;
     } catch {
       continue;
     }
   }
-  return best?.body ?? null;
+  return best;
 }
