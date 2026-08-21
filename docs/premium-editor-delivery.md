@@ -1,5 +1,18 @@
 # Premium editable studios delivery
 
+## Status — milestone complete
+
+All three waves shipped in a single PR: "feat: add premium editable studio
+workflow" (#16, 2026-08-19), which bumped the native runtime to 1.3.0 for
+`expo-secure-store`/`expo-crypto`. Later PRs (#17-#40, tracked under the other
+wave-plan docs) extended individual pieces — client projects gained
+appointments/sizes (#30), approval-proof PDF shipped its own dedicated wave
+(#33) — but the foundation described below (editable projects, full-screen
+editor, variation board, client folders, review packets, camera proof
+comparison, surface warp, production checks, encrypted backup/restore) was
+all delivered here. The one gap: no dedicated crypto round-trip / malformed
+-archive test file for `encryptedBackup.ts` (see Wave 3 gates).
+
 ## Objective
 
 Turn both Inkline and Sugar Haus into premium, offline-first creative workspaces

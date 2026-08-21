@@ -2,12 +2,11 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Directory, File, Paths } from "expo-file-system";
 import * as SecureStore from "expo-secure-store";
 import { AESKeySize, AESEncryptionKey, AESSealedData, aesDecryptAsync, aesEncryptAsync } from "expo-crypto";
+import { FILE_ROOTS, STORAGE_PREFIXES, parseBackupEnvelope, validateBackupPayload, type BackupPayload } from "./backupArchive";
+
+export { isSafeFilePath, isSafeStorageKey, parseBackupEnvelope, validateBackupPayload } from "./backupArchive";
 
 const KEY_SLOT = "inkline:backup-recovery-key:v1";
-const STORAGE_PREFIXES = ["inkline:"];
-const FILE_ROOTS = ["designs", "editable-projects"];
-
-type BackupPayload = { version: 1; createdAt: number; storage: [string, string][]; files: { path: string; data: string }[] };
 
 function utf8Bytes(value: string) {
   const encoded = unescape(encodeURIComponent(value));
@@ -53,20 +52,16 @@ export async function createEncryptedBackup() {
 }
 
 export async function restoreEncryptedBackup(file: File, recoveryKey: string) {
-  const envelope = JSON.parse(await file.text()) as { format?: string; data?: string };
-  if (envelope.format !== "inkline-backup" || !envelope.data) throw new Error("That is not an Inkline encrypted backup.");
+  const envelope = parseBackupEnvelope(await file.text());
   const key = await AESEncryptionKey.import(recoveryKey.trim(), "base64");
   const sealed = AESSealedData.fromCombined(envelope.data, { ivLength: 12, tagLength: 16 });
   const plaintext = await aesDecryptAsync(sealed, key);
-  const payload = JSON.parse(utf8String(plaintext)) as BackupPayload;
-  if (payload.version !== 1) throw new Error("This backup version is not supported.");
+  const payload = validateBackupPayload(JSON.parse(utf8String(plaintext)));
   for (const [keyName, value] of payload.storage) {
-    if (!STORAGE_PREFIXES.some(prefix => keyName.startsWith(prefix))) throw new Error("Backup contains an unsafe storage key.");
     await AsyncStorage.setItem(keyName, value);
   }
   for (const saved of payload.files) {
     const segments = saved.path.split("/");
-    if (!FILE_ROOTS.includes(segments[0]) || segments.some(segment => !segment || segment === "." || segment === "..")) throw new Error("Backup contains an unsafe file path.");
     const directory = new Directory(Paths.document, ...segments.slice(0, -1));
     if (!directory.exists) directory.create({ intermediates: true, idempotent: true });
     const target = new File(directory, segments.at(-1)!);
