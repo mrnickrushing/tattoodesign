@@ -37,6 +37,9 @@ import {
 } from "@/lib/appointments";
 import * as ImagePicker from "expo-image-picker";
 import { File } from "expo-file-system";
+import { aftercareHtml } from "@/lib/aftercare";
+import { PREF_KEYS, preferences } from "@/lib/preferences";
+import { PLACEMENTS, quote, type PlacementId } from "@/lib/quote";
 import { proofHtml, type ProofDesign } from "@/lib/proofSheet";
 import { shareUri } from "@/lib/files";
 import { RADIUS, SPACE, TYPE } from "@/lib/theme";
@@ -64,6 +67,8 @@ export default function ProjectsScreen() {
   const [appointment, setAppointment] = useState("");
   const [size, setSize] = useState("");
   const [referenceUris, setReferenceUris] = useState<string[]>([]);
+  /** Saved in Settings; 0 means no rate has been set and no price is shown. */
+  const [hourlyRate, setHourlyRate] = useState(0);
 
   const refresh = useCallback(
     () =>
@@ -79,7 +84,8 @@ export default function ProjectsScreen() {
   useFocusEffect(
     useCallback(() => {
       refresh();
-    }, [refresh]),
+      void preferences.get<number>(brand.id, PREF_KEYS.hourlyRate, 0).then(setHourlyRate);
+    }, [brand.id, refresh]),
   );
 
   function begin(project?: ClientProject) {
@@ -177,6 +183,7 @@ export default function ProjectsScreen() {
   }
 
   const [proofing, setProofing] = useState<string | null>(null);
+  const [carding, setCarding] = useState<string | null>(null);
 
   async function sendProof(project: ClientProject) {
     setProofing(project.id);
@@ -209,6 +216,60 @@ export default function ProjectsScreen() {
       Alert.alert("Couldn't build the proof", e instanceof Error ? e.message : "Try again.");
     } finally {
       setProofing(null);
+    }
+  }
+
+  /**
+   * The card the client leaves with.
+   *
+   * Coverage is asked rather than measured: how much of the piece is solid is
+   * the one thing that changes the advice — heavy black weeps for longer, and
+   * flooded icing keeps twice as long as piped — and it is a single tap for
+   * someone who has just finished the work, against a pixel analysis that
+   * would still be guessing.
+   */
+  async function sendAftercare(project: ClientProject) {
+    const heavy = brand.id === "sugar";
+    Alert.alert(
+      heavy ? "How are they finished?" : "How much solid work is in it?",
+      heavy
+        ? "Flooded icing seals the surface and keeps about twice as long as open piping."
+        : "Packed black weeps for longer than linework and needs the wrap left on.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: heavy ? "Piped detail" : "Mostly linework",
+          onPress: () => void buildAftercare(project, 0.2),
+        },
+        {
+          text: heavy ? "Flooded" : "Lots of solid black",
+          onPress: () => void buildAftercare(project, 0.7),
+        },
+      ]
+    );
+  }
+
+  async function buildAftercare(project: ClientProject, coverage: number) {
+    setCarding(project.id);
+    try {
+      const html = aftercareHtml({
+        brand: brand.id,
+        title: project.name,
+        client: project.client || undefined,
+        studioName: brand.name,
+        placement: project.placement || undefined,
+        sizeIn: project.sizeIn,
+        coverage,
+        // The appointment is when the work happened, which is what the
+        // schedule counts from.
+        sessionAt: project.appointmentAt,
+      });
+      await shareUri(await htmlToPdf(html));
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (e) {
+      Alert.alert("Couldn't build the card", e instanceof Error ? e.message : "Try again.");
+    } finally {
+      setCarding(null);
     }
   }
 
@@ -469,6 +530,29 @@ export default function ProjectsScreen() {
                     {describeAppointment(project.appointmentAt)} · {formatAppointmentDate(project.appointmentAt)}
                   </Text>
                 )}
+                {(() => {
+                  // How long to book, and what that is worth once a rate is
+                  // saved. Detail is assumed typical: the density that would
+                  // sharpen this comes off traced linework, which the
+                  // Production desk has and a project card does not.
+                  if (brand.id === "sugar" || !project.sizeIn) return null;
+                  const estimate = quote({
+                    widthIn: project.sizeIn.width,
+                    heightIn: project.sizeIn.height,
+                    density: 0.5,
+                    placement: normalisePlacementId(project.placement),
+                    hourlyRate,
+                  });
+                  if (!estimate.hours) return null;
+                  return (
+                    <Text
+                      style={[styles.projectDetail, { color: theme.muted, fontFamily: theme.fontBody }]}
+                    >
+                      {`Book about ${estimate.hours} h at typical detail`}
+                      {hourlyRate > 0 ? ` · ${estimate.subtotal}` : ""}
+                    </Text>
+                  );
+                })()}
                 <Text
                   style={[
                     styles.projectCount,
@@ -521,6 +605,14 @@ export default function ProjectsScreen() {
                   onPress={() => void sendProof(project)}
                   style={{ marginTop: SPACE.sm }}
                 />
+                <Button
+                  label={carding === project.id ? "Building card…" : "Aftercare card"}
+                  icon="heart-outline"
+                  loading={carding === project.id}
+                  disabled={carding !== null}
+                  onPress={() => void sendAftercare(project)}
+                  style={{ marginTop: SPACE.xs }}
+                />
               </View>
               <Icon
                 name="chevronForward"
@@ -540,6 +632,20 @@ export default function ProjectsScreen() {
       </View>
     </ScrollView>
   );
+}
+
+/**
+ * Matches the free-text placement field to a placement the difficulty table
+ * knows. Anything it does not recognise quotes as a flat, forgiving panel,
+ * which is the conservative direction to be wrong in — it under-books rather
+ * than inventing a surcharge for a body part nobody named.
+ */
+function normalisePlacementId(placement: string): PlacementId {
+  const cleaned = placement.trim().toLowerCase();
+  const match = PLACEMENTS.find(
+    (option) => cleaned === option.id.toLowerCase() || cleaned.includes(option.label.toLowerCase())
+  );
+  return match?.id ?? "forearm";
 }
 
 function Field({

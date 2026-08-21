@@ -14,7 +14,7 @@ import { RADIUS, SPACE, TYPE } from "@/lib/theme";
 import { useContentBottomInset, useContentWidth } from "@/lib/chrome";
 import { getSyncToken, setSyncToken as setStoredSyncToken, syncLibrary } from "@/lib/librarySync";
 import { getGenerationUsage, getSpendLimit, setSpendLimit, totalEstimatedSpend } from "@/lib/generationUsage";
-import { preferences } from "@/lib/preferences";
+import { PREF_KEYS, preferences } from "@/lib/preferences";
 import { createEncryptedBackup, restoreEncryptedBackup } from "@/lib/encryptedBackup";
 import { shareUri } from "@/lib/files";
 
@@ -93,6 +93,7 @@ export default function SettingsScreen() {
   const [recoveryKey, setRecoveryKey] = useState("");
   const [backupBusy, setBackupBusy] = useState(false);
   const [prefCount, setPrefCount] = useState(0);
+  const [hourlyRate, setHourlyRate] = useState("");
 
   useEffect(() => {
     Promise.all([getSpendLimit(), getGenerationUsage()]).then(([savedLimit, usage]) => {
@@ -100,7 +101,16 @@ export default function SettingsScreen() {
       setSpend(totalEstimatedSpend(usage));
     });
     preferences.all(brand.id).then((values) => setPrefCount(Object.keys(values).length));
+    preferences
+      .get<number>(brand.id, PREF_KEYS.hourlyRate, 0)
+      .then((saved) => setHourlyRate(saved > 0 ? String(saved) : ""));
   }, [brand.id]);
+
+  function saveHourlyRate(text: string) {
+    setHourlyRate(text);
+    const parsed = Number.parseFloat(text);
+    void preferences.set(brand.id, PREF_KEYS.hourlyRate, Number.isFinite(parsed) && parsed > 0 ? parsed : 0);
+  }
 
   function resetSessionDefaults() {
     Alert.alert(
@@ -365,6 +375,29 @@ export default function SettingsScreen() {
             {syncMessage}
           </Text>
         )}
+      </Card>
+
+      <View style={{ height: SPACE.lg }} />
+
+      <SectionLabel>What you charge</SectionLabel>
+      <Card>
+        <Text style={{ color: theme.muted, fontFamily: theme.fontBody, fontSize: 13, lineHeight: 18 }}>
+          {brand.id === "sugar"
+            ? "Your decorating rate. Orders quote against it — hours from the piece count, size and colour changes."
+            : "Your hourly rate. Projects quote against it — hours from the true size, the detail, and where on the body it goes."}
+        </Text>
+        <TextInput
+          value={hourlyRate}
+          onChangeText={saveHourlyRate}
+          placeholder="Per hour"
+          placeholderTextColor={theme.muted}
+          keyboardType="decimal-pad"
+          accessibilityLabel="Your hourly rate"
+          style={[
+            styles.input,
+            { color: theme.foreground, borderColor: theme.line, backgroundColor: theme.surfaceAlt, fontFamily: theme.fontBody },
+          ]}
+        />
       </Card>
 
       <View style={{ height: SPACE.lg }} />

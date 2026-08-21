@@ -85,6 +85,7 @@ export const PREF_KEYS = {
   brushColor: "editor.brushColor",
   pen: "editor.pen",
   placementWidthIn: "placement.widthIn",
+  hourlyRate: "quote.hourlyRate",
 } as const;
 
 export function isFiniteNumber(value: unknown): value is number {

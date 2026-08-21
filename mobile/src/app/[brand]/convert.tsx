@@ -25,6 +25,7 @@ import {
 } from "@/lib/stencil";
 import { PREF_KEYS, preferences } from "@/lib/preferences";
 import { BatchConvert } from "@/components/BatchConvert";
+import { flattenSketch } from "@/lib/sketchDeskew";
 import { DEFAULT_TRACE, skeletonize, tracePolylines } from "@/lib/vectorize";
 import type { Point } from "@/lib/designProject";
 import {
@@ -106,6 +107,8 @@ export default function ConvertScreen() {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [opts, setOpts] = useState<StencilOptions>(DEFAULT_STENCIL_OPTIONS);
+  /** Whether the source is paper photographed at an angle rather than shot flat. */
+  const [fromSketch, setFromSketch] = useState(false);
   const [overlayOpacity, setOverlayOpacity] = useState(0);
   const pipelineSeq = useRef(0);
   const [editing, setEditing] = useState<LibraryDesign | null>(null);
@@ -133,13 +136,18 @@ export default function ConvertScreen() {
   }, [brand.id]);
 
   const runPipeline = useCallback(
-    async (src: string, options: StencilOptions, seq: number) => {
+    async (src: string, options: StencilOptions, seq: number, sketch: boolean) => {
       setProcessing(true);
       setError(null);
       setResultReveal(null);
       try {
-        const next = await stencilize(src, options);
-        const reveal = await traceConvertedStencil(src, options);
+        // A sheet of paper photographed across a table is a trapezoid, and
+        // every threshold after this point would be measuring a trapezoid. If
+        // no sheet is found, flattenSketch hands the photo back untouched —
+        // which is also what happens to a rough drawn in-app, correctly.
+        const flat = sketch ? (await flattenSketch(src)).dataUrl : src;
+        const next = await stencilize(flat, options);
+        const reveal = await traceConvertedStencil(flat, options);
         if (seq === pipelineSeq.current) {
           setResultUrl(next);
           setResultReveal(reveal);
@@ -167,9 +175,9 @@ export default function ConvertScreen() {
   useEffect(() => {
     if (!workingSource) return;
     const seq = ++pipelineSeq.current;
-    const timer = setTimeout(() => runPipeline(workingSource, opts, seq), 180);
+    const timer = setTimeout(() => runPipeline(workingSource, opts, seq, fromSketch), 180);
     return () => clearTimeout(timer);
-  }, [workingSource, opts, runPipeline]);
+  }, [workingSource, opts, fromSketch, runPipeline]);
 
   const updateOpts = useCallback(
     (patch: Partial<StencilOptions>) => {
@@ -523,6 +531,38 @@ export default function ConvertScreen() {
             }}
             trackColor={{ true: theme.accent }}
             accessibilityLabel="Invert"
+          />
+        </View>
+
+        <View style={[styles.switchRow, { borderTopColor: theme.line }]}>
+          <View style={styles.switchCopy}>
+            <View style={styles.switchLabel}>
+              <Ionicons name="document-outline" size={15} color={theme.muted} />
+              <Text
+                style={{
+                  ...TYPE.body,
+                  color: theme.foreground,
+                  fontFamily: theme.fontBody,
+                }}
+              >
+                Photographed sketch
+              </Text>
+            </View>
+            <Text
+              style={{
+                ...TYPE.caption,
+                color: theme.muted,
+                fontFamily: theme.fontBody,
+              }}
+            >
+              Finds the sheet of paper and squares it up before tracing.
+            </Text>
+          </View>
+          <Switch
+            value={fromSketch}
+            onValueChange={setFromSketch}
+            trackColor={{ true: theme.accent }}
+            accessibilityLabel="Photographed sketch"
           />
         </View>
 

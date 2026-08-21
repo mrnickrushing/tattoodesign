@@ -29,7 +29,9 @@ import { CARD_HEIGHT_IN, CARD_WIDTH_IN, getScreenPpi, setScreenPpi } from "@/lib
 import { PREF_KEYS, preferences } from "@/lib/preferences";
 import { File } from "expo-file-system";
 import { HEAL_AGES, type HealAge } from "@/lib/healing";
-import { simulateHealing } from "@/lib/productionTools";
+import { SKIN_TONES, contrastAdvice, lineContrast, minLineWidthMm, type SkinTone } from "@/lib/skinTones";
+import { measureFinestLine, simulateHealing } from "@/lib/productionTools";
+import { pxPerMmFromDpi } from "@/lib/spacing";
 import { SPACE, RADIUS } from "@/lib/theme";
 
 type Mode = "size" | "photo" | "live";
@@ -59,6 +61,13 @@ export function PlacementPreview({
 
   const [mode, setMode] = useState<Mode>("size");
   const [aspect, setAspect] = useState(1);
+  /** Pixel width of the artwork, for working out how fine its finest mark can be. */
+  const [pixelWidth, setPixelWidth] = useState(0);
+  /** Skin to preview against. Null is the flash paper the app used to assume. */
+  const [tone, setTone] = useState<SkinTone | null>(null);
+  /** Finest line in the artwork, as a fraction of its width. Null until measured. */
+  const [finestLine, setFinestLine] = useState<number | null>(null);
+  const [measuring, setMeasuring] = useState(false);
   const [ppi, setPpi] = useState(160);
   const [calibrated, setCalibrated] = useState(false);
   const [calibrating, setCalibrating] = useState(false);
@@ -84,7 +93,9 @@ export function PlacementPreview({
     RNImage.getSize(
       uri,
       (w, h) => {
-        if (active && w > 0 && h > 0) setAspect(h / w);
+        if (!active || w <= 0 || h <= 0) return;
+        setAspect(h / w);
+        setPixelWidth(w);
       },
       () => {
         // Square is the safest guess: these are line art on a square canvas.
@@ -151,6 +162,44 @@ export function PlacementPreview({
     .onUpdate((e) => {
       rotation.value = startR.value + (e.rotation * 180) / Math.PI;
     });
+
+  /**
+   * The finest line actually in the piece, at the size it is set to.
+   *
+   * Measured, not inferred. One artwork pixel bounds it from below, but a bound
+   * only ever proves the cheerful direction — that nothing is too fine — so
+   * using it to raise a warning warned about every high-resolution export
+   * whatever was drawn in it.
+   */
+  const artworkDpi = pixelWidth > 0 && widthIn > 0 ? pixelWidth / widthIn : 0;
+  const finestMarkMm =
+    artworkDpi > 0 && finestLine ? (finestLine * pixelWidth) / pxPerMmFromDpi(artworkDpi) : 0;
+  const skinAdvice = tone && finestMarkMm > 0 ? contrastAdvice("#111111", tone, finestMarkMm) : null;
+  /** What the tone needs, which is knowable without measuring anything. */
+  const toneFloorMm = tone ? minLineWidthMm(lineContrast("#111111", tone.hex)) : 0;
+
+  /**
+   * Measured when a tone is first chosen rather than when the sheet opens.
+   * Thinning the artwork to a skeleton is not free, and nobody who stays on
+   * paper ever needs the answer.
+   */
+  async function selectTone(next: SkinTone | null) {
+    setTone(next);
+    Haptics.selectionAsync();
+    if (!next || finestLine !== null || measuring) return;
+    setMeasuring(true);
+    try {
+      const base64 = await new File(uri).base64();
+      setFinestLine(measureFinestLine(`data:image/png;base64,${base64}`));
+    } catch {
+      // Zero reads as "not measured", and the panel then says what the tone
+      // needs without passing judgement on the design. Better than judging it
+      // on a number we could not get.
+      setFinestLine(0);
+    } finally {
+      setMeasuring(false);
+    }
+  }
 
   const gesture = Gesture.Simultaneous(pan, pinch, rotate);
 
@@ -386,7 +435,7 @@ export function PlacementPreview({
                 styles.stage,
                 {
                   height: stageH,
-                  backgroundColor: mode === "size" ? theme.stock : "#000000",
+                  backgroundColor: mode === "size" ? (tone?.hex ?? theme.stock) : "#000000",
                   borderColor: theme.line,
                 },
               ]}
@@ -460,6 +509,44 @@ export function PlacementPreview({
                   <Notice tone="info" icon="information-circle-outline">
                     Sizes are an estimate until you calibrate this screen.
                   </Notice>
+                </View>
+              )}
+
+              {/* Skin, not paper. Black on flash paper is about 19:1; the same
+                  black on deep skin is nearer 3:1, and the fine line that
+                  reads beautifully on the sheet is the one that disappears at
+                  arm's length. Sugar Haus has no equivalent question — a
+                  cookie really is a pale flat surface. */}
+              {brand.id !== "sugar" && (
+                <View style={{ marginTop: SPACE.sm }}>
+                  <View style={styles.chips} accessibilityRole="radiogroup">
+                    <Chip label="On paper" active={tone === null} onPress={() => selectTone(null)} />
+                    {SKIN_TONES.map((option) => (
+                      <Chip
+                        key={option.id}
+                        label={option.label.replace(/^Type /, "")}
+                        active={tone?.id === option.id}
+                        onPress={() => selectTone(option)}
+                      />
+                    ))}
+                  </View>
+                  {skinAdvice?.level === "warn" && (
+                    <View style={{ marginTop: SPACE.xs }}>
+                      <Notice>{skinAdvice.detail}</Notice>
+                    </View>
+                  )}
+                  {skinAdvice?.level === "pass" && (
+                    <Text style={[styles.footnote, { color: theme.muted, fontFamily: theme.fontBody }]}>
+                      {skinAdvice.detail}
+                    </Text>
+                  )}
+                  {!!tone && !skinAdvice && (
+                    <Text style={[styles.footnote, { color: theme.muted, fontFamily: theme.fontBody }]}>
+                      {measuring
+                        ? "Measuring the linework…"
+                        : `${tone.label} holds linework down to ${toneFloorMm.toFixed(2)}mm.`}
+                    </Text>
+                  )}
                 </View>
               )}
 

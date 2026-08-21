@@ -12,6 +12,9 @@ import {
 import { warpMesh, type Surface } from "./curveWarp";
 import { stripDataUrlPrefix } from "./files";
 import { agePixels, healingProfile, type HealAge } from "./healing";
+import { coverageGaps, coverupFinding, coverupThreshold, edgeStrength, inkDensityMap, type Region } from "./coverup";
+import { finestStrokeWidth } from "./lineWidth";
+import { otsuThreshold } from "./sketch";
 
 export type ProductionFinding = { level: "pass" | "warn"; title: string; detail: string };
 
@@ -51,6 +54,125 @@ export function inspectProduction(dataUrl: string, dpi = 203, brand: "ink" | "su
       ? { level: darkRatio < 0.36 ? "pass" : "warn", title: "Piping feasibility", detail: darkRatio < 0.36 ? "Contour density leaves practical spacing for piping and transfers." : "Dense filled regions may need simplification for edible transfer work." }
       : { level: edgeRatio < 0.22 ? "pass" : "warn", title: "Stencil separation", detail: edgeRatio < 0.22 ? "Line density leaves enough negative space for a readable thermal transfer." : "Very dense edge detail may close up on skin or thermal paper." },
   ];
+}
+
+/**
+ * Both pieces reduced to the same grid, so the two can be compared at all.
+ *
+ * The ink cutoff is Otsu's, found per image, rather than a fixed luminance.
+ * A fixed one is wrong in exactly the case this feature exists for: Type V
+ * skin photographs at luminance 98 and Type VI at 55, both under any cutoff
+ * chosen for ink-on-paper, so a whole dark-skinned arm reads as solid ink and
+ * the check demands the new design cover every inch of it. Otsu splits each
+ * photograph into its own two populations and does not care how dark the skin
+ * behind the tattoo is.
+ *
+ * It does assume there are two populations. A photograph of unmarked skin has
+ * only one, and will come back with its darker half called ink — but the
+ * caller is being handed a photo of an existing tattoo, which is the whole
+ * premise of the comparison.
+ */
+function inkGrid(dataUrl: string, width: number, height: number) {
+  const image = decode(dataUrl);
+  const surface = Skia.Surface.Make(width, height);
+  if (!surface) throw new Error("The cover-up comparison is too large for this device.");
+  const canvas = surface.getCanvas();
+  canvas.clear(Skia.Color("white"));
+  canvas.drawImageRect(
+    image,
+    Skia.XYWHRect(0, 0, image.width(), image.height()),
+    Skia.XYWHRect(0, 0, width, height),
+    Skia.Paint()
+  );
+  const pixels = surface.makeImageSnapshot().readPixels(0, 0, {
+    width,
+    height,
+    colorType: ColorType.RGBA_8888,
+    alphaType: AlphaType.Unpremul,
+  }) as Uint8Array | null;
+  if (!pixels) throw new Error("The cover-up comparison could not read pixel data.");
+
+  const gray = new Uint8Array(width * height);
+  for (let i = 0; i < gray.length; i++) {
+    const p = i * 4;
+    gray[i] = Math.round(pixels[p] * 0.299 + pixels[p + 1] * 0.587 + pixels[p + 2] * 0.114);
+  }
+
+  const cutoff = otsuThreshold(gray);
+  const mask = new Uint8Array(width * height);
+  for (let i = 0; i < gray.length; i++) mask[i] = gray[i] < cutoff ? 1 : 0;
+  return { gray, mask };
+}
+
+/**
+ * Resolution the linework is measured at.
+ *
+ * High enough that a hairline still spans a pixel, low enough that thinning the
+ * mask to a skeleton is not a visible pause. It also sets the floor on what can
+ * be distinguished: a line finer than one nine-hundredth of the piece's width
+ * measures at the floor rather than at its true width. That is the right place
+ * for the floor to sit — a design that fine is one worth warning about anyway,
+ * so the measurement and the verdict fail in the same direction.
+ */
+const MEASURE_WIDTH = 900;
+
+/**
+ * The finest line in the artwork, as a fraction of the artwork's own width.
+ *
+ * A fraction rather than pixels or millimetres, because the caller knows how
+ * many inches wide the piece is printed but not what resolution it was
+ * exported at — and a fraction converts to real units with the printed size
+ * alone. Zero when there is no linework to measure.
+ */
+export function measureFinestLine(dataUrl: string): number {
+  const image = decode(dataUrl);
+  const width = Math.min(MEASURE_WIDTH, image.width());
+  const height = Math.max(1, Math.round((image.height() * width) / image.width()));
+  const { mask } = inkGrid(dataUrl, width, height);
+  const finest = finestStrokeWidth(mask, width, height);
+  return finest > 0 ? finest / width : 0;
+}
+
+/** Working resolution for the comparison. Coverage is an area question, not a detail one. */
+const COVERUP_WIDTH = 480;
+/** Patch size, in pixels of the above. A few millimetres of skin at print size. */
+const COVERUP_CELL = 16;
+
+export type CoverupAssessment = {
+  /** How crisp the old piece still is, 0 (a faded blur) to 1 (a fresh hard edge). */
+  edgeStrength: number;
+  /** Ink the new design needs, as a multiple of the old piece's. */
+  threshold: number;
+  /** Patches the design leaves too open, worst first, in the comparison's own pixels. */
+  gaps: Region[];
+  finding: ProductionFinding;
+};
+
+/**
+ * Whether this design will actually cover the tattoo already there.
+ *
+ * Both images are resampled onto one grid — they are photographs of different
+ * things at different sizes, and nothing can be compared until they are not.
+ * That resampling is also the assumption: the caller has to have framed the
+ * existing piece the way the new design will sit over it, because nothing here
+ * can register one to the other.
+ */
+export function assessCoverup(designUrl: string, existingUrl: string): CoverupAssessment {
+  const existingImage = decode(existingUrl);
+  const width = Math.min(COVERUP_WIDTH, existingImage.width());
+  const height = Math.max(1, Math.round((existingImage.height() * width) / existingImage.width()));
+
+  const existing = inkGrid(existingUrl, width, height);
+  const design = inkGrid(designUrl, width, height);
+
+  const edge = edgeStrength(existing.gray, width, height);
+  const threshold = coverupThreshold(edge);
+  const gaps = coverageGaps(
+    inkDensityMap(design.mask, width, height, COVERUP_CELL),
+    inkDensityMap(existing.mask, width, height, COVERUP_CELL),
+    threshold
+  );
+  return { edgeStrength: edge, threshold, gaps, finding: coverupFinding(gaps, threshold) };
 }
 
 /**

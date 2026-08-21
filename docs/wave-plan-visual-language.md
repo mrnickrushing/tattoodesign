@@ -10,6 +10,44 @@ recovered by hand in #23), implemented, `npm run lint` + `tsc --noEmit` +
 Wave 1 is implemented in this PR. Waves 2–6 are OTA-safe and can follow on the
 same binary. Waves 7–11 require a new native runtime and are gated at the bottom.
 
+## Status — waves 1–6 complete
+
+Wave 1 shipped with the doc. Waves 2–6 shipped together rather than one PR each:
+the harness this session ran under develops on a single named branch, so the
+sequential-PR ritual at the top could not be followed and the waves are five
+commits on one branch instead. Every other standing constraint held — no version
+bump, no new native dependency, pure logic in `mobile/src/lib/*.ts` under
+`tsx --test`, thin components. 601 tests, up from 491.
+
+Where the implementation departs from the sketches above, and why:
+
+- **Wave 2** splits across `sketch.ts` (pure) and `sketchDeskew.ts` (Skia), the
+  same way `vectorize.ts` splits from `stencil.ts`, so every decision stays
+  testable off-device. `deskew` takes the forward homography — the direction
+  `canvas.concat` wants — rather than the inverse-sampling one. `sheetMask` and
+  `otsuThreshold` were added because `estimatePaperQuad` needs a mask and
+  nothing produced one. `consolidateStrokes` gained a pixel-space sibling,
+  `consolidateWithin`: a mask has no physical size yet, and the tracer's real
+  unit is the line weight it just traced at.
+- **Wave 3** returns a `DensityMap` — cells plus the grid and frame — rather
+  than a bare `Float32Array`, following `StencilMask`. Coverage compares
+  fractions of skin and caps at solid: skin holds only so much pigment, and
+  asking for twice the ink of an already-solid old piece would call every
+  cover-up of heavy blackwork impossible.
+- **Wave 4** keeps `estimateHours`/`quote`/`icingPlan` and adds `planBatch` for
+  the batch-order mode the prose describes. `BatchDesign` carries piece size,
+  because cups of icing cannot be derived from a count alone.
+- **Wave 5** could not connect to the separate `TattooAftercare` project — it is
+  not reachable from this repo — so the schedule is written in `aftercare.ts`.
+  Swapping the source later does not touch the card.
+- **Wave 6** feeds `Point.w` and lets `ribbon.ts` render it, so there is no new
+  Skia in the wave at all.
+
+**Wave 7 (AR live body placement) also already shipped**, ahead of this doc's
+own gating — `PlacementPreview.tsx` has used `CameraView` since the AR healed
+preview landed (#39) and the runtime is at 1.4.0. Waves 8, 10 and 11 remain
+unbuilt.
+
 ## Standing constraints
 
 - **Do not bump `version` in `mobile/app.json` or `mobile/package.json`.**
