@@ -61,8 +61,9 @@ import { layDown, toolsFor } from "@/lib/material";
 import { consolidateWithin } from "@/lib/sketch";
 import { DEFAULT_TRACE, polylinesToStrokeLayer, skeletonize, tracePolylines } from "@/lib/vectorize";
 import { addCutLine, DEFAULT_CUT_LINE } from "@/lib/cutline";
-import { shareUri } from "@/lib/files";
-import { assessCoverup, compareCapture, inspectProduction, simulateHealing, wrapForSurface, type ProductionFinding } from "@/lib/productionTools";
+import { shareDataUrl, shareUri } from "@/lib/files";
+import { assessCoverup, compareCapture, inspectProduction, simulateHealing, trayFromDesign, wrapForSurface, type ProductionFinding } from "@/lib/productionTools";
+import { encodeStl, toBase64 } from "@/lib/stl";
 import { HEAL_AGES, type HealAge } from "@/lib/healing";
 import { MIN_LINE_GAP_MM, checkLineSpacing, pxPerMmFromDpi, spacingFinding } from "@/lib/spacing";
 import { PREF_KEYS, isFiniteNumber, preferences } from "@/lib/preferences";
@@ -1010,6 +1011,102 @@ export function DesignEditor({
     }
   }
 
+  /**
+   * Exports a casting tray for the 3D printer.
+   *
+   * The tray is what gets printed; silicone poured into it is what becomes the
+   * mold, and the mold is what touches food. Thickness is asked rather than
+   * guessed because a drawing has no depth in it — it is the one number the
+   * artwork genuinely cannot supply.
+   */
+  function exportCastingTray() {
+    if (!project || !preview) return;
+    Alert.alert(
+      "How thick are they?",
+      "The shapes stand this proud of the tray floor, so it is how deep the finished piece will be.",
+      [
+        { text: "Cancel", style: "cancel" },
+        ...[
+          { label: "Thin — 4mm", shapeMm: 4 },
+          { label: "Standard — 7mm", shapeMm: 7 },
+          { label: "Chunky — 12mm", shapeMm: 12 },
+        ].map((choice) => ({
+          text: choice.label,
+          onPress: () => void reviewCastingTray(choice.shapeMm, true),
+        })),
+      ]
+    );
+  }
+
+  /**
+   * Builds the tray and puts it up for approval before anything is shared.
+   *
+   * Handing over a file the code has already worked out will not print is the
+   * expensive kind of quiet failure — the printer runs for three hours and the
+   * fine detail simply is not there at the end of it. So the preflight is shown
+   * where the decision is made rather than left on a panel nobody has open.
+   *
+   * The same moment is the only place the fill question can be asked, because
+   * it is the only place we know whether it is a real question: a drawing
+   * cannot say whether an enclosed white region is inside the shape or a hole
+   * through it, and only the person who drew it knows.
+   */
+  async function reviewCastingTray(shapeMm: number, fillOutlines: boolean) {
+    if (!project || !preview) return;
+    setBusy(true);
+    let tray: ReturnType<typeof trayFromDesign> = null;
+    try {
+      tray = trayFromDesign(preview, { widthIn: project.canvas.width / PRINT_DPI, shapeMm, fillOutlines });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't build the casting tray.");
+      return;
+    } finally {
+      setBusy(false);
+    }
+    if (!tray) {
+      setError("Nothing to stand up — trace or draw a shape first.");
+      return;
+    }
+    const built = tray;
+    setFindings(built.findings);
+
+    const warnings = built.findings.filter((finding) => finding.level === "warn");
+    const summary =
+      `${built.shapes} shape${built.shapes === 1 ? "" : "s"} on a ${built.widthMm.toFixed(0)} x ${built.depthMm.toFixed(0)}mm tray. ` +
+      `About ${built.plasticCm3.toFixed(0)}cm³ of filament, and roughly ${built.siliconeMl.toFixed(0)}ml of silicone to fill it.`;
+
+    Alert.alert(
+      warnings.length ? "Worth checking before you print" : "Ready to export",
+      warnings.length ? `${warnings.map((finding) => finding.detail).join("\n\n")}\n\n${summary}` : summary,
+      [
+        { text: "Cancel", style: "cancel" },
+        // Only offered when the fill actually changed the shape — otherwise
+        // both readings are the same tray and the question is noise.
+        ...(fillOutlines && built.outlinesFilled
+          ? [{ text: "Keep the holes", onPress: () => void reviewCastingTray(shapeMm, false) }]
+          : []),
+        {
+          text: warnings.length ? "Export anyway" : "Export",
+          onPress: () => void shareCastingTray(built),
+        },
+      ]
+    );
+  }
+
+  async function shareCastingTray(tray: NonNullable<ReturnType<typeof trayFromDesign>>) {
+    if (!project) return;
+    setBusy(true);
+    try {
+      const bytes = encodeStl(tray.mesh, `${project.title} casting tray`);
+      const name = project.title.replace(/[^a-z0-9]+/gi, "-").toLowerCase() || "tray";
+      await shareDataUrl(`data:model/stl;base64,${toBase64(bytes)}`, `${name}-tray.stl`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't share the casting tray.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function shareReviewPacket() {
     if (!project || !preview) return;
     const safeTitle = project.title.replace(/[<>]/g, "");
@@ -1294,6 +1391,7 @@ export function DesignEditor({
               onApplyWrap={applyWrap}
               onInspect={runProductionCheck}
               onCheckCoverup={brand.id === "sugar" ? undefined : checkCoverup}
+              onCastingTray={brand.id === "sugar" ? exportCastingTray : undefined}
               healAge={healAge}
               onHealAge={runHealing}
               onCheckCapture={checkCapture}
@@ -1370,6 +1468,7 @@ function Inspector({
   onApplyWrap,
   onInspect,
   onCheckCoverup,
+  onCastingTray,
   healAge,
   onHealAge,
   onCheckCapture,
@@ -1426,6 +1525,8 @@ function Inspector({
   onInspect: () => void;
   /** Absent for Sugar Haus: there is nothing underneath a cookie. */
   onCheckCoverup?: () => void;
+  /** Ink Lab has no use for a mold. */
+  onCastingTray?: () => void;
   healAge: HealAge;
   onHealAge: (age: HealAge) => void;
   onCheckCapture: () => void;
@@ -1583,6 +1684,7 @@ function Inspector({
           <MiniAction icon="brush-outline" label="Lay down" onPress={onLayDown} />
           <MiniAction icon="ellipse-outline" label="Cut line" onPress={() => onProcess("cutline")} />
           <MiniAction icon="code-slash-outline" label="SVG" onPress={onExportSvg} />
+          {onCastingTray && <MiniAction icon="cube-outline" label="Mold tray" onPress={onCastingTray} />}
         </View>
       </PanelTitle>
     );

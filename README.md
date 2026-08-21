@@ -99,6 +99,15 @@ slowed (`material.ts`). Clients leave with a card personalised to their own
 piece — placement, size, coverage and session date — that opens with no signal
 (`aftercare.ts`).
 
+**From design to 3D printer**
+A drawing becomes a printable casting tray: closed boundaries traced from the
+artwork (`contour.ts`), extruded into a watertight mesh (`solid.ts`), and
+written as binary STL in millimetres (`stl.ts`). The tray is a walled box with
+the shapes standing proud of its floor (`castingTray.ts`) — silicone poured in
+cures around them, and *that* is the mold. Nothing printed ever touches food.
+Before it exports it says what will go wrong: detail under two nozzle widths
+does not print badly, it does not print at all.
+
 **Portability & sync**
 AES-256-GCM encrypted backup archives with the key held in `SecureStore`
 (`encryptedBackup.ts`, schema/validation split out into
@@ -114,7 +123,7 @@ semantic icon set mapped to SF Symbols with an Ionicons fallback
 (`icons.ts`).
 
 Most of this lives under `mobile/src/lib/*.ts` as pure, unit-tested
-functions — 601 tests as of this writing (`npm test` in `mobile/`) — with
+functions — 678 tests as of this writing (`npm test` in `mobile/`) — with
 UI wired on top in `mobile/src/app/[brand]/*.tsx` and
 `mobile/src/components/`.
 

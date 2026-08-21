@@ -13,6 +13,7 @@ import { warpMesh, type Surface } from "./curveWarp";
 import { stripDataUrlPrefix } from "./files";
 import { agePixels, healingProfile, type HealAge } from "./healing";
 import { coverageGaps, coverupFinding, coverupThreshold, edgeStrength, inkDensityMap, type Region } from "./coverup";
+import { buildTray, type Tray, type TraySpec } from "./castingTray";
 import { finestStrokeWidth } from "./lineWidth";
 import { otsuThreshold } from "./sketch";
 
@@ -173,6 +174,30 @@ export function assessCoverup(designUrl: string, existingUrl: string): CoverupAs
     threshold
   );
   return { edgeStrength: edge, threshold, gaps, finding: coverupFinding(gaps, threshold) };
+}
+
+/**
+ * Resolution the tray is traced at.
+ *
+ * A shape three inches across works out about a seventh of a millimetre per
+ * pixel here, comfortably finer than any nozzle resolves, so nothing the
+ * printer could have made is lost. Going finer only makes the mesh heavier.
+ */
+const TRAY_WIDTH = 600;
+
+/**
+ * Builds a printable casting tray from a design.
+ *
+ * Decode, threshold, and hand it to castingTray.ts — every judgement in the
+ * chain lives next door where it can be tested off-device, and what is here is
+ * the pixels.
+ */
+export function trayFromDesign(dataUrl: string, spec: TraySpec): Tray | null {
+  const image = decode(dataUrl);
+  const width = Math.min(TRAY_WIDTH, image.width());
+  const height = Math.max(1, Math.round((image.height() * width) / image.width()));
+  const { mask } = inkGrid(dataUrl, width, height);
+  return buildTray(mask, width, height, spec);
 }
 
 /**
