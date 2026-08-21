@@ -16,6 +16,7 @@
 import { Skia, ColorType, AlphaType, ImageFormat } from "@shopify/react-native-skia";
 import { stripDataUrlPrefix } from "./files";
 import { distanceTransform } from "./lineWidth";
+import { parseHex } from "./icingRecipe";
 
 export type CutLineOptions = {
   /** Printed width of the design, which is what turns inches into pixels. */
@@ -39,16 +40,6 @@ export const DEFAULT_CUT_LINE: CutLineOptions = {
 
 /** Anything darker than this counts as artwork rather than background. */
 const INK_THRESHOLD = 160;
-
-function rgb(hex: string): [number, number, number] {
-  const h = hex.replace("#", "");
-  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
-  return [
-    parseInt(full.slice(0, 2), 16),
-    parseInt(full.slice(2, 4), 16),
-    parseInt(full.slice(4, 6), 16),
-  ];
-}
 
 export async function addCutLine(src: string, options: CutLineOptions): Promise<string> {
   let decoded = null;
@@ -94,7 +85,10 @@ export async function addCutLine(src: string, options: CutLineOptions): Promise<
   const dist = distanceTransform(mask, width, height);
   const inner = options.gapIn * pxPerIn;
   const outer = inner + Math.max(1, options.thicknessIn * pxPerIn);
-  const [r, g, b] = rgb(options.color);
+  // A colour that will not parse falls back to the default rather than being
+  // let through as NaN, which lands in the byte array as black — a cut line the
+  // same colour as the artwork, which is the one thing it must never be.
+  const { r, g, b } = parseHex(options.color) ?? parseHex(DEFAULT_CUT_LINE.color)!;
 
   const out = new Uint8Array(pixels.length);
   out.set(pixels);

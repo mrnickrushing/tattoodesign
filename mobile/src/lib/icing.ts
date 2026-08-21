@@ -8,6 +8,7 @@
 
 import { Skia, ColorType, AlphaType, ImageFormat } from "@shopify/react-native-skia";
 import { stripDataUrlPrefix } from "./files";
+import { parseHex } from "./icingRecipe";
 
 export type IcingColors = {
   /** Flood color — what fills the shape. */
@@ -41,22 +42,6 @@ export const LINE_COLORS = [
   { name: "Cherry", hex: "#d62f45" },
   { name: "Gold", hex: "#c9a227" },
 ];
-
-function rgb(hex: string): [number, number, number] {
-  const h = hex.replace("#", "");
-  const full =
-    h.length === 3
-      ? h
-          .split("")
-          .map((c) => c + c)
-          .join("")
-      : h;
-  return [
-    parseInt(full.slice(0, 2), 16),
-    parseInt(full.slice(2, 4), 16),
-    parseInt(full.slice(4, 6), 16),
-  ];
-}
 
 /** Keeps the preview fast; it's judged by eye, not printed. */
 const MAX_DIMENSION = 900;
@@ -100,8 +85,10 @@ export async function recolor(src: string, colors: IcingColors): Promise<string>
   }) as Uint8Array | null;
   if (!pixels) throw new Error("Couldn't read the design's pixels.");
 
-  const [fr, fg, fb] = rgb(colors.flood);
-  const [lr, lg, lb] = rgb(colors.line);
+  // Unparseable colours fall back to the defaults instead of reaching the byte
+  // array as NaN, which would silently flood the cookie black.
+  const { r: fr, g: fg, b: fb } = parseHex(colors.flood) ?? parseHex(DEFAULT_ICING.flood)!;
+  const { r: lr, g: lg, b: lb } = parseHex(colors.line) ?? parseHex(DEFAULT_ICING.line)!;
   const out = new Uint8Array(width * height * 4);
   for (let i = 0; i < out.length; i += 4) {
     // Luminance is the mix: white background becomes flood, black line
