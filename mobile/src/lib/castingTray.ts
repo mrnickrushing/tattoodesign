@@ -26,6 +26,7 @@ import {
   mergeMeshes,
   meshVolume,
   offsetOutline,
+  outlineGap,
   type Mesh,
   type Outline,
 } from "./solid";
@@ -171,6 +172,34 @@ const MIN_WALL_NOZZLES = 2;
 
 /** How many times a flare may be halved before it is not worth having. */
 const FILLET_HALVINGS = 4;
+
+/**
+ * The most flare any shape on this tray may take before it reaches a neighbour.
+ *
+ * A flare grows every shape outwards, so two shapes closer together than twice
+ * the flare meet at the floor and the slicer welds them into one — quietly
+ * turning two cookies into one joined by a web of flash. Both sides move, so
+ * half the closest approach is the ceiling, and what is left between them still
+ * has to be a nozzle wide: a gap thinner than one extrusion is not a gap the
+ * printer can lay a wall into, so it closes anyway.
+ *
+ * Cavities are the same argument at tray scale. The packer reserves the webbing
+ * around each unflared copy, so the shapes along the facing edges are what eats
+ * into it — and the webbing is the least those can be apart, whatever the
+ * artwork looks like.
+ */
+function flareLimit(outlines: Outline[], largestMm: number, nozzleMm: number, webbingMm: number): number {
+  // Past this the cap stops binding, so measuring further only costs time —
+  // it is the gap at which half of what is left is already the whole flare.
+  let closest = Math.min(largestMm * 2 + nozzleMm, webbingMm);
+  for (let i = 0; i < outlines.length && closest > 0; i++) {
+    for (let j = i + 1; j < outlines.length; j++) {
+      closest = outlineGap(outlines[i], outlines[j], closest);
+      if (closest <= 0) break;
+    }
+  }
+  return Math.min(largestMm, (closest - nozzleMm) / 2);
+}
 
 /**
  * The largest flare this shape can take, and the outline that goes with it.
@@ -320,30 +349,54 @@ export function buildTray(
     heightMm
   );
 
+  // Laid out once at the origin, then carried to each cavity. The copies are
+  // translations of one another, so whatever the flare has to clear in one of
+  // them it has to clear in all of them.
+  const unitOutlines: Outline[] = shapes.map((shape) => ({
+    outer: shape.outer.points.map((point) => toMm(point, { x: 0, y: 0 })),
+    holes: shape.holes.map((hole) => hole.points.map((point) => toMm(point, { x: 0, y: 0 }))),
+  }));
+
+  const flareLimitMm =
+    filletMm <= 0
+      ? 0
+      : flareLimit(unitOutlines, filletMm, nozzleMm, grid.positions.length > 1 ? webbingMm : Infinity);
+
   // One solid per shape per cavity: six cookies from one design is six
   // separate closed solids, not one shape repeated by the slicer.
   let filletsSkipped = 0;
   let smallestFlareMm = Infinity;
   const positives = grid.positions.flatMap((at) =>
-    shapes.flatMap((shape) => {
-      const outline = {
-        outer: shape.outer.points.map((point) => toMm(point, at)),
-        holes: shape.holes.map((hole) => hole.points.map((point) => toMm(point, at))),
+    unitOutlines.flatMap((unit) => {
+      const outline: Outline = {
+        outer: unit.outer.map((point) => ({ x: point.x + at.x, y: point.y + at.y })),
+        holes: unit.holes.map((hole) => hole.map((point) => ({ x: point.x + at.x, y: point.y + at.y }))),
       };
-      const body = extrudePrism(outline.outer, outline.holes, floorMm - WELD_MM, floorMm + spec.shapeMm);
-      if (filletMm <= 0) return [body];
 
       // The skirt is the same outline flared at the floor and true a flare's
       // height above it. A shape too fine for even the smallest flare is better
       // left square than left wrong.
-      const flare = flareFor(outline, filletMm, nozzleMm / 2);
-      if (!flare) {
-        filletsSkipped++;
-        return [body];
+      const flare = flareLimitMm > 0 ? flareFor(outline, flareLimitMm, nozzleMm / 2) : null;
+      const skirt = flare && extrudeTapered(flare.outline, outline, floorMm - WELD_MM, floorMm + flare.mm);
+      if (!flare || !skirt || !skirt.count) {
+        if (filletMm > 0) filletsSkipped++;
+        return [extrudePrism(outline.outer, outline.holes, floorMm - WELD_MM, floorMm + spec.shapeMm)];
       }
       if (flare.mm < smallestFlareMm) smallestFlareMm = flare.mm;
-      const skirt = extrudeTapered(flare.outline, outline, floorMm - WELD_MM, floorMm + flare.mm);
-      return skirt.count ? [body, skirt] : [body];
+
+      // The body starts at the top of the skirt, not at the floor. Reaching
+      // lower would cost nothing to print — the slicer unions the overlap — but
+      // every volume below is a sum over separate closed meshes, which cannot
+      // see that two of them share a footprint. The shared part would be
+      // counted twice: too much filament quoted, and too little silicone, which
+      // is the number somebody stands at a bench and mixes from.
+      const body = extrudePrism(
+        outline.outer,
+        outline.holes,
+        floorMm + flare.mm - WELD_MM,
+        floorMm + spec.shapeMm
+      );
+      return [body, skirt];
     })
   );
 
@@ -486,10 +539,10 @@ function inspectTray(
             level: "warn",
             title: "Demolding",
             // Not a failure to fix so much as a consequence to know about: the
-            // shape is too fine to grow by this much without welding its own
-            // parts together, so it stands square-footed and the silicone will
-            // want more care coming off it.
-            detail: `${limits.filletsSkipped} shape${limits.filletsSkipped === 1 ? " has" : "s have"} detail too close together to flare at all — the smallest flare this printer can lay down, ${(limits.nozzleMm / 2).toFixed(2)}mm, would still weld neighbouring parts together — so ${limits.filletsSkipped === 1 ? "it stands" : "they stand"} square on the floor. The silicone will come off, but pull it slowly: a square corner is where it tears.`,
+            // shape has no room to grow by this much without welding itself to
+            // something — its own detail or its neighbour — so it stands
+            // square-footed and the silicone will want more care coming off it.
+            detail: `${limits.filletsSkipped} shape${limits.filletsSkipped === 1 ? " has" : "s have"} nothing to flare into — the smallest flare this printer can lay down, ${(limits.nozzleMm / 2).toFixed(2)}mm, would already weld something together, whether that is a shape's own detail closing on itself or the piece sitting next to it — so ${limits.filletsSkipped === 1 ? "it stands" : "they stand"} square on the floor. The silicone will come off, but pull it slowly: a square corner is where it tears.`,
           }
     );
   }

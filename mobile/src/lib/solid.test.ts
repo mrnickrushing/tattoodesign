@@ -6,6 +6,7 @@ import {
   isSimplePolygon,
   offsetOutline,
   offsetPolygon,
+  outlineGap,
   inspectMesh,
   mergeMeshes,
   meshVolume,
@@ -376,4 +377,83 @@ test("a taper described upside down is the same solid", () => {
   const down = meshVolume(extrudeTapered(narrow, wide, 2, 0));
   assert.ok(Math.abs(up - down) < 1e-6, `${up} against ${down}`);
   assert.ok(up > 0);
+});
+
+test("a loop that merely touches itself is not simple either", () => {
+  // Two lobes meeting at a point. Nothing crosses — every edge stays on its own
+  // side — so a strict crossing test calls this clean and the walls built on it
+  // come out with a seam. It is what an offset produces the moment it grows two
+  // parts of a shape into contact, which is the case worth catching.
+  assert.equal(
+    isSimplePolygon([
+      { x: 0, y: 0 }, { x: 4, y: 4 }, { x: 8, y: 0 },
+      { x: 8, y: 8 }, { x: 4, y: 4 }, { x: 0, y: 8 },
+    ]),
+    false,
+    "pinched at a repeated vertex"
+  );
+
+  // A vertex landing in the middle of an edge it is not an end of: the same
+  // pinch, without a duplicate point to give it away.
+  assert.equal(
+    isSimplePolygon([
+      { x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 },
+      { x: 5, y: 0 }, { x: 0, y: 10 },
+    ]),
+    false,
+    "a vertex sitting on a far edge"
+  );
+
+  // Doubling back along the line it came in on: no crossing, no repeated point,
+  // and no solid between the two passes.
+  assert.equal(
+    isSimplePolygon([
+      { x: 0, y: 0 }, { x: 10, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 6 },
+    ]),
+    false,
+    "collinear overlap"
+  );
+
+  // And the ordinary cases still pass: a square has collinear neighbours only
+  // where it is entitled to them.
+  assert.equal(isSimplePolygon(square(10)), true);
+  assert.equal(
+    isSimplePolygon([{ x: 0, y: 0 }, { x: 5, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }]),
+    true,
+    "a redundant point along an edge is not a pinch"
+  );
+});
+
+test("the gap between two outlines is the closest their boundaries come", () => {
+  const left = { outer: square(10), holes: [] };
+  // Side by side, so the gap is along one axis only.
+  const right = {
+    outer: [
+      { x: 14, y: 0 }, { x: 24, y: 0 }, { x: 24, y: 10 }, { x: 14, y: 10 },
+    ],
+    holes: [],
+  };
+  assert.ok(Math.abs(outlineGap(left, right) - 4) < 1e-9, `got ${outlineGap(left, right)}`);
+
+  // A ceiling is an answer nobody will act on, not a measurement.
+  assert.equal(outlineGap(left, right, 2), 2, "further apart than asked about");
+  assert.ok(Math.abs(outlineGap(left, right, 9) - 4) < 1e-9, "nearer than the ceiling, so measured");
+
+  // Set diagonally, the nearest approach is corner to corner and counts both
+  // axes — square(size, at) steps along x and y together.
+  const corner = { outer: square(10, 13), holes: [] };
+  assert.ok(
+    Math.abs(outlineGap(left, corner) - Math.hypot(3, 3)) < 1e-9,
+    `got ${outlineGap(left, corner)}`
+  );
+});
+
+test("a shape inside another's hole is as near to it as any neighbour", () => {
+  // A ring with a small square standing in the middle of it. The gap that
+  // matters is to the *hole*, not to the ring's outer edge — and an offset
+  // closes it from both sides just the same.
+  const ring = { outer: square(30), holes: [[...square(20, 5)].reverse()] };
+  const island = { outer: square(4, 13), holes: [] };
+  // The hole runs 5..25; the island 13..17. Eight either side.
+  assert.ok(Math.abs(outlineGap(ring, island) - 8) < 1e-9, `got ${outlineGap(ring, island)}`);
 });

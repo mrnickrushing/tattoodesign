@@ -100,6 +100,26 @@ function wound(points: Point[], positive: boolean): Point[] {
  */
 export function isSimplePolygon(points: Point[]): boolean {
   if (points.length < 3) return false;
+
+  // Touching counts. A vertex that lands on another vertex, or in the middle of
+  // an edge it is not an end of, pinches the loop to a point — two lobes joined
+  // where the boundary meets itself. Nothing *crosses* there, so the strict
+  // crossing test below reports a clean polygon, and the walls raised on it come
+  // out with zero-area faces and a seam that never closes. An offset lands
+  // exactly here whenever it grows two parts of a shape into contact, which is
+  // precisely the case the caller is asking about.
+  for (let i = 0; i < points.length; i++) {
+    for (let j = i + 1; j < points.length; j++) {
+      if (samePoint(points[i], points[j])) return false;
+    }
+    for (let j = 0; j < points.length; j++) {
+      const next = (j + 1) % points.length;
+      // Its own two edges are the ones a vertex is allowed to sit on.
+      if (i === j || i === next) continue;
+      if (onSegment(points[i], points[j], points[next])) return false;
+    }
+  }
+
   for (let i = 0; i < points.length; i++) {
     const a = points[i];
     const b = points[(i + 1) % points.length];
@@ -198,6 +218,90 @@ export function offsetPolygon(points: Point[], distance: number): Point[] | null
  * without inverting or closing up, and nothing may cross itself. A caller that
  * gets null should carry on without the offset rather than with a knot.
  */
+/** Distance from p to the nearest point of segment ab. */
+function pointToSegment(p: Point, a: Point, b: Point): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lengthSquared = dx * dx + dy * dy;
+  if (lengthSquared < 1e-18) return Math.hypot(p.x - a.x, p.y - a.y);
+  const along = ((p.x - a.x) * dx + (p.y - a.y) * dy) / lengthSquared;
+  const t = Math.max(0, Math.min(1, along));
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+}
+
+/** The closest approach between two loops, given up on once it cannot win. */
+function loopGap(a: Point[], b: Point[], ceiling: number): number {
+  if (a.length < 2 || b.length < 2) return ceiling;
+
+  // Boxes first. Two loops already further apart than the best gap so far
+  // cannot beat it, and on detailed line art that discards nearly every pair
+  // before a single edge is looked at — which is what keeps this affordable
+  // when a design traces out fifty separate shapes.
+  let aMinX = Infinity, aMinY = Infinity, aMaxX = -Infinity, aMaxY = -Infinity;
+  for (const point of a) {
+    if (point.x < aMinX) aMinX = point.x;
+    if (point.x > aMaxX) aMaxX = point.x;
+    if (point.y < aMinY) aMinY = point.y;
+    if (point.y > aMaxY) aMaxY = point.y;
+  }
+  let bMinX = Infinity, bMinY = Infinity, bMaxX = -Infinity, bMaxY = -Infinity;
+  for (const point of b) {
+    if (point.x < bMinX) bMinX = point.x;
+    if (point.x > bMaxX) bMaxX = point.x;
+    if (point.y < bMinY) bMinY = point.y;
+    if (point.y > bMaxY) bMaxY = point.y;
+  }
+  const apart = Math.hypot(
+    Math.max(0, Math.max(aMinX - bMaxX, bMinX - aMaxX)),
+    Math.max(0, Math.max(aMinY - bMaxY, bMinY - aMaxY))
+  );
+  if (apart >= ceiling) return ceiling;
+
+  let best = ceiling;
+  for (let i = 0; i < a.length; i++) {
+    const a1 = a[i];
+    const a2 = a[(i + 1) % a.length];
+    for (let j = 0; j < b.length; j++) {
+      const b1 = b[j];
+      const b2 = b[(j + 1) % b.length];
+      // Neither loop crosses the other — they are traced from disjoint runs of
+      // the same mask — and for segments that do not meet, the closest approach
+      // is always at an end of one of them.
+      const gap = Math.min(
+        pointToSegment(a1, b1, b2),
+        pointToSegment(a2, b1, b2),
+        pointToSegment(b1, a1, a2),
+        pointToSegment(b2, a1, a2)
+      );
+      if (gap < best) best = gap;
+      if (best <= 0) return 0;
+    }
+  }
+  return best;
+}
+
+/**
+ * The closest approach between the boundaries of two outlines.
+ *
+ * Every loop counts, holes included: a shape sitting in another shape's hole is
+ * as close to it as two shapes side by side are to each other, and an offset
+ * closes both kinds of gap at the same rate.
+ *
+ * `ceiling` is the largest answer worth having. Anything further apart than
+ * that is reported as exactly `ceiling`, which is what lets the box test throw
+ * work away instead of measuring distances nobody will act on.
+ */
+export function outlineGap(a: Outline, b: Outline, ceiling = Infinity): number {
+  let best = ceiling;
+  for (const left of [a.outer, ...a.holes]) {
+    for (const right of [b.outer, ...b.holes]) {
+      best = loopGap(left, right, best);
+      if (best <= 0) return 0;
+    }
+  }
+  return best;
+}
+
 export function offsetOutline(outline: Outline, distance: number): Outline | null {
   const outer = offsetPolygon(wound(outline.outer, true), distance);
   if (!outer || !isSimplePolygon(outer)) return null;

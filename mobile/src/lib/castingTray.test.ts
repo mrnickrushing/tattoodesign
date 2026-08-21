@@ -55,16 +55,28 @@ test("a bigger piece makes a bigger tray, in proportion", () => {
 
 test("the shape stands on the floor, not through it", () => {
   const tray = buildTray(oneShape(), W, H, SPEC)!;
-  const positive = tray.parts[2];
-  let lowest = Infinity;
-  let highest = -Infinity;
-  for (let i = 2; i < positive.positions.length; i += 3) {
-    lowest = Math.min(lowest, positive.positions[i]);
-    highest = Math.max(highest, positive.positions[i]);
-  }
-  assert.ok(Math.abs(lowest - (2 - 0.01)) < 1e-6, "starts a hair inside the floor so the union is unambiguous");
-  assert.ok(Math.abs(highest - (2 + 6)) < 1e-6, "and stands the full thickness of the piece");
-  assert.ok(highest < tray.heightMm, "with silicone room above it");
+  // The shape is a skirt and a body stacked, so the span that has to reach the
+  // floor and stand full height is the pair of them together.
+  const span = (part: (typeof tray.parts)[number]) => {
+    let lowest = Infinity;
+    let highest = -Infinity;
+    for (let i = 2; i < part.positions.length; i += 3) {
+      lowest = Math.min(lowest, part.positions[i]);
+      highest = Math.max(highest, part.positions[i]);
+    }
+    return { lowest, highest };
+  };
+  const body = span(tray.parts[2]);
+  const skirt = span(tray.parts[3]);
+
+  assert.ok(Math.abs(skirt.lowest - (2 - 0.01)) < 1e-6, "starts a hair inside the floor so the union is unambiguous");
+  assert.ok(Math.abs(body.highest - (2 + 6)) < 1e-6, "and stands the full thickness of the piece");
+  assert.ok(body.highest < tray.heightMm, "with silicone room above it");
+
+  // The body picks up where the skirt leaves off, overlapping by the same hair
+  // and no more. Any daylight here and the shape is two floating solids; any
+  // more overlap and the volumes below count the shared part twice.
+  assert.ok(Math.abs(body.lowest - (skirt.highest - 0.01)) < 1e-6, `body starts at ${body.lowest}, skirt tops out at ${skirt.highest}`);
 });
 
 test("the artwork is flipped so it does not come out of the mold upside down", () => {
@@ -455,4 +467,77 @@ test("turning the fillet off says nothing about demolding", () => {
   const tray = buildTray(oneShape(), W, H, { ...SPEC, filletMm: 0 })!;
   assert.equal(tray.findings.find((finding) => finding.title === "Demolding"), undefined);
   assert.equal(tray.filletsSkipped, 0);
+});
+
+/** Two bars with a gap of `gapPx` mask pixels between them. */
+function twoShapes(gapPx: number): Uint8Array {
+  const mask = new Uint8Array(W * H);
+  const right = 55 + gapPx;
+  for (let y = 20; y < 70; y++) {
+    for (let x = 30; x < 55; x++) mask[y * W + x] = 1;
+    for (let x = right; x < right + 25; x++) mask[y * W + x] = 1;
+  }
+  return mask;
+}
+
+test("a fillet adds its own wedge of plastic and nothing more", () => {
+  const flared = buildTray(oneShape(), W, H, SPEC)!;
+  const square = buildTray(oneShape(), W, H, { ...SPEC, filletMm: 0 })!;
+  assert.equal(flared.filletAppliedMm, 0.8, "the whole flare fits on a lone rectangle");
+
+  // The shape is 60x50 mask pixels at 76.2mm across 120 of them.
+  const perimeterMm = 2 * (60 + 50) * (76.2 / 120);
+  // A skirt is a slope around the edge, so what it adds is bounded by a band
+  // one flare wide and one flare tall running the whole way round. The body it
+  // sits under is *not* part of that: counting the shape's whole footprint
+  // again for the height of the flare would be twenty times this.
+  const addedMm3 = (flared.plasticCm3 - square.plasticCm3) * 1000;
+  assert.ok(addedMm3 > 0, `a flare adds plastic, got ${addedMm3.toFixed(1)}mm3`);
+  assert.ok(addedMm3 < perimeterMm * 0.8 * 0.8, `flare added ${addedMm3.toFixed(1)}mm3, over a band's worth`);
+
+  // And it comes out of the silicone one for one — the wedge stands where the
+  // rubber would have been.
+  const lostMl = square.siliconeMl - flared.siliconeMl;
+  assert.ok(Math.abs(lostMl - addedMm3 / 1000) < 1e-6, `plastic gained ${addedMm3 / 1000}, silicone lost ${lostMl}`);
+});
+
+test("a flare stops short of welding itself to the shape next door", () => {
+  const nozzleMm = 0.4;
+  // Two mask pixels of daylight, at 0.635mm each.
+  const gapMm = 2 * (76.2 / 120);
+  const tray = buildTray(twoShapes(2), W, H, { ...SPEC, nozzleMm })!;
+  assert.equal(tray.shapes, 2);
+  assert.equal(tray.filletsSkipped, 0, "capped, not abandoned");
+
+  // Both shapes grow, so each may take half of what is between them — less a
+  // nozzle width, since a gap thinner than one extrusion closes anyway.
+  assert.ok(
+    Math.abs(tray.filletAppliedMm - (gapMm - nozzleMm) / 2) < 1e-9,
+    `flared ${tray.filletAppliedMm}mm into a ${gapMm.toFixed(3)}mm gap`
+  );
+  assert.ok(
+    gapMm - 2 * tray.filletAppliedMm >= nozzleMm - 1e-9,
+    "a nozzle's width of daylight survives between the skirts"
+  );
+});
+
+test("shapes far enough apart keep the flare they asked for", () => {
+  // Twenty pixels is 12.7mm — far more than twice any flare on offer.
+  const tray = buildTray(twoShapes(20), W, H, SPEC)!;
+  assert.equal(tray.shapes, 2);
+  assert.equal(tray.filletAppliedMm, 0.8, "the cap only bites when something is actually near");
+});
+
+test("the webbing between cavities is a limit on the flare too", () => {
+  // Cavities sit a webbing apart, so shapes on the facing edges are what eats
+  // into it — even though each cavity on its own has room to spare.
+  const tight = buildTray(oneShape(), W, H, { ...SPEC, copies: 4, webbingMm: 1, nozzleMm: 0.4 })!;
+  assert.ok(tight.cavities > 1, "more than one cavity, or there is no webbing to protect");
+  assert.ok(
+    Math.abs(tight.filletAppliedMm - (1 - 0.4) / 2) < 1e-9,
+    `flared ${tight.filletAppliedMm}mm into 1mm of webbing`
+  );
+
+  const roomy = buildTray(oneShape(), W, H, { ...SPEC, copies: 4, webbingMm: 6 })!;
+  assert.equal(roomy.filletAppliedMm, 0.8, "six millimetres of webbing is no constraint at all");
 });
