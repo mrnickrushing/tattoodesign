@@ -69,6 +69,18 @@ export type TraySpec = {
    */
   webbingMm?: number;
   /**
+   * How far the drawing's own lines stand proud of the filled body.
+   *
+   * Without this a design with any interior detail casts as a flat slab of its
+   * own silhouette — the drawing survives only as a border. Raising the
+   * linework puts the picture back on the face of the piece.
+   *
+   * Only applies where there is linework to raise: an artwork that was already
+   * a solid has nothing inside it, and one whose marks *are* the object is
+   * already standing at full height. Zero turns it off.
+   */
+  reliefMm?: number;
+  /**
    * Whether an outline should stand up as the shape it outlines. On by
    * default, because line art is usually a silhouette. Off when the marks
    * themselves are the object — a lattice, a monogram cut right through.
@@ -85,6 +97,7 @@ const DEFAULTS = {
   copies: 1,
   webbingMm: 6,
   filletMm: 0.8,
+  reliefMm: 0.6,
 };
 
 export type CavityGrid = {
@@ -243,6 +256,14 @@ export type Tray = {
   filletsSkipped: number;
   /** The smallest flare actually applied, in millimetres. Zero when none was. */
   filletAppliedMm: number;
+  /**
+   * How far the linework was actually raised on the top face, in millimetres.
+   *
+   * Zero when there was nothing to raise — an artwork already solid, or one
+   * whose marks are themselves the object — or when the lines are finer than
+   * the nozzle can lay down.
+   */
+  reliefAppliedMm: number;
   /** Cavities on the tray, and how they were arranged. */
   cavities: number;
   columns: number;
@@ -288,6 +309,7 @@ export function buildTray(
   const copies = Math.max(1, Math.floor(spec.copies ?? DEFAULTS.copies));
   const filletMm = Math.max(0, spec.filletMm ?? DEFAULTS.filletMm);
   const webbingMm = Math.max(0, spec.webbingMm ?? DEFAULTS.webbingMm);
+  const reliefMm = Math.max(0, spec.reliefMm ?? DEFAULTS.reliefMm);
 
   if (maskWidth <= 0 || maskHeight <= 0 || mask.length < maskWidth * maskHeight) return null;
   if (!(spec.widthIn > 0) || !(spec.shapeMm > 0)) return null;
@@ -307,6 +329,22 @@ export function buildTray(
   const contours = traceContours(shape, maskWidth, maskHeight, 0.1 / mmPerPx);
   const shapes = groupContours(contours);
   if (!shapes.length) return null;
+
+  // The drawing's own lines, to be raised on the top face.
+  //
+  // Only where filling actually changed something: an artwork already solid has
+  // no interior to put back, and one whose marks *are* the object is standing at
+  // full height already. The width to clear is one bead, not the two a free
+  // standing wall needs — a ridge on a face is held up by the face.
+  const reliefLineMm = outlinesFilled ? finestStrokeWidth(mask, maskWidth, maskHeight) * mmPerPx : 0;
+  const reliefShapes =
+    reliefMm > 0 && reliefLineMm >= nozzleMm
+      ? groupContours(traceContours(mask, maskWidth, maskHeight, 0.1 / mmPerPx))
+      : [];
+  // Taken from what was actually traced, so a tray never grows to make room for
+  // relief that turned out to be nothing — that would be silicone bought for a
+  // gap over an empty face.
+  const reliefAppliedMm = reliefShapes.length ? reliefMm : 0;
 
   let minX = Infinity;
   let minY = Infinity;
@@ -339,7 +377,7 @@ export function buildTray(
 
   const widthMm = grid.widthMm + marginMm * 2;
   const depthMm = grid.depthMm + marginMm * 2;
-  const heightMm = floorMm + spec.shapeMm + coverMm;
+  const heightMm = floorMm + spec.shapeMm + reliefAppliedMm + coverMm;
 
   const floor = extrudePrism(rectangle(0, 0, widthMm, depthMm), [], 0, floorMm);
   const walls = extrudePrism(
@@ -400,14 +438,33 @@ export function buildTray(
     })
   );
 
-  const parts = [floor, walls, ...positives].filter((part) => part.count > 0);
+  // The linework, standing on the face of the body it was drawn on. Straight
+  // walls, no flare: these are a ridge on a surface rather than a shape rising
+  // off the floor, and the silicone lifts straight off them.
+  const reliefParts = grid.positions
+    .flatMap((at) =>
+      reliefShapes.map((line) =>
+        extrudePrism(
+          line.outer.points.map((point) => toMm(point, at)),
+          line.holes.map((hole) => hole.points.map((point) => toMm(point, at))),
+          floorMm + spec.shapeMm - WELD_MM,
+          floorMm + spec.shapeMm + reliefAppliedMm
+        )
+      )
+    )
+    .filter((part) => part.count > 0);
+
+  // Everything standing between the floor and the silicone: the shapes, their
+  // skirts, and the relief on top of them.
+  const standing = [...positives, ...reliefParts];
+  const parts = [floor, walls, ...standing].filter((part) => part.count > 0);
   const mesh = mergeMeshes(parts);
 
   const plasticMm3 = parts.reduce((sum, part) => sum + meshVolume(part), 0);
   // Everything inside the walls that the shapes and floor do not already fill.
   const cavityMm3 =
     (widthMm - marginMm) * (depthMm - marginMm) * (heightMm - floorMm) -
-    positives.reduce((sum, part) => sum + meshVolume(part), 0);
+    standing.reduce((sum, part) => sum + meshVolume(part), 0);
 
   return {
     mesh,
@@ -422,6 +479,7 @@ export function buildTray(
     shapes: grid.positions.length * shapes.length,
     filletsSkipped,
     filletAppliedMm: Number.isFinite(smallestFlareMm) ? smallestFlareMm : 0,
+    reliefAppliedMm,
     cavities: grid.positions.length,
     columns: grid.columns,
     rows: grid.rows,
@@ -439,6 +497,11 @@ export function buildTray(
       filletMm,
       filletsSkipped,
       filletAppliedMm: Number.isFinite(smallestFlareMm) ? smallestFlareMm : 0,
+      shapeMm: spec.shapeMm,
+      reliefMm,
+      reliefAppliedMm,
+      reliefLineMm,
+      outlinesFilled,
     }),
   };
 }
@@ -487,6 +550,11 @@ function inspectTray(
     filletMm: number;
     filletsSkipped: number;
     filletAppliedMm: number;
+    shapeMm: number;
+    reliefMm: number;
+    reliefAppliedMm: number;
+    reliefLineMm: number;
+    outlinesFilled: boolean;
   }
 ): ProductionFinding[] {
   const findings: ProductionFinding[] = [];
@@ -543,6 +611,31 @@ function inspectTray(
             // something — its own detail or its neighbour — so it stands
             // square-footed and the silicone will want more care coming off it.
             detail: `${limits.filletsSkipped} shape${limits.filletsSkipped === 1 ? " has" : "s have"} nothing to flare into — the smallest flare this printer can lay down, ${(limits.nozzleMm / 2).toFixed(2)}mm, would already weld something together, whether that is a shape's own detail closing on itself or the piece sitting next to it — so ${limits.filletsSkipped === 1 ? "it stands" : "they stand"} square on the floor. The silicone will come off, but pull it slowly: a square corner is where it tears.`,
+          }
+    );
+  }
+
+  // Relief is worth a word either way: applied, it changes how thick the piece
+  // ends up; refused, the drawing is about to come out as a plain slab and the
+  // person who drew it should hear that from the app rather than from the mold.
+  if (limits.outlinesFilled && limits.reliefMm > 0) {
+    findings.push(
+      limits.reliefAppliedMm > 0
+        ? {
+            level: "pass",
+            title: "Relief",
+            detail: `The drawing's own lines stand ${limits.reliefAppliedMm.toFixed(
+              2
+            )}mm proud of the face, so the piece carries the picture and not just its outline. That puts the finished thickness at ${(
+              limits.shapeMm + limits.reliefAppliedMm
+            ).toFixed(2)}mm.`,
+          }
+        : {
+            level: "warn",
+            title: "Relief",
+            // Not a failure so much as a consequence: the lines are there in
+            // the drawing, they just cannot survive this nozzle at this size.
+            detail: `The linework is about ${limits.reliefLineMm.toFixed(2)}mm across, under the ${limits.nozzleMm}mm bead this nozzle lays down, so it cannot be raised on the face. The piece will cast as a plain silhouette. Scale it up, or print it with a finer nozzle, to get the drawing back.`,
           }
     );
   }
