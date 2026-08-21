@@ -10,12 +10,22 @@
 // So there is one place that knows the version and every store in it.
 
 const DB_NAME = "inkline";
-const VERSION = 1;
+const VERSION = 2;
 
 /** Every store, declared together, because they are created together. */
 export const STORES = {
   designs: "designs",
   projectAssets: "project-assets",
+  /**
+   * Editable project manifests.
+   *
+   * These used to live in localStorage, which is capped somewhere around five
+   * megabytes. A manifest holds the drawing's geometry and grows with it, so
+   * that cap was reachable in one sitting — and the write that crossed it threw
+   * QuotaExceededError, which surfaced as a raw browser message and lost the
+   * edit. The layer images were already here for the same reason.
+   */
+  projectManifests: "project-manifests",
 } as const;
 
 let connection: Promise<IDBDatabase> | null = null;

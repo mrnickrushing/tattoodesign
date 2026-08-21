@@ -32,8 +32,10 @@ import { Notice } from "@/components/ui";
 import {
   addRasterAsset,
   cloneProject,
-  loadOrCreateProject,
+  commitSnapshot,
+  openProject,
   projectAssetBase64,
+  restoreSnapshot,
   saveProject,
   type DesignLayer,
   type EditableDesignProject,
@@ -50,8 +52,6 @@ import {
   rasterLayerAssets,
   removeLayer,
   strokePathsInCanvasSpace,
-  restoreSnapshot,
-  snapshotProject,
   updateLayer,
 } from "@/lib/projectMutations";
 import type { LibraryDesign } from "@/lib/designLibrary";
@@ -308,12 +308,23 @@ export function DesignEditor({
     let active = true;
     (async () => {
       try {
-        const next = await loadOrCreateProject(brand.id, design);
-        const flattened = await renderProject(next);
+        const opened = await openProject(brand.id, design);
+        const flattened = await renderProject(opened.project);
         if (!active) return;
-        setProject(next);
+        setProject(opened.project);
         setPreview(flattened);
         setOriginalPreview(flattened);
+        // Never open a rebuilt project in silence. This used to look exactly
+        // like opening the design for the first time.
+        if (opened.damage) {
+          setError(
+            opened.damage.salvaged
+              ? "This design's saved file couldn't be read, so the most recent restore point was opened instead. Anything drawn after it is not in this copy." +
+                  (opened.damage.kept ? ` The unreadable file was kept as ${opened.damage.kept}.` : "")
+              : "This design's saved file couldn't be read and no restore point was found, so it has been reopened from the original image." +
+                  (opened.damage.kept ? ` The unreadable file was kept as ${opened.damage.kept}.` : "")
+          );
+        }
       } catch (e) {
         if (active) setError(e instanceof Error ? e.message : "Couldn't open this project.");
       } finally {
@@ -403,7 +414,7 @@ export function DesignEditor({
     if (!project) return;
     setPast((items) => [...items.slice(-39), clone(project)]);
     setFuture([]);
-    await persist(snapshotProject(next, label));
+    await persist(await commitSnapshot(next, label));
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   }
 
@@ -1482,7 +1493,14 @@ export function DesignEditor({
               onTransform={transformSelected}
               onCrop={() => setCropping(true)}
               onProcess={addProcessedLayer}
-              onRestore={(index) => project && commit("Restore snapshot", restoreSnapshot(project, index))}
+              onRestore={(index) => {
+                if (!project) return;
+                void (async () => {
+                  const restored = await restoreSnapshot(project, index);
+                  if (restored) await commit("Restore snapshot", restored);
+                  else setError("That restore point could not be read.");
+                })();
+              }}
               onExportSvg={exportSvg}
               onTrace={traceToVector}
               onCleanup={cleanUpStrokes}
