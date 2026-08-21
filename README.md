@@ -59,6 +59,13 @@ to editable vector strokes (`lettering.ts`, `letteringRender.ts`), and a
 smart cleanup assistant that finds stray specks and bridges broken lines in
 one undo (`cleanup.ts`).
 
+**From paper**
+Photographed sketches are squared up before anything reads them as a stencil —
+the sheet is found against the bench, its corners recovered by intersecting the
+fitted edges, and the photo resampled flat (`sketch.ts`, `sketchDeskew.ts`). The
+tracer then collapses the three passes an artist makes at one line into one
+line, while leaving a deliberate double line alone.
+
 **Library & organization**
 Search, tags, and favorites (`libraryFilter.ts`); one-tap remix from any
 saved design with a set of composable remix verbs — simpler, bolder, more
@@ -69,8 +76,10 @@ undo/redo snapshots (`VersionHistory.tsx`).
 **Client & production workflow**
 Client/order projects with appointments, placement, dimensions, and
 reference notes (`clientProjects.ts`); branded approval-proof PDFs rendered
-at true printed size (`proofSheet.ts`); a material-cost and sheet-yield
-planner for orders (`yield.ts`); a print log that remembers what was printed
+at true printed size (`proofSheet.ts`); quoting that turns true size, detail
+density and placement difficulty into hours and a figure, with a whole batch
+order — counts, sheets, icing by colour, price — planned in one pass
+(`quote.ts`); a material-cost and sheet-yield planner for orders (`yield.ts`); a print log that remembers what was printed
 so it can be reprinted (`printLog.ts`); reusable per-brand session defaults
 for trace thresholds, brush size, and sheet templates (`preferences.ts`);
 auto-pack sheet layout (`autopack.ts`); a minimum-line-spacing / blowout
@@ -80,7 +89,15 @@ piping feasibility (`spacing.ts`, `productionTools.ts`, `icingRecipe.ts`).
 **Preview & aftercare**
 Live camera AR placement preview (`PlacementPreview.tsx`) with a healed-look
 overlay (`healing.ts`) and a healed-tattoo timeline that records how a piece
-actually healed over time (`healedAge.ts`, `healedRecords.ts`).
+actually healed over time (`healedAge.ts`, `healedRecords.ts`). Previews draw
+against skin rather than flash paper, with six Fitzpatrick-derived tones and a
+warning when a line is too fine to hold on the one chosen (`skinTones.ts`); a
+cover-up check measures whether a design lays down enough ink to bury the
+tattoo already there (`coverup.ts`). Linework can be redrawn at the width the
+chosen needle grouping or piping tip really leaves, thickening where the hand
+slowed (`material.ts`). Clients leave with a card personalised to their own
+piece — placement, size, coverage and session date — that opens with no signal
+(`aftercare.ts`).
 
 **Portability & sync**
 AES-256-GCM encrypted backup archives with the key held in `SecureStore`
@@ -97,7 +114,7 @@ semantic icon set mapped to SF Symbols with an Ionicons fallback
 (`icons.ts`).
 
 Most of this lives under `mobile/src/lib/*.ts` as pure, unit-tested
-functions — 491 tests as of this writing (`npm test` in `mobile/`) — with
+functions — 601 tests as of this writing (`npm test` in `mobile/`) — with
 UI wired on top in `mobile/src/app/[brand]/*.tsx` and
 `mobile/src/components/`.
 
