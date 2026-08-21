@@ -70,7 +70,7 @@ function withSpares(sheets: number): number {
 }
 
 /** Rounds to a quarter cup — the smallest thing anyone actually measures. */
-function toMeasurable(cups: number): number {
+export function toMeasurable(cups: number): number {
   return Math.max(0.25, Math.round(cups * 4) / 4);
 }
 
