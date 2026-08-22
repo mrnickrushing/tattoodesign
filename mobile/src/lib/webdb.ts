@@ -10,12 +10,22 @@
 // So there is one place that knows the version and every store in it.
 
 const DB_NAME = "inkline";
-const VERSION = 1;
+const VERSION = 2;
 
 /** Every store, declared together, because they are created together. */
 export const STORES = {
   designs: "designs",
   projectAssets: "project-assets",
+  /**
+   * Editable project manifests.
+   *
+   * These used to live in localStorage, which is capped somewhere around five
+   * megabytes. A manifest holds the drawing's geometry and grows with it, so
+   * that cap was reachable in one sitting — and the write that crossed it threw
+   * QuotaExceededError, which surfaced as a raw browser message and lost the
+   * edit. The layer images were already here for the same reason.
+   */
+  projectManifests: "project-manifests",
 } as const;
 
 let connection: Promise<IDBDatabase> | null = null;
@@ -51,9 +61,23 @@ export function withStore<T>(
   return open().then(
     (db) =>
       new Promise<T>((resolve, reject) => {
-        const request = work(db.transaction(store, mode).objectStore(store));
-        request.onsuccess = () => resolve(request.result);
+        // Resolved on the transaction completing, not on the request
+        // succeeding. They are not the same moment: a request reports success
+        // and the transaction can still abort afterwards — running out of
+        // quota is the usual way — so a caller that treats request-success as
+        // durable can go on to delete the only other copy of what it just
+        // wrote. Which is exactly what the localStorage migration does.
+        const transaction = db.transaction(store, mode);
+        const request = work(transaction.objectStore(store));
+        let value: T;
+        request.onsuccess = () => {
+          value = request.result;
+        };
         request.onerror = () => reject(request.error);
+        transaction.oncomplete = () => resolve(value);
+        transaction.onabort = () =>
+          reject(transaction.error ?? new Error("The browser could not finish saving. It may be out of space."));
+        transaction.onerror = () => reject(transaction.error);
       })
   );
 }

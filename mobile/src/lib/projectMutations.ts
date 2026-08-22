@@ -3,6 +3,8 @@ import { renderStroke } from "./ribbon";
 import type {
   DesignLayer,
   EditableDesignProject,
+  ProjectSnapshot,
+  SnapshotBody,
   LayerTransform,
   Point,
   ShapeLayer,
@@ -43,18 +45,51 @@ export function makeTextLayer(width: number, height: number, text = "New label")
   };
 }
 
-export function snapshotProject(project: EditableDesignProject, label: string): EditableDesignProject {
+/** How many restore points the version history keeps. */
+export const SNAPSHOT_LIMIT = 8;
+
+/** The geometry a restore point stands for, ready to be written out. */
+export function snapshotBody(project: EditableDesignProject, createdAt: number): SnapshotBody {
+  // No clone: the caller serialises this immediately, and serialising is
+  // itself the copy. Deep-cloning first measured 57ms on a real drawing, spent
+  // to produce an object that is thrown away a line later.
+  return { layers: project.layers, canvas: project.canvas, createdAt };
+}
+
+/**
+ * Records a restore point whose geometry is stored under `body`.
+ *
+ * Writing that geometry out is the caller's job — this file stays free of IO
+ * so the rules about what history keeps can be checked off-device.
+ */
+export function snapshotProject(project: EditableDesignProject, label: string, body: string, createdAt: number): EditableDesignProject {
   return {
     ...project,
     revision: project.revision + 1,
-    snapshots: [...project.snapshots.slice(-7), { label, createdAt: Date.now(), layers: clone(project.layers), canvas: clone(project.canvas) }],
+    snapshots: [...project.snapshots.slice(-(SNAPSHOT_LIMIT - 1)), { label, createdAt, body }],
   };
 }
 
-export function restoreSnapshot(project: EditableDesignProject, index: number): EditableDesignProject {
-  const snapshot = project.snapshots[index];
-  if (!snapshot) return project;
-  return { ...project, layers: clone(snapshot.layers), canvas: clone(snapshot.canvas), selectedLayerId: snapshot.layers.at(-1)?.id ?? null, revision: project.revision + 1 };
+/**
+ * The restore points that fell off the end, so their files can be deleted.
+ *
+ * A restore point is a file now, and a history that only ever adds is a
+ * project directory that grows for the life of the app.
+ */
+export function evictedBodies(before: ProjectSnapshot[], after: ProjectSnapshot[]): string[] {
+  const kept = new Set(after.map((snapshot) => snapshot.body));
+  return before.filter((snapshot) => !kept.has(snapshot.body)).map((snapshot) => snapshot.body);
+}
+
+/** Puts a restore point's geometry back, once the caller has read it. */
+export function applySnapshot(project: EditableDesignProject, body: SnapshotBody): EditableDesignProject {
+  return {
+    ...project,
+    layers: clone(body.layers),
+    canvas: clone(body.canvas),
+    selectedLayerId: body.layers.at(-1)?.id ?? null,
+    revision: project.revision + 1,
+  };
 }
 
 export function updateLayer(project: EditableDesignProject, id: string, updater: (layer: DesignLayer) => DesignLayer): EditableDesignProject {

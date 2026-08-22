@@ -11,8 +11,11 @@ import {
   projectToSvg,
   rasterLayerAssets,
   removeLayer,
-  restoreSnapshot,
+  applySnapshot,
+  evictedBodies,
+  snapshotBody,
   snapshotProject,
+  SNAPSHOT_LIMIT,
   strokePathsInCanvasSpace,
   updateLayer,
 } from "./projectMutations";
@@ -21,7 +24,7 @@ import type { EditableDesignProject, StrokeLayer } from "./designProject";
 function project(): EditableDesignProject {
   const base = makeStrokeLayer(1000, 800, "Base");
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: "design-1",
     brand: "ink",
     title: "Rose",
@@ -51,15 +54,15 @@ test("layer mutations preserve a usable selection", () => {
 });
 
 test("snapshots restore prior editable geometry", () => {
-  let value = project();
-  value = snapshotProject(value, "Before move");
+  const disk = store();
+  let value = disk.save(project(), "Before move");
   const id = value.layers[0].id;
   value = updateLayer(value, id, (layer) => ({
     ...layer,
     transform: { ...layer.transform, x: 300 },
   }));
   assert.equal(value.layers[0].transform.x, 300);
-  value = restoreSnapshot(value, 0);
+  value = disk.load(value, 0)!;
   assert.equal(value.layers[0].transform.x, 0);
 });
 
@@ -206,6 +209,31 @@ test("rotating a stroke layer rotates its canvas geometry", () => {
 // ---------------------------------------------------------------------------
 
 /** A project whose one layer carries geometry deep enough to alias. */
+/**
+ * A stand-in for the store restore points are written to.
+ *
+ * The pure half never touches storage — it records a name and the caller
+ * writes the geometry under it — so a test needs only somewhere to put it.
+ */
+function store() {
+  const files = new Map<string, string>();
+  return {
+    files,
+    save(project: EditableDesignProject, label: string, at = 1) {
+      const body = `snapshot-${files.size}.json`;
+      files.set(body, JSON.stringify(snapshotBody(project, at)));
+      const next = snapshotProject(project, label, body, at);
+      for (const dropped of evictedBodies(project.snapshots, next.snapshots)) files.delete(dropped);
+      return next;
+    },
+    load(project: EditableDesignProject, index: number) {
+      const snapshot = project.snapshots[index];
+      const raw = snapshot && files.get(snapshot.body);
+      return raw ? applySnapshot(project, JSON.parse(raw)) : null;
+    },
+  };
+}
+
 function drawn(): EditableDesignProject {
   const value = project();
   return updateLayer(value, value.layers[0].id, (layer) => ({
@@ -245,17 +273,21 @@ function poke(value: EditableDesignProject, x: number): void {
 }
 
 test("a snapshot is a copy of the geometry, not a view onto it", () => {
-  const value = snapshotProject(drawn(), "Before");
+  // Serialising to the store is what makes the copy now, rather than a deep
+  // clone in memory — so the claim is the same and the mechanism is not.
+  const disk = store();
+  const value = disk.save(drawn(), "Before");
   poke(value, 999);
   assert.deepEqual(strokeXs(value), [999, 20]);
-  assert.deepEqual(strokeXs(restoreSnapshot(value, 0)), [10, 20], "the snapshot moved with the edit");
+  assert.deepEqual(strokeXs(disk.load(value, 0)!), [10, 20], "the snapshot moved with the edit");
 });
 
 test("restoring hands back a copy, so a snapshot survives being restored twice", () => {
-  const value = snapshotProject(drawn(), "Before");
-  const first = restoreSnapshot(value, 0);
+  const disk = store();
+  const value = disk.save(drawn(), "Before");
+  const first = disk.load(value, 0)!;
   poke(first, -1);
-  assert.deepEqual(strokeXs(restoreSnapshot(value, 0)), [10, 20], "restoring twice gave different answers");
+  assert.deepEqual(strokeXs(disk.load(value, 0)!), [10, 20], "restoring twice gave different answers");
 });
 
 test("a duplicate shares nothing with what it was copied from", () => {
@@ -282,9 +314,11 @@ test("a duplicate sits directly above its original and offset from it", () => {
 });
 
 test("version history keeps the last eight restore points", () => {
+  const disk = store();
   let value = project();
-  for (let i = 1; i <= 12; i++) value = snapshotProject(value, `Edit ${i}`);
+  for (let i = 1; i <= 12; i++) value = disk.save(value, `Edit ${i}`, i);
 
+  assert.equal(value.snapshots.length, SNAPSHOT_LIMIT);
   assert.equal(value.snapshots.length, 8);
   assert.deepEqual(
     value.snapshots.map((snapshot) => snapshot.label),
@@ -294,12 +328,13 @@ test("version history keeps the last eight restore points", () => {
   assert.equal(value.revision, 13, "twelve edits off revision 1");
 });
 
-test("restoring a snapshot that is not there leaves the project alone", () => {
+test("restoring a snapshot that is not there gives nothing back", () => {
   // The history panel indexes into this list, and a stale index has to be
   // survivable rather than clearing the canvas.
-  const value = snapshotProject(project(), "Only one");
+  const disk = store();
+  const value = disk.save(project(), "Only one");
   for (const index of [-1, 1, 99, Number.NaN]) {
-    assert.equal(restoreSnapshot(value, index), value, `index ${index} was not a no-op`);
+    assert.equal(disk.load(value, index), null, `index ${index} came back with something`);
   }
 });
 
@@ -331,7 +366,7 @@ test("what a mutation does not touch, it leaves identical", () => {
     ["moveLayer", moveLayer(addLayer(before, shape), shape.id, -1)],
     ["duplicateLayer", duplicateLayer(before, before.layers[0].id)],
     ["updateLayer", updateLayer(before, before.layers[0].id, (layer) => layer)],
-    ["snapshotProject", snapshotProject(before, "x")],
+    ["snapshotProject", snapshotProject(before, "x", "snapshot-x.json", 1)],
   ];
   for (const [name, after] of cases) {
     assert.notEqual(after, before, `${name} returned the same object`);
