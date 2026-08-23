@@ -5,6 +5,13 @@ on:
   push:
     branches: [main]
 
+# Cancel superseded runs instead of billing them to completion. Without this,
+# pushing three times to a branch bills three full runs when only the last
+# result is ever used. Actions minutes bill on private repos.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   mobile:
     runs-on: ubuntu-latest
